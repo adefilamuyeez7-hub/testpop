@@ -637,7 +637,11 @@ const AdminPage = () => {
     const normalizedWallet = newWallet.trim().toLowerCase();
     const now = new Date().toISOString();
 
-    // ✅ FIX: Write directly to Supabase first, then update local state on success
+    if (!import.meta.env.VITE_SUPABASE_URL || !import.meta.env.VITE_SUPABASE_ANON_KEY) {
+      toast.error("Whitelist is unavailable because Supabase is not configured in Vercel yet.");
+      return;
+    }
+
     const { data: inserted, error } = await supabase
       .from("whitelist")
       .upsert(
@@ -657,7 +661,7 @@ const AdminPage = () => {
 
     if (error) {
       console.error("❌ Failed to save artist to Supabase:", error);
-      toast.error("Failed to whitelist artist — check your connection and try again");
+      toast.error(`Failed to whitelist artist: ${error.message}`);
       return;
     }
 

@@ -7,7 +7,7 @@
 import { useState } from "react";
 import { getRuntimeApiToken } from "@/lib/runtimeSession";
 
-const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:8787";
+const API_BASE = (import.meta.env.VITE_SECURE_API_BASE_URL || import.meta.env.VITE_API_BASE || "").replace(/\/$/, "");
 
 function getAuthHeaders() {
   const headers = new Headers();
@@ -50,6 +50,10 @@ export function useApproveArtist() {
     setError(null);
 
     try {
+      if (!API_BASE) {
+        throw new Error("Admin API is not configured. Set VITE_SECURE_API_BASE_URL in Vercel.");
+      }
+
       const headers = getAuthHeaders();
       headers.set("Content-Type", "application/json");
 
@@ -111,6 +115,10 @@ export function useAdminArtists(status?: "pending" | "approved" | "rejected") {
     setError(null);
 
     try {
+      if (!API_BASE) {
+        throw new Error("Admin API is not configured. Set VITE_SECURE_API_BASE_URL in Vercel.");
+      }
+
       const params = new URLSearchParams();
       if (status) params.append("status", status);
 
