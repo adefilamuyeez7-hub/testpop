@@ -23,11 +23,13 @@ const AdminGuard = ({ children }: { children: React.ReactNode }) => {
         .then(() => {
           setSessionEstablished(true);
           setSessionError(null);
+          console.log("✅ Admin secure session established!");
         })
         .catch((error) => {
-          console.error("Failed to establish secure session:", error);
-          setSessionError("Failed to authenticate with backend");
-          toast.error("Authentication failed. Please refresh and try again.");
+          const errorMsg = error instanceof Error ? error.message : String(error);
+          console.error("❌ Failed to establish secure session:", errorMsg);
+          setSessionError(errorMsg || "Failed to authenticate with backend");
+          toast.error(`Authentication failed: ${errorMsg}`);
         });
     }
   }, [address, isConnected, sessionEstablished]);

@@ -31,7 +31,10 @@ function requireSecureApi() {
 export async function requestWalletChallenge(wallet: string): Promise<ChallengeResponse> {
   requireSecureApi();
 
-  const response = await fetch(`${secureApiBaseUrl}/auth/challenge`, {
+  const url = `${secureApiBaseUrl}/auth/challenge`;
+  console.log("📡 Requesting challenge from:", url);
+
+  const response = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ wallet }),
@@ -39,7 +42,10 @@ export async function requestWalletChallenge(wallet: string): Promise<ChallengeR
   });
 
   if (!response.ok) {
-    throw new Error(await response.text());
+    const errorText = await response.text();
+    const errorMsg = `Challenge request failed: ${response.status} ${response.statusText} - ${errorText}`;
+    console.error("❌", errorMsg);
+    throw new Error(errorMsg);
   }
 
   return response.json();
@@ -66,7 +72,10 @@ export async function signChallengeMessage(message: string, wallet: string): Pro
 export async function verifyWalletChallenge(wallet: string, signature: string): Promise<SecureSession> {
   requireSecureApi();
 
-  const response = await fetch(`${secureApiBaseUrl}/auth/verify`, {
+  const url = `${secureApiBaseUrl}/auth/verify`;
+  console.log("📡 Verifying challenge at:", url);
+
+  const response = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ wallet, signature }),
@@ -74,37 +83,66 @@ export async function verifyWalletChallenge(wallet: string, signature: string): 
   });
 
   if (!response.ok) {
-    throw new Error(await response.text());
+    const errorText = await response.text();
+    const errorMsg = `Verification failed: ${response.status} ${response.statusText} - ${errorText}`;
+    console.error("❌", errorMsg);
+    throw new Error(errorMsg);
   }
 
   return response.json();
 }
 
 export async function establishSecureSession(wallet: string): Promise<SecureSession> {
-  const challenge = await requestWalletChallenge(wallet);
-  const signature = await signChallengeMessage(challenge.message, wallet);
-  const session = await verifyWalletChallenge(wallet, signature);
-
-  setRuntimeSession({
-    apiToken: session.apiToken,
-    supabaseToken: session.supabaseToken || "",
-    wallet: session.wallet,
-    role: session.role,
-  });
-
   try {
-    const token = session.supabaseToken || "";
-    if (token) {
-      await supabase.auth.setSession({
-        access_token: token,
-        refresh_token: token,
-      });
-    }
-  } catch {
-    // best-effort only
-  }
+    console.log("🔐 Starting secure session establishment for wallet:", wallet);
+    console.log("🌐 API Base URL:", secureApiBaseUrl);
 
-  return session;
+    console.log("📡 Step 1: Requesting wallet challenge...");
+    const challenge = await requestWalletChallenge(wallet);
+    console.log("✅ Challenge received:", challenge);
+
+    console.log("📝 Step 2: Signing challenge message...");
+    const signature = await signChallengeMessage(challenge.message, wallet);
+    console.log("✅ Message signed, signature length:", signature.length);
+
+    console.log("🔍 Step 3: Verifying wallet challenge...");
+    const session = await verifyWalletChallenge(wallet, signature);
+    console.log("✅ Session verified:", { wallet: session.wallet, role: session.role });
+
+    console.log("💾 Step 4: Storing runtime session...");
+    setRuntimeSession({
+      apiToken: session.apiToken,
+      supabaseToken: session.supabaseToken || "",
+      wallet: session.wallet,
+      role: session.role,
+    });
+    console.log("✅ Runtime session stored");
+
+    try {
+      const token = session.supabaseToken || "";
+      if (token) {
+        console.log("🔑 Step 5: Setting Supabase session...");
+        await supabase.auth.setSession({
+          access_token: token,
+          refresh_token: token,
+        });
+        console.log("✅ Supabase session set");
+      }
+    } catch (err) {
+      console.warn("⚠️ Supabase session warning (non-blocking):", err);
+      // best-effort only
+    }
+
+    console.log("🎉 Secure session established successfully!");
+    return session;
+  } catch (error) {
+    console.error("❌ Secure session establishment failed:", error);
+    if (error instanceof Error) {
+      console.error("Error message:", error.message);
+      console.error("Error stack:", error.stack);
+    }
+    throw error;
+  }
 }
 
 export function clearSecureSession() {
