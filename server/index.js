@@ -1010,6 +1010,10 @@ app.get("/admin/artists", authRequired, adminRequired, async (req, res) => {
   }
 });
 
-app.listen(Number(PORT), () => {
-  console.log(`PopUp API listening on http://localhost:${PORT}`);
+const port = Number(PORT) || 3000;
+app.listen(port, () => {
+  console.log(`PopUp API listening on http://localhost:${port}`);
 });
+
+// Export app for serverless (Vercel)
+export default app;

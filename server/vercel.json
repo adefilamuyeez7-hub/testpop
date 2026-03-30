@@ -3,7 +3,8 @@
   "builds": [
     {
       "src": "index.js",
-      "use": "@vercel/node"
+      "use": "@vercel/node",
+      "config": { "maxLambdaSize": "50mb", "nodeVersion": "20.x" }
     }
   ],
   "routes": [
@@ -11,9 +12,5 @@
       "src": "/(.*)",
       "dest": "index.js"
     }
-  ],
-  "env": {
-    "PORT": "3001",
-    "NODE_ENV": "production"
-  }
+  ]
 }
