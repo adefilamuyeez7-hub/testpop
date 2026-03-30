@@ -47,7 +47,11 @@ WHERE used = FALSE;
 -- CLEANUP FUNCTION - Automated maintenance
 -- ═══════════════════════════════════════════════════════════════════════════════
 
-CREATE OR REPLACE FUNCTION cleanup_expired_nonces()
+-- Drop existing function if it exists (previous version had different return type)
+DROP FUNCTION IF EXISTS cleanup_expired_nonces();
+
+-- Create improved cleanup function with row count reporting
+CREATE FUNCTION cleanup_expired_nonces()
 RETURNS TABLE(expired_count INT, used_count INT) AS $$
 DECLARE
   expired_rows INT := 0;
