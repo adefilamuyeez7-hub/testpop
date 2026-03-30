@@ -104,8 +104,8 @@ export interface AnalyticsRecord {
 
 // ─────────────────────────────────────────────────────────────────────────
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL?.trim();
+const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY?.trim();
 
 // Check if Supabase is configured - don't throw, just log
 if (!supabaseUrl || !supabaseAnonKey) {
