@@ -4,7 +4,7 @@ import { injected, coinbaseWallet, metaMask, walletConnect } from "wagmi/connect
 import { createAppKit } from "@reown/appkit";
 import { WagmiAdapter } from "@reown/appkit-adapter-wagmi";
 
-const projectId = import.meta.env.VITE_WALLETCONNECT_PROJECT_ID || "";
+const projectId = import.meta.env.VITE_WALLETCONNECT_PROJECT_ID?.trim() || "";
 
 export const ACTIVE_CHAIN = baseSepolia;
 
