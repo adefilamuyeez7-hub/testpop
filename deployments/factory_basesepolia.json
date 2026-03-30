@@ -1,0 +1,11 @@
+{
+  "network": "baseSepolia",
+  "chainId": 84532,
+  "deployer": "0x4B393730eFc0E3C1E0C0944fbC05EdEF4eE58092",
+  "factory": {
+    "address": "0xFd58d0f5F0423201Edb756d0f44D667106fc5705",
+    "deploymentTx": "0x58a24c56064d0196e435db0388d63353c8ff2bfc57159d9b4edc8575f3c527a1"
+  },
+  "timestamp": "2026-03-23T15:59:09.147Z",
+  "note": "Run: npx hardhat run scripts/set-factory-bytecode.mjs --network baseSepolia -- 0xFd58d0f5F0423201Edb756d0f44D667106fc5705"
+}

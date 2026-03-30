@@ -1,0 +1,13 @@
+{
+  "network": "baseSepolia",
+  "chainId": 84532,
+  "deployer": "0x4B393730eFc0E3C1E0C0944fbC05EdEF4eE58092",
+  "token": {
+    "address": "0x6CCDAD96591d0Bd2e97070dD2a96E56d7ce6BC97",
+    "artist": "0x4B393730eFc0E3C1E0C0944fbC05EdEF4eE58092",
+    "name": "Artist Shares",
+    "symbol": "SHARES",
+    "deploymentTx": "0x9c595708b0cdf31931f9e9e0923ff3f328530b945d047a5d3b00713d19cab3b5"
+  },
+  "timestamp": "2026-03-23T16:00:37.136Z"
+}

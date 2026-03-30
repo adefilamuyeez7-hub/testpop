@@ -1,0 +1,26 @@
+{
+  "name": "The popup - Art on Baseapp",
+  "short_name": "The popup",
+  "description": "collect everything Art on Baseapp",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#000000",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/src/assets/logo.png",
+      "sizes": "64x64 32x32 24x24 16x16",
+      "type": "image/png"
+    }
+  ],
+  "categories": ["productivity", "shopping"],
+  "screenshots": [
+    {
+      "src": "/hero-art-DpJLnIbe.jpg",
+      "sizes": "1280x720",
+      "type": "image/jpeg"
+    }
+  ],
+  "base:app_id": "69bf4dc71465da0849435b21"
+}

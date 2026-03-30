@@ -1,0 +1,79 @@
+import hardhat from "hardhat";
+import fs from "fs";
+
+const { ethers } = hardhat;
+
+async function main() {
+  console.log("🚀 Starting ProductStore deployment to Base Sepolia...\n");
+
+  // Get deployer account
+  const [deployer] = await ethers.getSigners();
+  console.log(`📍 Deploying from: ${deployer.address}`);
+
+  // Get contract factory
+  const ProductStore = await ethers.getContractFactory("ProductStore");
+
+  // Deploy ProductStore (no constructor arguments needed)
+  console.log("\n⏳ Deploying ProductStore contract...");
+  const productStore = await ProductStore.deploy();
+
+  await productStore.waitForDeployment();
+  const address = await productStore.getAddress();
+
+  console.log(`✅ ProductStore deployed to: ${address}`);
+  console.log(`📝 Network: ${hardhat.network.name}`);
+  console.log(`👤 Owner: ${deployer.address}`);
+
+  // Save deployment info
+  const deploymentInfo = {
+    contract: "ProductStore",
+    address: address,
+    deployer: deployer.address,
+    network: hardhat.network.name,
+    timestamp: new Date().toISOString(),
+    blockNumber: await ethers.provider.getBlockNumber(),
+  };
+
+  console.log("\n📋 Deployment Info:");
+  console.log(JSON.stringify(deploymentInfo, null, 2));
+
+  // Save to file
+  const deploymentDir = "./deployments";
+  if (!fs.existsSync(deploymentDir)) {
+    fs.mkdirSync(deploymentDir);
+  }
+  fs.writeFileSync(
+    `${deploymentDir}/${hardhat.network.name}_ProductStore.json`,
+    JSON.stringify(deploymentInfo, null, 2)
+  );
+
+  console.log(
+    `\n✨ Deployment info saved to: ${deploymentDir}/${hardhat.network.name}_ProductStore.json`
+  );
+
+  // Verify contract is callable
+  console.log("\n🔍 Verifying contract...");
+  const owner = await productStore.owner();
+  const nextProductId = await productStore.nextProductId();
+  console.log(`✅ Owner: ${owner}`);
+  console.log(`✅ Next Product ID: ${nextProductId}`);
+
+  console.log("\n🎉 Deployment complete!");
+  console.log(
+    `\n📖 Contract Address for frontend integration: ${address}`
+  );
+}
+
+main()
+  .then(() => process.exit(0))
+  .catch((error) => {
+    console.error(error);
+    process.exit(1);
+  });
+
+main()
+  .then(() => process.exit(0))
+  .catch((error) => {
+    console.error(error);
+    process.exit(1);
+  });
