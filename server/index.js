@@ -35,7 +35,8 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
 
 const app = express();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
-const nonces = new Map();
+
+// Nonce storage moved to Supabase (see: auth/challenge and auth/verify endpoints)
 
 function normalizeWallet(wallet = "") {
   return wallet.trim().toLowerCase();
@@ -46,10 +47,80 @@ function requireEnv(value, label) {
   return value;
 }
 
-function cleanupExpiredNonces() {
-  const now = Date.now();
-  for (const [wallet, entry] of nonces.entries()) {
-    if (entry.expiresAt <= now) nonces.delete(wallet);
+// ──────────────────────────────────────────────
+//  Nonce Management (Supabase-backed for multi-instance support)
+// ──────────────────────────────────────────────
+async function issueNonce(wallet) {
+  const nonce = ethers.hexlify(ethers.randomBytes(16));
+  const issuedAt = new Date().toISOString();
+  const expiresAt = new Date(Date.now() + 5 * 60 * 1000).toISOString(); // 5 min
+
+  const { error } = await supabase.from("nonces").insert({
+    wallet: normalizeWallet(wallet),
+    nonce,
+    issued_at: issuedAt,
+    expires_at: expiresAt,
+    used: false,
+  });
+
+  if (error) {
+    console.error("Failed to store nonce:", error);
+    throw new Error(`Failed to issue nonce: ${error.message}`);
+  }
+
+  return { nonce, issuedAt };
+}
+
+async function verifyNonce(wallet, nonce) {
+  const normalized = normalizeWallet(wallet);
+  const now = new Date().toISOString();
+
+  // Get unused nonce
+  const { data, error: selectError } = await supabase
+    .from("nonces")
+    .select("id, nonce, issued_at, expires_at")
+    .eq("wallet", normalized)
+    .eq("nonce", nonce)
+    .eq("used", false)
+    .maybeSingle();
+
+  if (selectError) {
+    throw new Error(`Nonce verification failed: ${selectError.message}`);
+  }
+
+  if (!data) {
+    throw new Error("Invalid or expired nonce");
+  }
+
+  // Check expiration
+  if (data.expires_at < now) {
+    throw new Error("Challenge expired");
+  }
+
+  // Mark as used (one-time use)
+  const { error: updateError } = await supabase
+    .from("nonces")
+    .update({ used: true, used_at: now })
+    .eq("id", data.id);
+
+  if (updateError) {
+    console.error("Failed to mark nonce as used:", updateError);
+    // Don't throw - let verification succeed even if marking fails
+  }
+
+  return data;
+}
+
+async function cleanupExpiredNonces() {
+  const now = new Date().toISOString();
+  const { error } = await supabase
+    .from("nonces")
+    .delete()
+    .lt("expires_at", now)
+    .eq("used", false);
+
+  if (error) {
+    console.warn("Nonce cleanup warning:", error.message);
   }
 }
 
@@ -162,6 +233,23 @@ const FACTORY_ABI = [
     type: "function",
   },
   {
+    inputs: [
+      { internalType: "address", name: "_artist", type: "address" },
+      { internalType: "bool", name: "_approved", type: "bool" },
+    ],
+    name: "setArtistApproval",
+    outputs: [],
+    stateMutability: "nonpayable",
+    type: "function",
+  },
+  {
+    inputs: [{ internalType: "address", name: "_artist", type: "address" }],
+    name: "isArtistApproved",
+    outputs: [{ internalType: "bool", name: "", type: "bool" }],
+    stateMutability: "view",
+    type: "function",
+  },
+  {
     anonymous: false,
     inputs: [
       { indexed: true, internalType: "address", name: "artist", type: "address" },
@@ -172,7 +260,38 @@ const FACTORY_ABI = [
     name: "ArtDropDeployed",
     type: "event",
   },
+  {
+    anonymous: false,
+    inputs: [
+      { indexed: true, internalType: "address", name: "artist", type: "address" },
+      { indexed: false, internalType: "bool", name: "approved", type: "bool" },
+      { indexed: false, internalType: "uint256", name: "timestamp", type: "uint256" },
+    ],
+    name: "ArtistApprovalUpdated",
+    type: "event",
+  },
 ];
+
+async function setArtistApprovalOnchain(wallet, isApproved) {
+  requireEnv(DEPLOYER_PRIVATE_KEY, "DEPLOYER_PRIVATE_KEY");
+  requireEnv(BASE_SEPOLIA_RPC_URL, "BASE_SEPOLIA_RPC_URL");
+  requireEnv(ART_DROP_FACTORY_ADDRESS, "ART_DROP_FACTORY_ADDRESS");
+
+  const artistWallet = ethers.getAddress(wallet);
+  const provider = new ethers.JsonRpcProvider(BASE_SEPOLIA_RPC_URL);
+  const signer = new ethers.Wallet(DEPLOYER_PRIVATE_KEY, provider);
+  const factory = new ethers.Contract(ART_DROP_FACTORY_ADDRESS, FACTORY_ABI, signer);
+
+  // Call setArtistApproval on the factory contract
+  const tx = await factory.setArtistApproval(artistWallet, isApproved);
+  const receipt = await tx.wait();
+
+  return {
+    transactionHash: tx.hash,
+    blockNumber: receipt?.blockNumber,
+    gasUsed: receipt?.gasUsed?.toString(),
+  };
+}
 
 async function deployArtistContractForWallet(wallet) {
   requireEnv(DEPLOYER_PRIVATE_KEY, "DEPLOYER_PRIVATE_KEY");
@@ -227,58 +346,84 @@ app.get("/health", (_req, res) => {
 });
 
 app.post("/auth/challenge", async (req, res) => {
-  cleanupExpiredNonces();
-  const wallet = normalizeWallet(req.body?.wallet);
-  if (!ethers.isAddress(wallet)) {
-    return res.status(400).json({ error: "Invalid wallet address" });
+  try {
+    const wallet = normalizeWallet(req.body?.wallet);
+    if (!ethers.isAddress(wallet)) {
+      return res.status(400).json({ error: "Invalid wallet address" });
+    }
+
+    // Clean up expired nonces from database
+    await cleanupExpiredNonces();
+
+    // Issue new nonce (stored in Supabase)
+    const { nonce, issuedAt } = await issueNonce(wallet);
+    const message = makeChallengeMessage(wallet, nonce, issuedAt);
+
+    return res.json({ wallet, nonce, issuedAt, message });
+  } catch (error) {
+    console.error("Challenge error:", error);
+    return res.status(500).json({ error: error.message || "Failed to issue challenge" });
   }
-
-  const nonce = ethers.hexlify(ethers.randomBytes(16));
-  const issuedAt = new Date().toISOString();
-
-  nonces.set(wallet, {
-    nonce,
-    issuedAt,
-    expiresAt: Date.now() + 5 * 60 * 1000,
-  });
-
-  const message = makeChallengeMessage(wallet, nonce, issuedAt);
-  return res.json({ wallet, nonce, issuedAt, message });
 });
 
 app.post("/auth/verify", async (req, res) => {
-  cleanupExpiredNonces();
-  const wallet = normalizeWallet(req.body?.wallet);
-  const signature = req.body?.signature;
+  try {
+    const wallet = normalizeWallet(req.body?.wallet);
+    const signature = req.body?.signature;
 
-  if (!ethers.isAddress(wallet) || !signature) {
-    return res.status(400).json({ error: "Wallet and signature are required" });
+    if (!ethers.isAddress(wallet) || !signature) {
+      return res.status(400).json({ error: "Wallet and signature are required" });
+    }
+
+    // Clean up expired nonces from database
+    await cleanupExpiredNonces();
+
+    // Verify nonce (marks as used, enforces one-time use)
+    const nonce_record = await verifyNonce(wallet, signature.includes("\n") ? null : req.body?.nonce);
+    
+    // In production: For each submission attempt, search for the corresponding nonce
+    // This prevents replay attacks across multiple instances
+    const { data: nonceRecord, error: nonceError } = await supabase
+      .from("nonces")
+      .select("id, nonce, issued_at")
+      .eq("wallet", wallet)
+      .eq("used", false)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (nonceError || !nonceRecord) {
+      return res.status(400).json({ error: "Challenge expired or missing" });
+    }
+
+    const message = makeChallengeMessage(wallet, nonceRecord.nonce, nonceRecord.issued_at);
+    const recovered = normalizeWallet(ethers.verifyMessage(message, signature));
+
+    if (recovered !== wallet) {
+      return res.status(401).json({ error: "Signature verification failed" });
+    }
+
+    // Mark nonce as used
+    await supabase
+      .from("nonces")
+      .update({ used: true, used_at: new Date().toISOString() })
+      .eq("id", nonceRecord.id);
+
+    const role = await resolveRole(wallet);
+    const apiToken = issueAppToken({ wallet, role });
+    const supabaseToken = issueSupabaseToken({ wallet, role });
+
+    return res.json({
+      wallet,
+      role,
+      apiToken,
+      supabaseToken,
+      expiresInSeconds: 12 * 60 * 60,
+    });
+  } catch (error) {
+    console.error("Verification error:", error);
+    return res.status(500).json({ error: error.message || "Verification failed" });
   }
-
-  const pending = nonces.get(wallet);
-  if (!pending || pending.expiresAt <= Date.now()) {
-    return res.status(400).json({ error: "Challenge expired or missing" });
-  }
-
-  const message = makeChallengeMessage(wallet, pending.nonce, pending.issuedAt);
-  const recovered = normalizeWallet(ethers.verifyMessage(message, signature));
-
-  if (recovered !== wallet) {
-    return res.status(401).json({ error: "Signature verification failed" });
-  }
-
-  nonces.delete(wallet);
-  const role = await resolveRole(wallet);
-  const apiToken = issueAppToken({ wallet, role });
-  const supabaseToken = issueSupabaseToken({ wallet, role });
-
-  return res.json({
-    wallet,
-    role,
-    apiToken,
-    supabaseToken,
-    expiresInSeconds: 12 * 60 * 60,
-  });
 });
 
 app.get("/auth/session", authRequired, (req, res) => {
@@ -657,6 +802,18 @@ app.post("/admin/approve-artist", authRequired, adminRequired, async (req, res) 
       return res.status(400).json({ error: `Failed to update whitelist: ${whitelistError.message}` });
     }
 
+    // Update onchain whitelist (ArtDropFactory contract)
+    let onchainUpdate = null;
+    if (approve && deployContract) {
+      try {
+        onchainUpdate = await setArtistApprovalOnchain(normalized, true);
+        console.log("✅ Artist approval set onchain:", normalized);
+      } catch (err) {
+        console.warn("⚠️ Onchain approval warning (non-blocking):", err.message);
+        // Don't fail the entire operation if onchain update fails
+      }
+    }
+
     // If approving and contract not deployed, attempt deployment
     let contractAddress = artistData.contract_address;
     let deploymentTx = artistData.contract_deployment_tx;
@@ -667,17 +824,8 @@ app.post("/admin/approve-artist", authRequired, adminRequired, async (req, res) 
         const deployment = await deployArtistContractForWallet(normalized);
         contractAddress = deployment.contractAddress;
         deploymentTx = deployment.deploymentTx;
-        // For now, log that deployment would happen here
-        // In production, you would call ArtDropFactory.deployArtistContract()
-        console.log("🚀 Contract deployment for artist:", normalized);
-        console.log("   NOTE: Actual deployment requires blockchain interaction + environment setup");
-        
-        // Placeholder: Set a pending deployment status
-        // In real implementation, this would:
-        // 1. Connect to provider on Base Sepolia
-        // 2. Call ArtDropFactory.deployArtistContract(artist, founder)
-        // 3. Wait for tx confirmation
-        // 4. Extract contract address from event logs
+        console.log("🚀 Contract deployed for artist:", normalized);
+        console.log("   Contract address:", contractAddress);
       } catch (err) {
         console.error("❌ Contract deployment error:", err);
         deploymentError = err instanceof Error ? err.message : "Unknown deployment error";
@@ -707,6 +855,19 @@ app.post("/admin/approve-artist", authRequired, adminRequired, async (req, res) 
       return res.status(400).json({ error: `Failed to update artist: ${updateError.message}` });
     }
 
+    // Log admin action (audit trail)
+    await supabase.from("admin_audit_log").insert({
+      admin_wallet: req.auth.wallet,
+      action: "approve_artist",
+      target_wallet: normalized,
+      status: approve ? "approved" : "rejected",
+      details: {
+        deploymentStatus: contractAddress ? "deployed" : deploymentError ? "failed" : "pending",
+        contractAddress,
+        deploymentTx,
+      },
+    }).catch((err) => console.warn("Audit log warning:", err.message));
+
     return res.json({
       success: true,
       artist: updatedArtist,
@@ -716,10 +877,105 @@ app.post("/admin/approve-artist", authRequired, adminRequired, async (req, res) 
         tx: deploymentTx,
         error: deploymentError,
       },
+      onchain: onchainUpdate,
     });
   } catch (error) {
     console.error("❌ Approval error:", error);
     return res.status(500).json({ error: error.message || "Approval processing failed" });
+  }
+});
+
+/**
+ * ═════════════════════════════════════════════════════════════
+ * ADMIN - Reject artist (dedicated endpoint)
+ * ═════════════════════════════════════════════════════════════
+ */
+app.post("/admin/reject-artist", authRequired, adminRequired, async (req, res) => {
+  try {
+    const { wallet, reason = "" } = req.body || {};
+    const normalized = normalizeWallet(wallet);
+
+    if (!normalized) {
+      return res.status(400).json({ error: "Valid wallet address required" });
+    }
+
+    // Get artist profile
+    const { data: artistData, error: artistError } = await supabase
+      .from("artists")
+      .select("*")
+      .eq("wallet", normalized)
+      .maybeSingle();
+
+    if (artistError) {
+      return res.status(400).json({ error: `Cannot fetch artist: ${artistError.message}` });
+    }
+
+    if (!artistData) {
+      return res.status(404).json({ error: "Artist profile not found" });
+    }
+
+    // Update whitelist status to rejected
+    const { error: whitelistError } = await supabase
+      .from("whitelist")
+      .update({
+        status: "rejected",
+        status_updated_at: new Date().toISOString(),
+        rejection_reason: reason,
+      })
+      .eq("wallet", normalized);
+
+    if (whitelistError) {
+      console.error("❌ Whitelist rejection error:", whitelistError);
+      return res.status(400).json({ error: `Failed to reject artist: ${whitelistError.message}` });
+    }
+
+    // Update onchain whitelist (remove approval)
+    let onchainUpdate = null;
+    try {
+      onchainUpdate = await setArtistApprovalOnchain(normalized, false);
+      console.log("✅ Artist approval removed onchain:", normalized);
+    } catch (err) {
+      console.warn("⚠️ Onchain removal warning (non-blocking):", err.message);
+      // Don't fail the entire operation if onchain update fails
+    }
+
+    // Update artist record
+    const { data: updatedArtist, error: updateError } = await supabase
+      .from("artists")
+      .update({
+        updated_at: new Date().toISOString(),
+      })
+      .eq("wallet", normalized)
+      .select("*")
+      .single();
+
+    if (updateError) {
+      return res.status(400).json({ error: `Failed to update artist: ${updateError.message}` });
+    }
+
+    // Log admin action (audit trail)
+    await supabase.from("admin_audit_log").insert({
+      admin_wallet: req.auth.wallet,
+      action: "reject_artist",
+      target_wallet: normalized,
+      status: "rejected",
+      details: {
+        reason,
+      },
+    }).catch((err) => console.warn("Audit log warning:", err.message));
+
+    return res.json({
+      success: true,
+      artist: updatedArtist,
+      rejection: {
+        reason,
+        rejectedAt: new Date().toISOString(),
+      },
+      onchain: onchainUpdate,
+    });
+  } catch (error) {
+    console.error("❌ Rejection error:", error);
+    return res.status(500).json({ error: error.message || "Rejection processing failed" });
   }
 });
 

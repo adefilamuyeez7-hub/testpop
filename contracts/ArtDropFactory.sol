@@ -31,6 +31,13 @@ contract ArtDropFactory {
     address[] public allDeployedContracts;
     
     // ──────────────────────────────────────────────
+    //  ARTIST WHITELIST (ONCHAIN) - replaces DB-only whitelist
+    // ──────────────────────────────────────────────
+    mapping(address => bool) public artistApproved;
+    mapping(address => uint256) public approvalTimestamp;
+    address[] public approvedArtists;
+    
+    // ──────────────────────────────────────────────
     //  Events
     // ──────────────────────────────────────────────
     event ArtDropDeployed(
@@ -45,6 +52,8 @@ contract ArtDropFactory {
     event FactoryOwnershipTransferred(address indexed previousOwner, address indexed newOwner);
     
     event FounderWalletUpdated(address indexed previousFounder, address indexed newFounder);
+    
+    event ArtistApprovalUpdated(address indexed artist, bool approved, uint256 timestamp);
 
     // ──────────────────────────────────────────────
     //  Constructor
@@ -84,11 +93,46 @@ contract ArtDropFactory {
     }
 
     // ──────────────────────────────────────────────
+    //  Artist Whitelist Management (ONCHAIN)
+    // ──────────────────────────────────────────────
+    /// @dev Set artist approval status (replaces DB-only whitelist)
+    function setArtistApproval(address _artist, bool _approved) external onlyOwner {
+        require(_artist != address(0), "Invalid artist address");
+        
+        bool wasApproved = artistApproved[_artist];
+        artistApproved[_artist] = _approved;
+        approvalTimestamp[_artist] = block.timestamp;
+        
+        // Track approved artists (add to list if newly approved)
+        if (_approved && !wasApproved) {
+            approvedArtists.push(_artist);
+        }
+        
+        emit ArtistApprovalUpdated(_artist, _approved, block.timestamp);
+    }
+
+    /// @dev Check if artist is approved
+    function isArtistApproved(address _artist) external view returns (bool) {
+        return artistApproved[_artist];
+    }
+
+    /// @dev Get all approved artists
+    function getApprovedArtists() external view returns (address[] memory) {
+        return approvedArtists;
+    }
+
+    /// @dev Get count of approved artists
+    function getApprovedArtistCount() external view returns (uint256) {
+        return approvedArtists.length;
+    }
+
+    // ──────────────────────────────────────────────
     //  Core deployment function
     // ──────────────────────────────────────────────
-    /// @dev Deploys a new ArtDrop contract for the given artist wallet
+    /// @dev Deploys a new ArtDrop contract for the given artist wallet (requires approval)
     function deployArtDrop(address _artistWallet) external onlyOwner returns (address) {
         require(_artistWallet != address(0), "Invalid artist wallet");
+        require(artistApproved[_artistWallet], "Artist not approved");
         require(artistToContract[_artistWallet] == address(0), "Artist already has contract");
         
         bytes memory bytecode = artDropBytecode;
