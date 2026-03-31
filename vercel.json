@@ -8,46 +8,19 @@
         "maxLambdaSize": "50mb",
         "nodeVersion": "20.x"
       }
-    },
-    {
-      "src": "package.json",
-      "use": "@vercel/static-build",
-      "config": {
-        "distDir": "dist"
-      }
     }
   ],
   "routes": [
     {
-      "src": "/api/?(.*)",
+      "src": "/api/(.*)",
       "dest": "server/api/index.js"
     },
     {
-      "src": "/dist/(.*)",
-      "dest": "/dist/$1"
-    },
-    {
-      "src": "/(.*\\.[a-zA-Z0-9]+)$",
-      "dest": "/$1"
+      "handle": "filesystem"
     },
     {
       "src": "/.*",
       "dest": "/index.html"
     }
-  ],
-  "headers": [
-    {
-      "source": "/dist/(.*)",
-      "headers": [
-        {
-          "key": "Cache-Control",
-          "value": "public, max-age=31536000, immutable"
-        }
-      ]
-    }
-  ],
-  "env": {
-    "NODE_ENV": "production",
-    "FRONTEND_ORIGIN": "https://testpop-one.vercel.app"
-  }
+  ]
 }
