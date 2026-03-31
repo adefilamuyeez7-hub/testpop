@@ -606,6 +606,24 @@ app.get("/health", (_req, res) => {
   res.json({ ok: true, service: "popup-api", env: NODE_ENV });
 });
 
+// DEBUG: Check if dist folder exists
+app.get("/debug/dist-status", (req, res) => {
+  const distPath = path.join(__dirname, './dist');
+  const indexPath = path.join(distPath, 'index.html');
+  const distExists = fs.existsSync(distPath);
+  const indexExists = fs.existsSync(indexPath);
+  const dirContents = distExists ? fs.readdirSync(distPath).slice(0, 10) : [];
+  
+  res.json({
+    "__dirname": __dirname,
+    "distPath": distPath,
+    "distExists": distExists,
+    "indexExists": indexExists,
+    "distContents": dirContents,
+    "NODE_ENV": NODE_ENV
+  });
+});
+
 // ╔═══════════════════════════════════════════════════════════════════════════╗
 // ║ AUTH ROUTES - Registered at both /path and /api/path for Vercel           ║
 // ╚═══════════════════════════════════════════════════════════════════════════╝
