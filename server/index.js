@@ -246,6 +246,26 @@ function sameWalletOrAdmin(targetWallet, auth) {
   return auth?.role === "admin" || normalizeWallet(targetWallet) === auth?.wallet;
 }
 
+// ═════════════════════════════════════════════════════════════════════════════
+// ROUTE REGISTRATION HELPERS - Register routes for both / and /api prefixes
+// ═════════════════════════════════════════════════════════════════════════════
+
+const routes = {}; // Store route definitions
+
+// Helper to register a route at both paths
+function registerRoute(method, path, ...handlers) {
+  const handler = handlers[handlers.length - 1]; // Last arg is the handler
+  const middleware = handlers.slice(0, -1); // All others are middleware
+  
+  // Register at original path
+  app[method](`${path}`, ...middleware, handler);
+  
+  // Register at /api path  
+  app[method](`/api${path}`, ...middleware, handler);
+  
+  console.log(`✅ Registered ${method.toUpperCase()} ${path} and /api${path}`);
+}
+
 // CORS origin validation - ensure only valid HTTPS URLs in production
 function isValidOrigin(origin) {
   try {
@@ -519,32 +539,55 @@ app.options('*', cors());
 app.use(express.json({ limit: "2mb" }));
 app.use(cookieParser());
 
-// Strip /api prefix when running on Vercel (requests come in as /api/auth/challenge but routes are /auth/challenge)
+// ═════════════════════════════════════════════════════════════════════════════
+// URL REWRITING MIDDLEWARE - Critical for Vercel serverless
+// When Vercel routes /api/auth/challenge -> server/api/index.js,
+// the Express app receives the FULL path with /api prefix.
+// We need to rewrite it so routes match.
+// ═════════════════════════════════════════════════════════════════════════════
+
 app.use((req, res, next) => {
-  // Log the incoming request path for debugging
- console.log(`[ROUTER] Incoming: path=${req.path} url=${req.url} method=${req.method}`);
+  // Log EVERY request with full details
+  console.log(`\n${'═'.repeat(80)}`);
+  console.log(`📥 INCOMING REQUEST`);
+  console.log(`   method: ${req.method}`);
+  console.log(`   originalUrl: ${req.originalUrl}`);
+  console.log(`   url: ${req.url}`);
+  console.log(`   path: ${req.path}`);
+  console.log(`   baseUrl: ${req.baseUrl}`);
+  console.log(`   hostname: ${req.hostname}`);
+  console.log(`   protocol: ${req.protocol}`);
   
-  // Strip /api prefix from both req.url and req.path since Express uses req.path for routing
-  if (req.path.startsWith('/api/')) {
-    req.url = req.url.replace(/^\/api/, '');
-    // Also update internal Express routing
-    req.path = req.path.replace(/^\/api/, '');
-    console.log(`[ROUTER] Stripped /api -> path=${req.path} url=${req.url}`);
+  // Strip /api prefix - required for Vercel routing
+  if (req.originalUrl?.startsWith('/api/')) {
+    const newUrl = req.originalUrl.substring(4); // Remove '/api' (4 chars)
+    console.log(`   ⚙️ REWRITING: ${req.originalUrl} → ${newUrl}`);
+    req.url = newUrl;
+    // Force Express to re-parse the new URL for routing
+  } else if (req.url?.startsWith('/api/')) {
+    const newUrl = req.url.substring(4);
+    console.log(`   ⚙️ REWRITING url: ${req.url} → ${newUrl}`);
+    req.url = newUrl;
   }
+  
+  console.log(`   AFTER REWRITE: url=${req.url}, path=${req.path}`);
+  console.log(`${'═'.repeat(80)}\n`);
   next();
 });
 
-// Log all requests after routing
+// Log all requests right before routing
 app.use((req, res, next) => {
-  console.log(`📨 ${req.method} ${req.path}`);
+  console.log(`📨 ROUTING: ${req.method} ${req.url} (original path was ${req.path})`);
   next();
 });
 
 app.get("/health", (_req, res) => {
+  console.log("✅ /health endpoint called");
   res.json({ ok: true, service: "popup-api", env: NODE_ENV });
 });
 
 app.get("/", (_req, res) => {
+  console.log("✅ / root endpoint called");
   res.json({ 
     status: "API is running", 
     service: "popup-api",
@@ -554,6 +597,52 @@ app.get("/", (_req, res) => {
 });
 
 app.post("/auth/challenge", authLimiter, async (req, res) => {
+  try {
+    const wallet = normalizeWallet(req.body?.wallet);
+    if (!ethers.isAddress(wallet)) {
+      return res.status(400).json({ error: "Invalid wallet address" });
+    }
+
+    // Clean up expired nonces from database
+    await cleanupExpiredNonces();
+
+    // Issue new nonce (stored in Supabase)
+    const { nonce, issuedAt } = await issueNonce(wallet);
+    const message = makeChallengeMessage(wallet, nonce, issuedAt);
+
+    return res.json({ wallet, nonce, issuedAt, message });
+  } catch (error) {
+    console.error("Challenge error:", error);
+    const isDev = NODE_ENV === 'development';
+    return res.status(500).json({ error: isDev ? error.message : "Failed to issue challenge" });
+  }
+});
+
+// Also create /api/auth/challenge route for Vercel
+app.post("/api/auth/challenge", authLimiter, async (req, res) => {
+  try {
+    const wallet = normalizeWallet(req.body?.wallet);
+    if (!ethers.isAddress(wallet)) {
+      return res.status(400).json({ error: "Invalid wallet address" });
+    }
+
+    // Clean up expired nonces from database
+    await cleanupExpiredNonces();
+
+    // Issue new nonce (stored in Supabase)
+    const { nonce, issuedAt } = await issueNonce(wallet);
+    const message = makeChallengeMessage(wallet, nonce, issuedAt);
+
+    return res.json({ wallet, nonce, issuedAt, message });
+  } catch (error) {
+    console.error("Challenge error:", error);
+    const isDev = NODE_ENV === 'development';
+    return res.status(500).json({ error: isDev ? error.message : "Failed to issue challenge" });
+  }
+});
+
+// Also create /api/auth/challenge route for Vercel
+app.post("/api/auth/challenge", authLimiter, async (req, res) => {
   try {
     const wallet = normalizeWallet(req.body?.wallet);
     if (!ethers.isAddress(wallet)) {
@@ -595,6 +684,112 @@ app.post("/auth/verify", authLimiter, async (req, res) => {
 
     if (recovered !== wallet) {
       // Log failed verification attempt (security event)
+      console.warn(`🔓 Failed signature verification for ${wallet} from ${req.ip}`);
+      return res.status(401).json({ error: "Signature verification failed" });
+    }
+
+    const { error: updateError } = await supabase
+      .from("nonces")
+      .update({ used: true, used_at: new Date().toISOString() })
+      .eq("id", nonceRecord.id);
+
+    if (updateError) {
+      console.error("Failed to mark nonce as used:", updateError);
+      return res.status(500).json({ error: "Failed to finalize authenticated session" });
+    }
+
+    const role = await resolveRole(wallet);
+    const apiToken = issueAppToken({ wallet, role });
+    const supabaseToken = issueSupabaseToken({ wallet, role });
+
+    console.log(`✅ Auth verified for ${wallet} (role: ${role})`);
+    return res.json({
+      wallet,
+      role,
+      apiToken,
+      supabaseToken,
+      expiresInSeconds: 12 * 60 * 60,
+    });
+  } catch (error) {
+    console.error("Verification error:", error);
+    const isDev = NODE_ENV === 'development';
+    return res.status(500).json({ error: isDev ? error.message : "Verification failed" });
+  }
+});
+
+// DUPLICATE ROUTES FOR /api prefix - Vercel workaround
+app.post("/api/auth/verify", authLimiter, async (req, res) => {
+  try {
+    const wallet = normalizeWallet(req.body?.wallet);
+    const signature = req.body?.signature;
+    const nonce = req.body?.nonce;
+
+    if (!ethers.isAddress(wallet) || !signature || !nonce) {
+      return res.status(400).json({ error: "Wallet, signature, and nonce are required" });
+    }
+
+    // Clean up expired nonces from database
+    await cleanupExpiredNonces();
+
+    const nonceRecord = await getValidNonceRecord(wallet, nonce);
+
+    const message = makeChallengeMessage(wallet, nonceRecord.nonce, nonceRecord.issued_at);
+    const recovered = normalizeWallet(ethers.verifyMessage(message, signature));
+
+    if (recovered !== wallet) {
+      console.warn(`🔓 Failed signature verification for ${wallet} from ${req.ip}`);
+      return res.status(401).json({ error: "Signature verification failed" });
+    }
+
+    const { error: updateError } = await supabase
+      .from("nonces")
+      .update({ used: true, used_at: new Date().toISOString() })
+      .eq("id", nonceRecord.id);
+
+    if (updateError) {
+      console.error("Failed to mark nonce as used:", updateError);
+      return res.status(500).json({ error: "Failed to finalize authenticated session" });
+    }
+
+    const role = await resolveRole(wallet);
+    const apiToken = issueAppToken({ wallet, role });
+    const supabaseToken = issueSupabaseToken({ wallet, role });
+
+    console.log(`✅ Auth verified for ${wallet} (role: ${role})`);
+    return res.json({
+      wallet,
+      role,
+      apiToken,
+      supabaseToken,
+      expiresInSeconds: 12 * 60 * 60,
+    });
+  } catch (error) {
+    console.error("Verification error:", error);
+    const isDev = NODE_ENV === 'development';
+    return res.status(500).json({ error: isDev ? error.message : "Verification failed" });
+  }
+});
+
+// DUPLICATE ROUTES FOR /api prefix - Vercel workaround
+app.post("/api/auth/verify", authLimiter, async (req, res) => {
+  try {
+    const wallet = normalizeWallet(req.body?.wallet);
+    const signature = req.body?.signature;
+    const nonce = req.body?.nonce;
+
+    if (!ethers.isAddress(wallet) || !signature || !nonce) {
+      return res.status(400).json({ error: "Wallet, signature, and nonce are required" });
+    }
+
+    // Clean up expired nonces from database
+    await cleanupExpiredNonces();
+
+    const nonceRecord = await getValidNonceRecord(wallet, nonce);
+
+    const message = makeChallengeMessage(wallet, nonceRecord.nonce, nonceRecord.issued_at);
+    const recovered = normalizeWallet(ethers.verifyMessage(message, signature));
+
+    if (recovered !== wallet) {
       console.warn(`🔓 Failed signature verification for ${wallet} from ${req.ip}`);
       return res.status(401).json({ error: "Signature verification failed" });
     }
