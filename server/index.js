@@ -362,6 +362,14 @@ app.options('*', cors());
 app.use(express.json({ limit: "2mb" }));
 app.use(cookieParser());
 
+// Strip /api prefix when running on Vercel (requests come in as /api/auth/challenge but routes are /auth/challenge)
+app.use((req, res, next) => {
+  if (req.path.startsWith('/api/')) {
+    req.url = req.url.replace('/api', '');
+  }
+  next();
+});
+
 // Log all requests
 app.use((req, res, next) => {
   console.log(`📨 ${req.method} ${req.path}`);
