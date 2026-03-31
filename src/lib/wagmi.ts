@@ -23,8 +23,8 @@ export const appKit = createAppKit({
   metadata: {
     name: "POPUP",
     description: "Drop it. Own it. Get paid.",
-    url: "https://pop-up.fun",
-    icons: ["https://pop-up.fun/favicon.ico"],
+    url: "https://testpop-one.vercel.app",
+    icons: ["https://testpop-one.vercel.app/favicon.ico"],
   },
   features: {
     analytics: false,
