@@ -1,3 +1,5 @@
+import { getRuntimeApiToken } from "@/lib/runtimeSession";
+
 const DEFAULT_PINATA_API_BASE = "/api/pinata";
 const PINATA_API_BASE = (import.meta.env.VITE_PINATA_API_BASE_URL || DEFAULT_PINATA_API_BASE).replace(/\/$/, "");
 
@@ -15,9 +17,21 @@ async function parseErrorResponse(response: Response): Promise<string> {
   }
 }
 
+function getPinataAuthHeaders(headers?: HeadersInit): Headers {
+  const nextHeaders = new Headers(headers);
+  const token = getRuntimeApiToken();
+
+  if (token) {
+    nextHeaders.set("Authorization", `Bearer ${token}`);
+  }
+
+  return nextHeaders;
+}
+
 async function postToPinataProxy(path: string, body: BodyInit): Promise<PinataUploadResponse> {
   const response = await fetch(`${PINATA_API_BASE}${path}`, {
     method: "POST",
+    headers: getPinataAuthHeaders(),
     body,
     credentials: "include",
   });
@@ -45,9 +59,9 @@ export async function uploadFileToPinata(file: File): Promise<string> {
 export async function uploadMetadataToPinata(metadata: object): Promise<string> {
   const response = await fetch(`${PINATA_API_BASE}/json`, {
     method: "POST",
-    headers: {
+    headers: getPinataAuthHeaders({
       "Content-Type": "application/json",
-    },
+    }),
     body: JSON.stringify({ metadata }),
     credentials: "include",
   });
