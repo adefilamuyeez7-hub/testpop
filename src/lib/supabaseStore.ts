@@ -175,7 +175,14 @@ export async function fetchLiveDropsFromSupabase() {
     console.log("📖 Fetching live drops from Supabase...");
     const { data, error } = await supabase
       .from("drops")
-      .select("*")
+      .select(`
+        *,
+        artists:artist_id (
+          id,
+          name,
+          avatar_url
+        )
+      `)
       .eq("status", "live")
       .order("created_at", { ascending: false });
 
@@ -185,32 +192,7 @@ export async function fetchLiveDropsFromSupabase() {
     }
 
     console.log(`✅ Fetched ${data?.length || 0} live drops from Supabase`);
-
-    // Enrich drops with artist information
-    const enrichedData = await Promise.all(
-      (data || []).map(async (drop) => {
-        try {
-          if (drop.artist_id) {
-            const { data: artistData } = await supabase
-              .from("artists")
-              .select("id, name, avatar_url")
-              .eq("id", drop.artist_id)
-              .single();
-
-            return {
-              ...drop,
-              artists: artistData || null,
-            };
-          }
-          return drop;
-        } catch (err) {
-          console.warn(`⚠️  Could not fetch artist for drop ${drop.id}:`, err);
-          return drop;
-        }
-      })
-    );
-
-    return enrichedData || [];
+    return data || [];
   } catch (error: any) {
     console.error("❌ fetchLiveDropsFromSupabase failed:", error.message);
     throw error;

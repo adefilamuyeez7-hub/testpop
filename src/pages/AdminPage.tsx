@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
@@ -29,10 +29,9 @@ import {
   deleteWhitelistEntry as dbDeleteWhitelistEntry,
   updateProduct as dbUpdateProduct,
   updateOrder as dbUpdateOrder,
-  updateWhitelistEntry as dbUpdateWhitelistEntry,
 } from "@/lib/db";
 import { useSupabaseAllProducts, useSupabaseAllDrops } from "@/hooks/useSupabase";
-import { useApproveArtist } from "@/lib/adminApi";
+import { useApproveArtist, useRejectArtist } from "@/lib/adminApi";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type MarketProduct = {
@@ -186,7 +185,6 @@ const AddProductDialog = ({ onAdd, adminAddress }: { onAdd: (p: MarketProduct, w
       const errorMsg = Object.values(validation.errors).join(", ");
       console.error("❌ Form validation failed:", errorMsg, validation.errors);
       toast.error(errorMsg);
-      return;
     }
 
     // Validate file upload
@@ -464,11 +462,216 @@ const UpdateOrderDialog = ({
 };
 
 // ─── Main AdminPage ───────────────────────────────────────────────────────────
+const WhitelistRow = memo(function WhitelistRow({
+  entry,
+  isApproving,
+  isRejecting,
+  isRemoving,
+  onApprove,
+  onReject,
+  onRemove,
+}: {
+  entry: WhitelistEntryWithContract;
+  isApproving: boolean;
+  isRejecting: boolean;
+  isRemoving: boolean;
+  onApprove: (id: string) => void;
+  onReject: (id: string) => void;
+  onRemove: (id: string) => void;
+}) {
+  return (
+    <div className="p-4 rounded-2xl bg-card border border-border">
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <p className="text-sm font-semibold text-foreground">{entry.name}</p>
+            <Badge variant="outline" className="text-[10px]">{entry.tag}</Badge>
+            <span className={`text-[10px] font-medium px-2 py-0.5 rounded-full capitalize ${whitelistColor[entry.status]}`}>
+              {entry.status}
+            </span>
+          </div>
+          <p className="text-xs font-mono text-muted-foreground mt-1 truncate">{entry.wallet}</p>
+          <p className="text-[10px] text-muted-foreground mt-0.5">Added {entry.joinedAt}</p>
+          {entry.contract_address && (
+            <div className="mt-2 p-2 rounded-lg bg-green-50 dark:bg-green-950 border border-green-200 dark:border-green-800">
+              <p className="text-[9px] font-semibold text-green-700 dark:text-green-300 mb-1">Contract Deployed</p>
+              <p className="text-[9px] font-mono text-green-600 dark:text-green-400 break-all">{entry.contract_address}</p>
+            </div>
+          )}
+        </div>
+
+        <div className="flex items-center gap-1.5 shrink-0">
+          {entry.status === "pending" && (
+            <>
+              <button
+                onClick={() => onApprove(entry.id)}
+                disabled={isApproving || isRejecting || isRemoving}
+                className="p-2 rounded-xl bg-green-100 text-green-700 hover:bg-green-200 transition-colors disabled:opacity-50 disabled:cursor-waiting"
+                title="Approve"
+              >
+                {isApproving ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
+              </button>
+              <button
+                onClick={() => onReject(entry.id)}
+                disabled={isApproving || isRejecting || isRemoving}
+                className="p-2 rounded-xl bg-red-100 text-red-700 hover:bg-red-200 transition-colors disabled:opacity-50 disabled:cursor-waiting"
+                title="Reject"
+              >
+                {isRejecting ? <Loader2 className="h-4 w-4 animate-spin" /> : <XCircle className="h-4 w-4" />}
+              </button>
+            </>
+          )}
+          {entry.status === "approved" && (
+            <button
+              onClick={() => onReject(entry.id)}
+              disabled={isApproving || isRejecting || isRemoving}
+              className="p-2 rounded-xl bg-secondary text-muted-foreground hover:bg-red-50 hover:text-red-600 transition-colors disabled:opacity-50 disabled:cursor-waiting"
+              title="Revoke"
+            >
+              {isRejecting ? <Loader2 className="h-4 w-4 animate-spin" /> : <XCircle className="h-4 w-4" />}
+            </button>
+          )}
+          {entry.status === "rejected" && (
+            <button
+              onClick={() => onApprove(entry.id)}
+              disabled={isApproving || isRejecting || isRemoving}
+              className="p-2 rounded-xl bg-secondary text-muted-foreground hover:bg-green-50 hover:text-green-700 transition-colors disabled:opacity-50 disabled:cursor-waiting"
+              title="Re-approve"
+            >
+              {isApproving ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
+            </button>
+          )}
+          <button
+            onClick={() => onRemove(entry.id)}
+            disabled={isRemoving || isApproving || isRejecting}
+            className="p-2 rounded-xl bg-secondary text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors disabled:opacity-50 disabled:cursor-waiting"
+            title="Remove"
+          >
+            {isRemoving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+});
+
+const ProductRow = memo(function ProductRow({
+  product,
+  onRemove,
+  onSave,
+  onTogglePublish,
+}: {
+  product: MarketProduct;
+  onRemove: (id: string) => void;
+  onSave: (product: MarketProduct) => void;
+  onTogglePublish: (id: string) => void;
+}) {
+  return (
+    <div className="p-4 rounded-2xl bg-card border border-border">
+      <div className="flex items-start justify-between gap-3 mb-3">
+        {product.image && (
+          <div className="h-14 w-14 rounded-xl overflow-hidden shrink-0">
+            <img src={product.image} alt={product.name} className="h-full w-full object-cover" />
+          </div>
+        )}
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <p className="text-sm font-semibold text-foreground">{product.name}</p>
+            <Badge variant="secondary" className="text-[10px]">{product.category}</Badge>
+            <span className={`text-[10px] font-medium px-2 py-0.5 rounded-full capitalize ${productColor[product.status]}`}>
+              {product.status.replace("_", " ")}
+            </span>
+          </div>
+          <p className="text-xs text-muted-foreground mt-1 line-clamp-1">{product.description}</p>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-4 gap-2 mb-3">
+        {[
+          { label: "ETH", value: `${product.priceEth}` },
+          { label: "Added", value: product.uploadedAt },
+          { label: "Stock", value: String(product.stock) },
+          { label: "Sold", value: String(product.sold) },
+        ].map((stat) => (
+          <div key={stat.label} className="text-center p-2 rounded-lg bg-secondary">
+            <p className="text-xs font-bold text-foreground">{stat.value}</p>
+            <p className="text-[9px] text-muted-foreground">{stat.label}</p>
+          </div>
+        ))}
+      </div>
+
+      {product.stock === 0 && product.status !== "out_of_stock" && (
+        <div className="flex items-center gap-1 text-[10px] text-destructive mb-2">
+          <AlertTriangle className="h-3 w-3" /> Out of stock - hide or restock
+        </div>
+      )}
+      {product.stock > 0 && product.stock <= 3 && (
+        <div className="flex items-center gap-1 text-[10px] text-yellow-700 mb-2">
+          <AlertTriangle className="h-3 w-3" /> Low stock
+        </div>
+      )}
+
+      <div className="flex items-center justify-between">
+        <div className="flex gap-3">
+          <EditProductDialog product={product} onSave={onSave} />
+          <a href={product.nftLink} target="_blank" rel="noreferrer" className="text-[10px] text-primary flex items-center gap-0.5">
+            <Upload className="h-3 w-3" /> NFT
+          </a>
+          <button onClick={() => onRemove(product.id)} className="text-[10px] text-destructive flex items-center gap-0.5">
+            <Trash2 className="h-3 w-3" /> Delete
+          </button>
+        </div>
+        <button
+          onClick={() => onTogglePublish(product.id)}
+          className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${product.status === "active" ? "bg-green-100 text-green-800 hover:bg-green-200" : "bg-secondary text-muted-foreground hover:bg-secondary/80"}`}
+        >
+          {product.status === "active" ? <><Eye className="h-3 w-3" /> Live</> : <><EyeOff className="h-3 w-3" /> Draft</>}
+        </button>
+      </div>
+    </div>
+  );
+});
+
+const OrderRow = memo(function OrderRow({
+  order,
+  onUpdate,
+}: {
+  order: Order;
+  onUpdate: (id: string, status: Order["status"], code: string) => void | Promise<void>;
+}) {
+  return (
+    <div className="p-4 rounded-2xl bg-card border border-border">
+      <div className="flex items-start justify-between mb-3">
+        <div>
+          <p className="text-sm font-bold font-mono text-foreground">{order.id}</p>
+          <p className="text-xs text-muted-foreground mt-0.5">{order.product} · Qty {order.qty}</p>
+          <p className="text-[10px] font-mono text-muted-foreground">{order.buyer}</p>
+        </div>
+        <span className={`text-[10px] font-semibold px-2 py-1 rounded-full capitalize ${orderColor[order.status]}`}>
+          {order.status}
+        </span>
+      </div>
+
+      <div className="space-y-1.5 text-xs text-muted-foreground mb-3">
+        <div className="flex items-center gap-1.5"><MapPin className="h-3.5 w-3.5 shrink-0" /> {order.address}</div>
+        <div className="flex items-center gap-1.5"><Truck className="h-3.5 w-3.5 shrink-0" />
+          Tracking: <span className="font-mono font-semibold text-foreground ml-1">{order.trackingCode}</span>
+        </div>
+        <div className="text-[10px]">Ordered {order.date}</div>
+      </div>
+
+      <div className="flex justify-end">
+        <UpdateOrderDialog order={order} onUpdate={onUpdate} />
+      </div>
+    </div>
+  );
+});
+
 const AdminPage = () => {
   const { address, disconnect } = useWallet();
-  const { data: supabaseProducts, loading: productsLoading } = useSupabaseAllProducts();
-  const { data: supabaseDrops } = useSupabaseAllDrops();
   const [activeTab, setActiveTab] = useState("whitelist");
+  const { data: supabaseProducts, loading: productsLoading } = useSupabaseAllProducts();
+  const { data: supabaseDrops } = useSupabaseAllDrops(activeTab === "analytics");
 
   const [whitelist, setWhitelist] = useState<WhitelistEntry[]>(() => getStoredArtistWhitelist());
 
@@ -485,12 +688,16 @@ const AdminPage = () => {
   }, []);
   const [products, setProducts] = useState<MarketProduct[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
+  const [ordersLoaded, setOrdersLoaded] = useState(false);
 
   const [whitelistFilter, setWhitelistFilter] = useState<"all" | "pending" | "approved" | "rejected">("all");
   const [addingArtist, setAddingArtist] = useState(false);
   const [newWallet, setNewWallet] = useState("");
   const [deployingWallet, setDeployingWallet] = useState<string | null>(null);
+  const [removingWallet, setRemovingWallet] = useState<string | null>(null);
+  const [whitelistActionLabel, setWhitelistActionLabel] = useState<string | null>(null);
   const { approve, isLoading: isApproving, error: approvalError } = useApproveArtist();
+  const { reject, isLoading: isRejecting, error: rejectionError } = useRejectArtist();
   const [newName, setNewName] = useState("");
   const [newTag, setNewTag] = useState("Digital Art");
 
@@ -520,6 +727,10 @@ const AdminPage = () => {
   }, [supabaseProducts]);
 
   useEffect(() => {
+    if (activeTab !== "orders" || ordersLoaded) {
+      return;
+    }
+
     let active = true;
 
     async function loadOrders() {
@@ -552,6 +763,7 @@ const AdminPage = () => {
       })) as Order[];
 
       setOrders(mappedOrders);
+      setOrdersLoaded(true);
     }
 
     void loadOrders();
@@ -559,16 +771,17 @@ const AdminPage = () => {
     return () => {
       active = false;
     };
-  }, [supabaseProducts]);
+  }, [activeTab, ordersLoaded]);
 
   // Whitelist actions — now uses backend API for deployment
-  const approveArtist = async (id: string) => {
+  const approveArtist = useCallback(async (id: string) => {
     const entry = whitelist.find(e => e.id === id);
     if (!entry) return;
 
     // Optimistic update to UI
     setWhitelist(p => p.map(e => e.id === id ? { ...e, status: "approved" } : e));
     setDeployingWallet(entry.wallet);
+    setWhitelistActionLabel(`Approving ${entry.name}`);
 
     try {
       console.log("📋 Approving artist via backend:", entry.wallet);
@@ -578,7 +791,14 @@ const AdminPage = () => {
         throw new Error(approvalError || "Approval failed");
       }
 
-      toast.success(`✅ Artist approved${result.deployment?.address ? " & contract deployed" : ""}`);
+      if (result.deployment?.address) {
+        toast.success("Artist approved and contract deployed");
+      } else if (result.warning || result.deployment?.error) {
+        toast.success("Artist approved");
+        toast.error(result.warning || result.deployment.error || "Contract deployment did not complete");
+      } else {
+        toast.success("Artist approved");
+      }
       
       // Reload whitelist from server to get updated status
       if (result.success) {
@@ -594,47 +814,57 @@ const AdminPage = () => {
       toast.error(`Approval failed: ${getErrorMessage(err)}`);
     } finally {
       setDeployingWallet(null);
+      setWhitelistActionLabel(null);
     }
-  };
+  }, [approve, approvalError, whitelist]);
 
-  const rejectArtist = async (id: string) => {
+  const rejectArtist = useCallback(async (id: string) => {
     const entry = whitelist.find(e => e.id === id);
     if (!entry) return;
 
+    setDeployingWallet(entry.wallet);
+    setWhitelistActionLabel(`Rejecting ${entry.name}`);
     setWhitelist(p => p.map(e => e.id === id ? { ...e, status: "rejected" } : e));
 
     try {
-      await dbUpdateWhitelistEntry(id, {
-        status: "rejected",
-        approved_at: null,
-      });
+      const result = await reject(entry.wallet);
+      if (!result) {
+        throw new Error(rejectionError || "Failed to reject artist");
+      }
+
+      const updatedEntries = await getServerArtistWhitelist();
+      setWhitelist(updatedEntries);
+      toast.error("Artist rejected");
     } catch (error) {
       console.error("❌ Failed to reject artist via admin API:", error);
       setWhitelist(p => p.map(e => e.id === id ? { ...e, status: entry.status } : e));
       toast.error(error instanceof Error ? error.message : "Failed to reject artist");
-      return;
+    } finally {
+      setDeployingWallet(null);
+      setWhitelistActionLabel(null);
     }
+  }, [reject, rejectionError, whitelist]);
 
-    toast.error("Artist rejected");
-  };
-
-  const removeArtist = async (id: string) => {
+  const removeArtist = useCallback(async (id: string) => {
     const entry = whitelist.find(e => e.id === id);
     if (!entry) return;
 
-    setWhitelist(p => p.filter(e => e.id !== id));
+    setRemovingWallet(entry.wallet);
+    setWhitelistActionLabel(`Removing ${entry.name}`);
 
     try {
       await dbDeleteWhitelistEntry(id);
+      setWhitelist(p => p.filter(e => e.id !== id));
+      toast.info("Artist removed");
     } catch (error) {
       console.error("❌ Failed to remove artist via admin API:", error);
-      setWhitelist(p => [...p, entry]);
       toast.error(error instanceof Error ? error.message : "Failed to remove artist");
       return;
+    } finally {
+      setRemovingWallet(null);
+      setWhitelistActionLabel(null);
     }
-
-    toast.info("Artist removed");
-  };
+  }, [whitelist]);
   const addArtist = async () => {
     // Validate wallet address
     if (!isValidWalletAddress(newWallet)) {
@@ -705,7 +935,7 @@ const AdminPage = () => {
   };
 
   // Product actions
-  const togglePublish = (id: string) => {
+  const togglePublish = useCallback((id: string) => {
     const updated = [...products].map(prod => {
       if (prod.id === id) {
         const newStatus = prod.status === "active" ? "draft" : (prod.stock > 0 ? "active" : "out_of_stock") as "active" | "draft" | "out_of_stock";
@@ -718,19 +948,19 @@ const AdminPage = () => {
       return prod;
     }) as MarketProduct[];
     setProducts(updated);
-  };
-  const removeProduct = (id: string) => {
+  }, [products]);
+  const removeProduct = useCallback((id: string) => {
     setProducts(p => p.filter(prod => prod.id !== id));
     // Optionally delete from Supabase too
     toast.info("Product removed");
-  };
-  const saveProduct = (updated: MarketProduct) => {
+  }, []);
+  const saveProduct = useCallback((updated: MarketProduct) => {
     setProducts(p => p.map(prod => prod.id === updated.id ? updated : prod));
     void saveProductToDBs(updated);
-  };
+  }, []);
 
   // Order actions
-  const updateOrder = async (id: string, status: Order["status"], trackingCode: string) => {
+  const updateOrder = useCallback(async (id: string, status: Order["status"], trackingCode: string) => {
     setOrders(p => p.map(o => o.id === id ? { ...o, status, trackingCode } : o));
     try {
       await dbUpdateOrder(id, {
@@ -741,14 +971,33 @@ const AdminPage = () => {
       console.error("Failed to update order in Supabase:", error);
       toast.error("Order update failed");
     }
-  };
+  }, []);
 
   // Counts for badges
-  const pendingWhitelist = whitelist.filter(e => e.status === "pending").length;
-  const pendingOrders = orders.filter(o => o.status === "pending").length;
-  const approvedArtists = whitelist.filter(e => e.status === "approved").length;
-  const filteredWhitelist = whitelist.filter(e => whitelistFilter === "all" || e.status === whitelistFilter);
+  const pendingWhitelist = useMemo(() => whitelist.filter(e => e.status === "pending").length, [whitelist]);
+  const pendingOrders = useMemo(() => orders.filter(o => o.status === "pending").length, [orders]);
+  const approvedArtists = useMemo(() => whitelist.filter(e => e.status === "approved").length, [whitelist]);
+  const whitelistStatusCounts = useMemo(() => ({
+    pending: whitelist.filter((entry) => entry.status === "pending").length,
+    approved: whitelist.filter((entry) => entry.status === "approved").length,
+    rejected: whitelist.filter((entry) => entry.status === "rejected").length,
+  }), [whitelist]);
+  const filteredWhitelist = useMemo(
+    () => whitelist.filter(e => whitelistFilter === "all" || e.status === whitelistFilter),
+    [whitelist, whitelistFilter]
+  );
   const analytics = useMemo(() => {
+    if (activeTab !== "analytics") {
+      return {
+        visitSeries: [],
+        currentWindow: 0,
+        visitorGrowth: 0,
+        topArtist: null,
+        topProduct: null,
+        topViewedArt: null,
+      };
+    }
+
     const snapshot = getAnalyticsSnapshot();
     const visitSeries = getRecentVisitSeries(14);
     const currentWindow = visitSeries.slice(-7).reduce((sum, day) => sum + day.visits, 0);
@@ -792,7 +1041,7 @@ const AdminPage = () => {
       topProduct,
       topViewedArt,
     };
-  }, [products, supabaseDrops]);
+  }, [activeTab, products, supabaseDrops]);
 
   useEffect(() => {
     // Only sync cache when data is loaded from server, not on optimistic updates
@@ -858,13 +1107,19 @@ const AdminPage = () => {
           </TabsList>
 
           {/* ── Artists / Whitelist ── */}
-          <TabsContent value="whitelist" className="space-y-3">
+          {activeTab === "whitelist" && <TabsContent value="whitelist" className="space-y-3">
+            {whitelistActionLabel && (
+              <div className="flex items-center gap-2 rounded-xl border border-primary/20 bg-primary/5 px-3 py-2 text-xs text-foreground">
+                <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
+                <span>{whitelistActionLabel}...</span>
+              </div>
+            )}
             {/* Filter pills */}
             <div className="flex gap-2 overflow-x-auto no-scrollbar">
               {(["all", "pending", "approved", "rejected"] as const).map(f => (
                 <button key={f} onClick={() => setWhitelistFilter(f)}
                   className={`px-3 py-1 rounded-full text-xs whitespace-nowrap capitalize transition-colors ${whitelistFilter === f ? "bg-primary text-primary-foreground" : "bg-secondary text-muted-foreground"}`}>
-                  {f} {f !== "all" && `(${whitelist.filter(e => e.status === f).length})`}
+                  {f} {f !== "all" && `(${whitelistStatusCounts[f]})`}
                 </button>
               ))}
             </div>
@@ -912,70 +1167,21 @@ const AdminPage = () => {
             )}
 
             {filteredWhitelist.map(entry => (
-              <div key={entry.id} className="p-4 rounded-2xl bg-card border border-border">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <p className="text-sm font-semibold text-foreground">{entry.name}</p>
-                      <Badge variant="outline" className="text-[10px]">{entry.tag}</Badge>
-                      <span className={`text-[10px] font-medium px-2 py-0.5 rounded-full capitalize ${whitelistColor[entry.status]}`}>
-                        {entry.status}
-                      </span>
-                    </div>
-                    <p className="text-xs font-mono text-muted-foreground mt-1 truncate">{entry.wallet}</p>
-                    <p className="text-[10px] text-muted-foreground mt-0.5">Added {entry.joinedAt}</p>
-                    {(entry as WhitelistEntryWithContract).contract_address && (
-                      <div className="mt-2 p-2 rounded-lg bg-green-50 dark:bg-green-950 border border-green-200 dark:border-green-800">
-                        <p className="text-[9px] font-semibold text-green-700 dark:text-green-300 mb-1">Contract Deployed</p>
-                        <p className="text-[9px] font-mono text-green-600 dark:text-green-400 break-all">{(entry as WhitelistEntryWithContract).contract_address}</p>
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="flex items-center gap-1.5 shrink-0">
-                    {entry.status === "pending" && (
-                      <>
-                        <button 
-                          onClick={() => approveArtist(entry.id)}
-                          disabled={isApproving && deployingWallet === entry.wallet}
-                          className="p-2 rounded-xl bg-green-100 text-green-700 hover:bg-green-200 transition-colors disabled:opacity-50 disabled:cursor-waiting" 
-                          title="Approve">
-                          {isApproving && deployingWallet === entry.wallet ? (
-                            <Loader2 className="h-4 w-4 animate-spin" />
-                          ) : (
-                            <CheckCircle2 className="h-4 w-4" />
-                          )}
-                        </button>
-                        <button onClick={() => rejectArtist(entry.id)}
-                          className="p-2 rounded-xl bg-red-100 text-red-700 hover:bg-red-200 transition-colors" title="Reject">
-                          <XCircle className="h-4 w-4" />
-                        </button>
-                      </>
-                    )}
-                    {entry.status === "approved" && (
-                      <button onClick={() => rejectArtist(entry.id)}
-                        className="p-2 rounded-xl bg-secondary text-muted-foreground hover:bg-red-50 hover:text-red-600 transition-colors" title="Revoke">
-                        <XCircle className="h-4 w-4" />
-                      </button>
-                    )}
-                    {entry.status === "rejected" && (
-                      <button onClick={() => approveArtist(entry.id)}
-                        className="p-2 rounded-xl bg-secondary text-muted-foreground hover:bg-green-50 hover:text-green-700 transition-colors" title="Re-approve">
-                        <CheckCircle2 className="h-4 w-4" />
-                      </button>
-                    )}
-                    <button onClick={() => removeArtist(entry.id)}
-                      className="p-2 rounded-xl bg-secondary text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors" title="Remove">
-                      <Trash2 className="h-4 w-4" />
-                    </button>
-                  </div>
-                </div>
-              </div>
+              <WhitelistRow
+                key={entry.id}
+                entry={entry as WhitelistEntryWithContract}
+                isApproving={isApproving && deployingWallet === entry.wallet}
+                isRejecting={isRejecting && deployingWallet === entry.wallet}
+                isRemoving={removingWallet === entry.wallet}
+                onApprove={approveArtist}
+                onReject={rejectArtist}
+                onRemove={removeArtist}
+              />
             ))}
-          </TabsContent>
+          </TabsContent>}
 
           {/* ── Products ── */}
-          <TabsContent value="products" className="space-y-3">
+          {activeTab === "products" && <TabsContent value="products" className="space-y-3">
             <AddProductDialog onAdd={async (p, wallet) => { 
               try {
                 setProducts(prev => [...prev, p]);
@@ -1062,10 +1268,10 @@ const AdminPage = () => {
                 </div>
               </div>
             ))}
-          </TabsContent>
+          </TabsContent>}
 
           {/* ── Orders ── */}
-          <TabsContent value="orders" className="space-y-3">
+          {activeTab === "orders" && <TabsContent value="orders" className="space-y-3">
             <div className="flex gap-2 overflow-x-auto no-scrollbar pb-1">
               {(["all", "pending", "shipped", "delivered", "cancelled"] as const).map(f => (
                 <button key={f}
@@ -1106,9 +1312,9 @@ const AdminPage = () => {
                 </div>
               </div>
             ))}
-          </TabsContent>
+          </TabsContent>}
 
-          <TabsContent value="analytics" className="space-y-4">
+          {activeTab === "analytics" && <TabsContent value="analytics" className="space-y-4">
             <div className="grid grid-cols-2 gap-3">
               <div className="p-4 rounded-2xl bg-card border border-border">
                 <div className="flex items-center gap-2 mb-2">
@@ -1188,7 +1394,7 @@ const AdminPage = () => {
                 </>
               )}
             </div>
-          </TabsContent>
+          </TabsContent>}
         </Tabs>
       </div>
     </div>

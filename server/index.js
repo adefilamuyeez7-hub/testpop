@@ -5,7 +5,6 @@ import cookieParser from "cookie-parser";
 import multer from "multer";
 import jwt from "jsonwebtoken";
 import rateLimit from "express-rate-limit";
-import dotenv from "dotenv";
 import { createClient } from "@supabase/supabase-js";
 import { ethers } from "ethers";
 import fs from "fs";
@@ -25,15 +24,40 @@ const frontendDistPath =
   frontendDistCandidates[0];
 const frontendIndexPath = path.join(frontendDistPath, "index.html");
 
+function loadEnvFile(envPath) {
+  if (!fs.existsSync(envPath)) return;
+
+  const raw = fs.readFileSync(envPath, "utf8");
+
+  for (const line of raw.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+
+    const separatorIndex = trimmed.indexOf("=");
+    if (separatorIndex === -1) continue;
+
+    const key = trimmed.slice(0, separatorIndex).trim();
+    if (!key || process.env[key] !== undefined) continue;
+
+    let value = trimmed.slice(separatorIndex + 1).trim();
+    if (
+      (value.startsWith('"') && value.endsWith('"')) ||
+      (value.startsWith("'") && value.endsWith("'"))
+    ) {
+      value = value.slice(1, -1);
+    }
+
+    process.env[key] = value;
+  }
+}
+
 [
   path.resolve(process.cwd(), ".env.local"),
   path.resolve(process.cwd(), ".env"),
   path.resolve(__dirname, ".env.local"),
   path.resolve(__dirname, ".env"),
 ].forEach((envPath) => {
-  if (fs.existsSync(envPath)) {
-    dotenv.config({ path: envPath, override: false });
-  }
+  loadEnvFile(envPath);
 });
 
 const {
@@ -101,6 +125,41 @@ function requireEnv(value, label) {
   return value;
 }
 
+function isPlaceholderSecret(value = "") {
+  const normalized = String(value).trim().toLowerCase();
+  return (
+    !normalized ||
+    normalized.includes("your_") ||
+    normalized.includes("[your") ||
+    normalized.includes("change_in_production") ||
+    normalized.includes("placeholder")
+  );
+}
+
+function isValidPrivateKey(value = "") {
+  const normalized = String(value).trim();
+  return /^0x[0-9a-fA-F]{64}$/.test(normalized);
+}
+
+function getContractDeploymentReadiness() {
+  const missing = [];
+  const invalid = [];
+
+  if (!DEPLOYER_PRIVATE_KEY) missing.push("DEPLOYER_PRIVATE_KEY");
+  if (!BASE_SEPOLIA_RPC_URL) missing.push("BASE_SEPOLIA_RPC_URL");
+  if (!ART_DROP_FACTORY_ADDRESS) missing.push("ART_DROP_FACTORY_ADDRESS");
+
+  if (DEPLOYER_PRIVATE_KEY && (isPlaceholderSecret(DEPLOYER_PRIVATE_KEY) || !isValidPrivateKey(DEPLOYER_PRIVATE_KEY))) {
+    invalid.push("DEPLOYER_PRIVATE_KEY");
+  }
+
+  return {
+    ready: missing.length === 0 && invalid.length === 0,
+    missing,
+    invalid,
+  };
+}
+
 // ──────────────────────────────────────────────
 //  Nonce Management (Supabase-backed for multi-instance support)
 // ──────────────────────────────────────────────
@@ -166,13 +225,12 @@ async function cleanupExpiredNonces() {
   }
 }
 
-function makeChallengeMessage(wallet, nonce, issuedAtIso) {
+function makeChallengeMessage(wallet, nonce) {
   return [
     "PopUp secure sign-in",
     "",
     `Wallet: ${wallet}`,
     `Nonce: ${nonce}`,
-    `Issued At: ${issuedAtIso}`,
     "",
     "This signature proves wallet ownership for PopUp API access.",
     "It does not move funds or approve token transfers.",
@@ -677,7 +735,7 @@ const authChallengeImpl = async (req, res) => {
 
     await cleanupExpiredNonces();
     const { nonce, issuedAt } = await issueNonce(wallet);
-    const message = makeChallengeMessage(wallet, nonce, issuedAt);
+    const message = makeChallengeMessage(wallet, nonce);
 
     return res.json({ wallet, nonce, issuedAt, message });
   } catch (error) {
@@ -704,7 +762,7 @@ const authVerifyImpl = async (req, res) => {
     await cleanupExpiredNonces();
     const nonceRecord = await getValidNonceRecord(wallet, nonce);
 
-    const message = makeChallengeMessage(wallet, nonceRecord.nonce, nonceRecord.issued_at);
+    const message = makeChallengeMessage(wallet, nonceRecord.nonce);
     const recovered = normalizeWallet(ethers.verifyMessage(message, signature));
 
     if (recovered !== wallet) {
@@ -1113,13 +1171,72 @@ const approveArtistImpl = async (req, res) => {
     const artistData = await ensureArtistProfile(normalized);
     const latestApplication = await getLatestArtistApplication(normalized);
 
-    // Update whitelist status
+    const artistName = artistData.name || latestApplication?.artist_name || normalized;
+
+    // Provision onchain first so approve+deploy acts like a single workflow.
+    let onchainUpdate = null;
+    let contractAddress = artistData.contract_address;
+    let deploymentTx = artistData.contract_deployment_tx;
+    let deploymentError = null;
+    const needsOnchainProvision = approve && deployContract;
+
+    if (needsOnchainProvision) {
+      const deploymentReadiness = getContractDeploymentReadiness();
+
+      if (!deploymentReadiness.ready) {
+        const configIssues = [
+          deploymentReadiness.missing.length
+            ? `missing ${deploymentReadiness.missing.join(", ")}`
+            : null,
+          deploymentReadiness.invalid.length
+            ? `invalid ${deploymentReadiness.invalid.join(", ")}`
+            : null,
+        ].filter(Boolean);
+
+        return res.status(500).json({
+          error: `Contract deployment configuration error: ${configIssues.join("; ")}`,
+        });
+      }
+
+      try {
+        onchainUpdate = await setArtistApprovalOnchain(normalized, true);
+        console.log("✅ Artist approval set onchain:", normalized);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Unknown onchain approval error";
+        console.error("❌ Onchain approval error:", err);
+        return res.status(500).json({ error: `Onchain approval failed: ${message}` });
+      }
+
+      if (!contractAddress) {
+        try {
+          const deployment = await deployArtistContractForWallet(normalized);
+          contractAddress = deployment.contractAddress;
+          deploymentTx = deployment.deploymentTx;
+          console.log("🚀 Contract deployed for artist:", normalized);
+          console.log("   Contract address:", contractAddress);
+        } catch (err) {
+          deploymentError = err instanceof Error ? err.message : "Unknown deployment error";
+          console.error("❌ Contract deployment error:", err);
+
+          try {
+            await setArtistApprovalOnchain(normalized, false);
+            console.log("🔄 Reverted onchain approval after deployment failure:", normalized);
+          } catch (rollbackErr) {
+            console.error("❌ Failed to rollback onchain approval:", rollbackErr);
+          }
+
+          return res.status(500).json({ error: `Contract deployment failed: ${deploymentError}` });
+        }
+      }
+    }
+
+    // Update whitelist status only after the combined approve+deploy flow succeeds.
     const { error: whitelistError } = await supabase
       .from("whitelist")
       .upsert(
         {
           wallet: normalized,
-          name: artistData.name || latestApplication?.artist_name || normalized,
+          name: artistName,
           tag: artistData.tag || null,
           status: approve ? "approved" : "rejected",
           approved_at: approve ? now : null,
@@ -1142,54 +1259,6 @@ const approveArtistImpl = async (req, res) => {
       null
     );
 
-    // Update onchain whitelist (ArtDropFactory contract)
-    let onchainUpdate = null;
-    if (approve && deployContract) {
-      try {
-        onchainUpdate = await setArtistApprovalOnchain(normalized, true);
-        console.log("✅ Artist approval set onchain:", normalized);
-      } catch (err) {
-        console.warn("⚠️ Onchain approval warning (non-blocking):", err.message);
-        // Don't fail the entire operation if onchain update fails
-      }
-    }
-
-    // If approving and contract not deployed, attempt deployment
-    let contractAddress = artistData.contract_address;
-    let deploymentTx = artistData.contract_deployment_tx;
-    let deploymentError = null;
-
-    if (approve && deployContract && !contractAddress) {
-      try {
-        const deployment = await deployArtistContractForWallet(normalized);
-        contractAddress = deployment.contractAddress;
-        deploymentTx = deployment.deploymentTx;
-        console.log("🚀 Contract deployed for artist:", normalized);
-        console.log("   Contract address:", contractAddress);
-      } catch (err) {
-        console.error("❌ Contract deployment error:", err);
-        deploymentError = err instanceof Error ? err.message : "Unknown deployment error";
-        
-        // ROLLBACK: If deployment failed after onchain approval, revert the approval
-        if (onchainUpdate) {
-          try {
-            console.log("🔄 Rolling back onchain approval due to deployment failure...");
-            await setArtistApprovalOnchain(normalized, false);
-            console.log("✅ Onchain approval reverted");
-          } catch (rollbackErr) {
-            console.error("❌ CRITICAL: Failed to rollback onchain approval:", rollbackErr);
-            // Continue anyway - we'll return the error
-          }
-        }
-        
-        // Return error to client
-        return res.status(500).json({ 
-          error: `Deployment failed: ${deploymentError}. Approval has been reverted.`,
-          deploymentError,
-        });
-      }
-    }
-
     // Update artist record with deployment status
     const updatePayload = {
       updated_at: now,
@@ -1206,7 +1275,7 @@ const approveArtistImpl = async (req, res) => {
       .upsert(
         {
           wallet: normalized,
-          name: artistData.name || latestApplication?.artist_name || normalized,
+          name: artistName,
           bio: artistData.bio || latestApplication?.bio || null,
           tag: artistData.tag || null,
           twitter_url: artistData.twitter_url || latestApplication?.twitter_url || null,
@@ -1252,6 +1321,7 @@ const approveArtistImpl = async (req, res) => {
         error: deploymentError,
       },
       onchain: onchainUpdate,
+      warning: null,
     });
   } catch (error) {
     console.error("❌ Approval error:", error);

@@ -501,7 +501,6 @@ const placeOrder = async () => {
       return;
     }
     setIsPlacingOrder(true);
-    await new Promise(r => setTimeout(r, 1500));
 
     const newOrder: Order = {
       id: `ORD-${Date.now().toString(36).toUpperCase()}`,

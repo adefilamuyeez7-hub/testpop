@@ -1,16 +1,14 @@
 import { useEffect, useState, useCallback } from "react";
 import {
   useAccount,
-  useConnect,
   useDisconnect,
   useBalance,
   useReadContract,
   useWriteContract,
   useWaitForTransactionReceipt,
 } from "wagmi";
-import { injected, walletConnect, coinbaseWallet, metaMask } from "wagmi/connectors";
 import { createPublicClient, http, decodeEventLog, parseEther, getAddress } from "viem";
-import { ACTIVE_CHAIN, appKit } from "@/lib/wagmi";
+import { ACTIVE_CHAIN } from "@/lib/wagmi";
 import { ART_DROP_ABI, ART_DROP_ADDRESS } from "@/lib/contracts/artDrop";
 import { ARTIST_DROP_ABI } from "@/lib/contracts/artDropArtist";
 import { POAP_CAMPAIGN_ABI, POAP_CAMPAIGN_ADDRESS } from "@/lib/contracts/poapCampaign";
@@ -18,18 +16,18 @@ import { POAP_CAMPAIGN_ABI, POAP_CAMPAIGN_ADDRESS } from "@/lib/contracts/poapCa
 // ── Wallet ──────────────────────────────────────
 export function useWallet() {
   const { address, isConnected, chain } = useAccount();
-  const { connect, connectors, isPending: isConnecting } = useConnect();
   const { disconnect } = useDisconnect();
   const { data: balance } = useBalance({ address });
 
-  const connectWallet = () => {
-    appKit.open();
+  const connectWallet = async () => {
+    const { openAppKit } = await import("@/lib/appKit");
+    await openAppKit();
   };
 
   return {
     address,
     isConnected,
-    isConnecting,
+    isConnecting: false,
     chain,
     balance,
     connectWallet,

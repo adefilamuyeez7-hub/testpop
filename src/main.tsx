@@ -1,6 +1,5 @@
 import { createRoot } from "react-dom/client";
 import App from "./App.tsx";
-import "@/lib/wagmi"; // Initialize AppKit
 import ErrorBoundary from "./components/ErrorBoundary.tsx";
 import { initializeFromSupabase } from "@/lib/artistStore";
 import "./index.css";
