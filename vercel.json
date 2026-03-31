@@ -20,12 +20,12 @@
       "dest": "server/api/index.js"
     },
     {
-      "src": "/(.*\\.(js|css|svg|png|jpg|jpeg|gif|webp|woff|woff2|ttf|eot|ico))",
-      "dest": "/dist/$1"
+      "src": "/(.*\\.(js|css|svg|png|jpg|jpeg|gif|webp|woff|woff2|ttf|eot|ico|json))",
+      "dest": "/$1"
     },
     {
-      "src": "/(.*)",
-      "dest": "/dist/index.html"
+      "src": "/.*",
+      "dest": "/index.html"
     }
   ]
 }
