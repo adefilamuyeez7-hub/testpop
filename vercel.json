@@ -1,4 +1,32 @@
 {
+  "buildCommand": "npm run build",
+  "builds": [
+    {
+      "src": "server/api/index.js",
+      "use": "@vercel/node",
+      "config": {
+        "maxLambdaSize": "50mb",
+        "nodeVersion": "20.x"
+      }
+    },
+    {
+      "src": "package.json",
+      "use": "@vercel/static-build",
+      "config": {
+        "distDir": "dist"
+      }
+    }
+  ],
+  "routes": [
+    {
+      "src": "/api/?(.*)",
+      "dest": "server/api/index.js"
+    },
+    {
+      "src": "/(.*)",
+      "dest": "/index.html"
+    }
+  ],
   "rewrites": [
     {
       "source": "/(.*)",
@@ -15,5 +43,9 @@
         }
       ]
     }
-  ]
+  ],
+  "env": {
+    "NODE_ENV": "production",
+    "FRONTEND_ORIGIN": "https://testpop-one.vercel.app"
+  }
 }
