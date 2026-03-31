@@ -1,13 +1,13 @@
 {
-  "buildCommand": "npm run build:vercel",
+  "buildCommand": "npm run build",
+  "outputDirectory": "dist",
   "builds": [
     {
       "src": "server/api/index.js",
       "use": "@vercel/node",
       "config": {
         "maxLambdaSize": "50mb",
-        "nodeVersion": "20.x",
-        "includeFiles": "dist/**"
+        "nodeVersion": "20.x"
       }
     }
   ],
@@ -21,8 +21,16 @@
       "dest": "server/api/index.js"
     },
     {
-      "src": "/(.*)",
+      "src": "/debug/(.*)",
       "dest": "server/api/index.js"
+    },
+    {
+      "src": "/(.*\\.(js|css|svg|png|jpg|jpeg|gif|webp|woff|woff2|ttf|eot|ico|json|webmanifest|map)?)$",
+      "dest": "/$1"
+    },
+    {
+      "src": "/.*",
+      "dest": "/index.html"
     }
   ]
 }
