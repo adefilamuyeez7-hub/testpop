@@ -1403,7 +1403,7 @@ const approveArtistImpl = async (req, res) => {
     }
 
     // Log admin action (audit trail)
-    await supabase.from("admin_audit_log").insert({
+    const { error: auditLogError } = await supabase.from("admin_audit_log").insert({
       admin_wallet: req.auth.wallet,
       action: "approve_artist",
       target_wallet: normalized,
@@ -1414,7 +1414,11 @@ const approveArtistImpl = async (req, res) => {
         deploymentTx,
         updateWarning,
       },
-    }).catch((err) => console.warn("Audit log warning:", err.message));
+    });
+
+    if (auditLogError) {
+      console.warn("Audit log warning:", auditLogError.message);
+    }
 
     return res.json({
       success: true,
@@ -1502,7 +1506,7 @@ const rejectArtistImpl = async (req, res) => {
     }
 
     // Log admin action (audit trail)
-    await supabase.from("admin_audit_log").insert({
+    const { error: auditLogError } = await supabase.from("admin_audit_log").insert({
       admin_wallet: req.auth.wallet,
       action: "reject_artist",
       target_wallet: normalized,
@@ -1510,7 +1514,11 @@ const rejectArtistImpl = async (req, res) => {
       details: {
         reason,
       },
-    }).catch((err) => console.warn("Audit log warning:", err.message));
+    });
+
+    if (auditLogError) {
+      console.warn("Audit log warning:", auditLogError.message);
+    }
 
     return res.json({
       success: true,
