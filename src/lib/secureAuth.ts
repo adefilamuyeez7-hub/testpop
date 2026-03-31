@@ -7,6 +7,8 @@ import {
 import { SECURE_API_BASE } from "@/lib/apiBase";
 
 const secureApiBaseUrl = SECURE_API_BASE;
+const AUTH_REQUEST_TIMEOUT_MS = 15000;
+const SIGNATURE_TIMEOUT_MS = 45000;
 
 export type SecureSession = {
   wallet: string;
@@ -29,18 +31,60 @@ function requireSecureApi() {
   }
 }
 
+async function fetchWithTimeout(input: RequestInfo | URL, init: RequestInit, timeoutMs: number) {
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    return await fetch(input, {
+      ...init,
+      signal: controller.signal,
+    });
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") {
+      throw new Error(`Request timed out after ${Math.round(timeoutMs / 1000)}s`);
+    }
+
+    throw error;
+  } finally {
+    window.clearTimeout(timeoutId);
+  }
+}
+
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+  let timeoutId: number | undefined;
+
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeoutId = window.setTimeout(() => {
+      reject(new Error(message));
+    }, timeoutMs);
+  });
+
+  try {
+    return await Promise.race([promise, timeoutPromise]);
+  } finally {
+    if (timeoutId !== undefined) {
+      window.clearTimeout(timeoutId);
+    }
+  }
+}
+
 export async function requestWalletChallenge(wallet: string): Promise<ChallengeResponse> {
   requireSecureApi();
 
   const url = `${secureApiBaseUrl}/auth/challenge`;
   console.log("📡 Requesting challenge from:", url);
 
-  const response = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ wallet }),
-    credentials: "include",
-  });
+  const response = await fetchWithTimeout(
+    url,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ wallet }),
+      credentials: "include",
+    },
+    AUTH_REQUEST_TIMEOUT_MS
+  );
 
   if (!response.ok) {
     const errorText = await response.text();
@@ -58,10 +102,14 @@ export async function signChallengeMessage(message: string, wallet: string): Pro
     throw new Error("No injected wallet provider found for secure signing.");
   }
 
-  const signature = await ethereum.request({
-    method: "personal_sign",
-    params: [message, wallet],
-  });
+  const signature = await withTimeout(
+    ethereum.request({
+      method: "personal_sign",
+      params: [message, wallet],
+    }) as Promise<unknown>,
+    SIGNATURE_TIMEOUT_MS,
+    "Wallet signature request timed out. Reopen your wallet and try again."
+  );
 
   if (!signature || typeof signature !== "string") {
     throw new Error("Wallet did not return a signature.");
@@ -80,12 +128,16 @@ export async function verifyWalletChallenge(
   const url = `${secureApiBaseUrl}/auth/verify`;
   console.log("📡 Verifying challenge at:", url);
 
-  const response = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ wallet, signature, nonce }),
-    credentials: "include",
-  });
+  const response = await fetchWithTimeout(
+    url,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ wallet, signature, nonce }),
+      credentials: "include",
+    },
+    AUTH_REQUEST_TIMEOUT_MS
+  );
 
   if (!response.ok) {
     const errorText = await response.text();

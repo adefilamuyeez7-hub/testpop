@@ -375,18 +375,29 @@ function isValidOrigin(origin) {
 }
 
 // Rate limiters for security
-const authLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 5, // 5 requests per wallet/IP per window
-  keyGenerator: (req) => req.body?.wallet || req.ip || 'unknown',
-  message: 'Too many authentication attempts, please try again later',
-  standardHeaders: true,
-  legacyHeaders: false,
-  handler: (req, res) => {
-    console.warn(`🚨 Rate limit exceeded for ${req.body?.wallet || req.ip}`);
-    res.status(429).json({ error: 'Too many authentication attempts, please try again later' });
-  },
-});
+function getAuthRateLimitKey(req) {
+  const wallet = normalizeWallet(req.body?.wallet);
+  const actor = wallet || req.ip || 'unknown';
+  return `${req.path}:${actor}`;
+}
+
+function createAuthLimiter(max, label) {
+  return rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max,
+    keyGenerator: (req) => getAuthRateLimitKey(req),
+    message: 'Too many authentication attempts, please try again later',
+    standardHeaders: true,
+    legacyHeaders: false,
+    handler: (req, res) => {
+      console.warn(`🚨 ${label} rate limit exceeded for ${getAuthRateLimitKey(req)}`);
+      res.status(429).json({ error: 'Too many authentication attempts, please try again later' });
+    },
+  });
+}
+
+const authChallengeLimiter = createAuthLimiter(10, 'Auth challenge');
+const authVerifyLimiter = createAuthLimiter(10, 'Auth verify');
 
 const uploadLimiter = rateLimit({
   windowMs: 60 * 60 * 1000, // 1 hour
@@ -816,8 +827,8 @@ const authChallengeImpl = async (req, res) => {
 };
 
 // Register at both /auth/challenge and /api/auth/challenge
-app.post("/auth/challenge", authLimiter, authChallengeImpl);
-app.post("/api/auth/challenge", authLimiter, authChallengeImpl);
+app.post("/auth/challenge", authChallengeLimiter, authChallengeImpl);
+app.post("/api/auth/challenge", authChallengeLimiter, authChallengeImpl);
 
 const authVerifyImpl = async (req, res) => {
   try {
@@ -870,8 +881,8 @@ const authVerifyImpl = async (req, res) => {
 };
 
 // Register at both /auth/verify and /api/auth/verify
-app.post("/auth/verify", authLimiter, authVerifyImpl);
-app.post("/api/auth/verify", authLimiter, authVerifyImpl);
+app.post("/auth/verify", authVerifyLimiter, authVerifyImpl);
+app.post("/api/auth/verify", authVerifyLimiter, authVerifyImpl);
 
 app.get("/auth/session", authRequired, (req, res) => {
   return res.json({ wallet: req.auth.wallet, role: req.auth.role });
