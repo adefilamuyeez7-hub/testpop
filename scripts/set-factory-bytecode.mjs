@@ -12,12 +12,13 @@ async function main() {
 
   console.log("\n=== SET BYTECODE ON ARTDROPFACTORY ===\n");
 
-  if (!process.argv[2]) {
-    console.error("❌ Usage: npx hardhat run scripts/set-factory-bytecode.mjs --network baseSepolia -- <factory-address>");
+  const factoryAddress = process.env.FACTORY_ADDRESS || process.argv[2];
+
+  if (!factoryAddress) {
+    console.error("❌ Usage: FACTORY_ADDRESS=0x... npx hardhat run scripts/set-factory-bytecode.mjs --network baseSepolia");
     process.exit(1);
   }
 
-  const factoryAddress = process.argv[2];
   console.log(`📝 Factory Address: ${factoryAddress}\n`);
 
   const [deployer] = await ethers.getSigners();

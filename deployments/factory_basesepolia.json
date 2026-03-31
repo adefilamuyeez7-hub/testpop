@@ -1,11 +1,11 @@
 {
   "network": "baseSepolia",
   "chainId": 84532,
-  "deployer": "0x4B393730eFc0E3C1E0C0944fbC05EdEF4eE58092",
+  "deployer": "0x3d9A4F8E9bE795c7e82Da4FEd21cDD0D5234513E",
   "factory": {
-    "address": "0xFd58d0f5F0423201Edb756d0f44D667106fc5705",
-    "deploymentTx": "0x58a24c56064d0196e435db0388d63353c8ff2bfc57159d9b4edc8575f3c527a1"
+    "address": "0x2d044a0AFAbE0C07Ee12b8f4c18691b82fb6cF01",
+    "deploymentTx": "0x816bcff6422df98656455ef12ee77a694903275f57f51de1f30a8718f16abe38"
   },
-  "timestamp": "2026-03-23T15:59:09.147Z",
-  "note": "Run: npx hardhat run scripts/set-factory-bytecode.mjs --network baseSepolia -- 0xFd58d0f5F0423201Edb756d0f44D667106fc5705"
+  "timestamp": "2026-03-31T15:46:27.420Z",
+  "note": "Run: npx hardhat run scripts/set-factory-bytecode.mjs --network baseSepolia -- 0x2d044a0AFAbE0C07Ee12b8f4c18691b82fb6cF01"
 }

@@ -28,7 +28,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // Configuration
 const RPC_URL = 'https://sepolia.base.org';
 const ADDRESSES_FILE = path.join(__dirname, '../deployed-addresses.json');
-const ARTIFACTS_DIR = path.join(__dirname, '../artifacts/contracts');
+const DEPLOYMENT_FILE = path.join(__dirname, '../deployments/factory_basesepolia.json');
 
 // Validate inputs
 if (process.argv.length < 3) {
@@ -65,12 +65,17 @@ async function main() {
     throw new Error('PRIVATE_KEY environment variable is required');
   }
 
-  if (!fs.existsSync(ADDRESSES_FILE)) {
-    throw new Error(`Deployed addresses file not found: ${ADDRESSES_FILE}`);
-  }
-
-  const deployedAddresses = JSON.parse(fs.readFileSync(ADDRESSES_FILE, 'utf8'));
-  const FACTORY_ADDRESS = deployedAddresses.factory || deployedAddresses.ArtDropFactory?.address;
+  const deployedAddresses = fs.existsSync(ADDRESSES_FILE)
+    ? JSON.parse(fs.readFileSync(ADDRESSES_FILE, 'utf8'))
+    : {};
+  const deploymentInfo = fs.existsSync(DEPLOYMENT_FILE)
+    ? JSON.parse(fs.readFileSync(DEPLOYMENT_FILE, 'utf8'))
+    : {};
+  const FACTORY_ADDRESS =
+    process.env.ART_DROP_FACTORY_ADDRESS ||
+    deployedAddresses.factory ||
+    deployedAddresses.ArtDropFactory?.address ||
+    deploymentInfo.factory?.address;
   
   if (!FACTORY_ADDRESS) {
     throw new Error('Factory not deployed. Run deploy-factory-direct.mjs first');

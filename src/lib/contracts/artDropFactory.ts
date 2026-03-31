@@ -1,7 +1,11 @@
 // Contract references for ArtDropFactory
-// Deployed on Base Sepolia: https://sepolia.basescan.org/address/0xFd58d0f5F0423201Edb756d0f44D667106fc5705
+// Deployed on Base Sepolia. Override with VITE_FACTORY_ADDRESS for replacement deployments.
 
-export const FACTORY_ADDRESS = "0xFd58d0f5F0423201Edb756d0f44D667106fc5705" as const;
+export const FACTORY_ADDRESS =
+  ((import.meta.env.VITE_FACTORY_ADDRESS as string | undefined)?.trim() as
+    | `0x${string}`
+    | undefined) ??
+  ("0x2d044a0AFAbE0C07Ee12b8f4c18691b82fb6cF01" as const);
 
 export const FACTORY_ABI = [
   // Events

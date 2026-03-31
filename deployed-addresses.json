@@ -1,3 +1,11 @@
 {
-  "ProductStore": "0x835436FEe0286D6020d06BAD7B34a4B6306Dc5A7"
+  "ProductStore": "0x835436FEe0286D6020d06BAD7B34a4B6306Dc5A7",
+  "ArtDropFactory": {
+    "address": "0x2d044a0AFAbE0C07Ee12b8f4c18691b82fb6cF01",
+    "deploymentTx": "0x816bcff6422df98656455ef12ee77a694903275f57f51de1f30a8718f16abe38",
+    "bytecodeTx": "0x2595ad4fed29e4eabddb89901b54166955c77e3fd9ea49d1fccadf8d98c72390",
+    "deployedAt": "2026-03-31T15:46:27.420Z",
+    "founderWallet": "0x3d9A4F8E9bE795c7e82Da4FEd21cDD0D5234513E",
+    "network": "Base Sepolia"
+  }
 }

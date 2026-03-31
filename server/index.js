@@ -73,11 +73,15 @@ const {
   SUPABASE_JWT_SECRET,
   PINATA_JWT,
   ADMIN_WALLETS = "",
-  BASE_SEPOLIA_RPC_URL = "https://sepolia.base.org",
-  ART_DROP_FACTORY_ADDRESS = "0xFd58d0f5F0423201Edb756d0f44D667106fc5705",
-  DEPLOYER_PRIVATE_KEY,
+  BASE_SEPOLIA_RPC_URL: rawBaseSepoliaRpcUrl = "https://sepolia.base.org",
+  ART_DROP_FACTORY_ADDRESS: rawArtDropFactoryAddress = "0x2d044a0AFAbE0C07Ee12b8f4c18691b82fb6cF01",
+  DEPLOYER_PRIVATE_KEY: rawDeployerPrivateKey,
   NODE_ENV = "development",
 } = process.env;
+
+const BASE_SEPOLIA_RPC_URL = rawBaseSepoliaRpcUrl.trim();
+const ART_DROP_FACTORY_ADDRESS = rawArtDropFactoryAddress.trim();
+const DEPLOYER_PRIVATE_KEY = rawDeployerPrivateKey?.trim();
 
 const appJwtSecret = APP_JWT_SECRET || JWT_SECRET;
 
