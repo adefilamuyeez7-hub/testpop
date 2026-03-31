@@ -1,6 +1,8 @@
 {
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
+  "cleanUrls": true,
+  "trailingSlash": false,
   "builds": [
     {
       "src": "server/api/index.js",
@@ -21,12 +23,11 @@
       "dest": "server/api/index.js"
     },
     {
-      "src": "/(.*\\.(js|css|svg|png|jpg|jpeg|gif|webp|woff|woff2|ttf|eot|ico|json|webmanifest|map|br|gz)?)$",
-      "dest": "/$1",
-      "continue": true
+      "src": "/(.*\\.(js|css|svg|png|jpg|jpeg|gif|webp|woff|woff2|ttf|eot|ico|json|webmanifest|map)?)$",
+      "dest": "/$1"
     },
     {
-      "src": "/(.*)",
+      "src": "/.*",
       "dest": "/index.html"
     }
   ]

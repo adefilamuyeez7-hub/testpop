@@ -540,26 +540,6 @@ app.use(express.json({ limit: "2mb" }));
 app.use(cookieParser());
 
 // ═════════════════════════════════════════════════════════════════════════════
-// STATIC FILE SERVING - Serve frontend SPA from dist folder
-// ═════════════════════════════════════════════════════════════════════════════
-
-// Serve static files with caching headers
-app.use(express.static(path.join(__dirname, '../dist'), {
-  maxAge: '1d',
-  etag: false,
-  setHeaders: (res, filePath) => {
-    // Cache static assets (js, css, fonts) long-term with version hashes
-    if (/\.(js|css|woff|woff2|ttf|eot|ico)$/i.test(filePath)) {
-      res.set('Cache-Control', 'public, max-age=31536000, immutable');
-    }
-    // Don't cache HTML
-    else if (/\.html$/i.test(filePath)) {
-      res.set('Cache-Control', 'no-cache, no-store, must-revalidate');
-    }
-  }
-}));
-
-// ═════════════════════════════════════════════════════════════════════════════
 // URL REWRITING MIDDLEWARE - Critical for Vercel serverless
 // When Vercel routes /api/auth/challenge -> server/api/index.js,
 // the Express app receives the FULL path with /api prefix.
@@ -1346,38 +1326,13 @@ app.get("/api/admin/artists", authRequired, adminRequired, getAdminArtistsImpl);
 
 const port = Number(PORT) || 3000;
 
-// ═════════════════════════════════════════════════════════════════════════════
-// SPA FALLBACK - Serve index.html for all non-API routes
-// This allows React Router to handle client-side navigation
-// ═════════════════════════════════════════════════════════════════════════════
-app.get('*', (req, res, next) => {
-  // If it's an API route, skip to 404 handler
-  if (req.path.startsWith('/api')) {
-    return next();
-  }
-  
-  // For all other routes, serve index.html from dist
-  console.log(`📄 SPA fallback: serving index.html for path: ${req.path}`);
-  const indexPath = path.join(__dirname, '../dist/index.html');
-  
-  if (fs.existsSync(indexPath)) {
-    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-    res.setHeader('Content-Type', 'text/html');
-    return res.sendFile(indexPath);
-  }
-  
-  // If index.html doesn't exist, continue to 404 handler
-  next();
-});
-
-// 404 handler
+// 404 handler - API routes that don't match
 app.use((_req, res) => {
-  console.warn(`⚠️ 404 NOT FOUND: ${_req.method} ${_req.path} | Full URL: ${_req.originalUrl} | Protocol: ${_req.protocol}`);
+  console.warn(`⚠️ 404 NOT FOUND: ${_req.method} ${_req.path} | Full URL: ${_req.originalUrl}`);
   res.status(404).json({ 
     error: "Endpoint not found", 
     path: _req.path, 
     method: _req.method,
-    originalUrl: _req.originalUrl,
     hint: "Check that your route is defined and /api prefix is correct for Vercel"
   });
 });
