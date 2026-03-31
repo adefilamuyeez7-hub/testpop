@@ -16,12 +16,12 @@ import {
   Bell, Settings, ChevronRight, Zap, Star, ArrowUpRight,
   Upload, AlertTriangle, Wallet, DollarSign, Activity, ArrowLeft,
 } from "lucide-react";
-import { useWallet, useCreateCampaign, useCreateDrop, useGetSubscriberCountFromArtistContract } from "@/hooks/useContracts";
+import { useWallet, useCreateCampaign, useGetSubscriberCountFromArtistContract } from "@/hooks/useContracts";
+import { useCreateDropArtist } from "@/hooks/useContractsArtist";
 import { useGetArtistContract } from "@/hooks/useContractIntegrations";
 import { ipfsToHttp, uploadFileToPinata, uploadMetadataToPinata } from "@/lib/pinata";
 import { formatEther } from "viem";
 import { toast } from "sonner";
-import { ART_DROP_ADDRESS } from "@/lib/contracts/artDrop";
 import { POAP_CAMPAIGN_ADDRESS } from "@/lib/contracts/poapCampaign";
 import {
   createArtistDrop,
@@ -125,7 +125,7 @@ const CreateDropSheet = ({ open, onClose, onCreated, artistContractAddress }: { 
   const [pendingResult, setPendingResult] = useState<{ metadataUri: string; imageUri: string } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const { isConnected, connectWallet, address } = useWallet();
-  const { createDrop, createdDropId, isPending, isConfirming, isSuccess, error } = useCreateDrop();
+  const { createDrop, createdDropId, isPending, isConfirming, isSuccess, error } = useCreateDropArtist(artistContractAddress);
   const [form, setForm] = useState({ title: "", description: "", price: "", duration: "24", supply: "1", type: "buy" as Drop["type"] });
 
   const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -245,7 +245,7 @@ const CreateDropSheet = ({ open, onClose, onCreated, artistContractAddress }: { 
             image: preview,
             metadataUri: pendingResult.metadataUri,
             imageUri: pendingResult.imageUri,
-            contractAddress: ART_DROP_ADDRESS,
+            contractAddress: artistContractAddress ?? null,
             contractDropId: createdDropId,
             contractKind: "artDrop",
           });
@@ -261,7 +261,7 @@ const CreateDropSheet = ({ open, onClose, onCreated, artistContractAddress }: { 
         setIsUploading(false);
       }
     })();
-  }, [createdDropId, isSuccess, pendingResult, form, preview, address, onCreated, onClose]);
+  }, [createdDropId, isSuccess, pendingResult, form, preview, address, onCreated, onClose, artistContractAddress]);
 
   const busy = isUploading || isPending || isConfirming;
   const canNext0 = !!preview;
@@ -504,7 +504,7 @@ const ArtistStudioPage = () => {
         setDeployingArtistWallet(null);
       }
     })();
-  }, [deploymentSuccess, deploymentReceipt, deployedContractAddress, address]);
+  }, [deploymentSuccess, deploymentReceipt, deployedContractAddress, address, deploymentPending]);
 
   const handleImageFile = (field: "avatarPreview" | "bannerPreview") => (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
@@ -580,7 +580,7 @@ const ArtistStudioPage = () => {
       if (!artist.contractAddress && !deployedContractAddress) {
         toast.info("Profile saved. An admin will deploy your artist contract before you can publish drops.");
       }
-      if (false && !artist.contractAddress) {
+      if (deploymentPending && !artist.contractAddress) {
         console.log("🚀 Contract not found for artist, initiating deployment...");
         setDeployingArtistWallet(address);
         toast.info("🚀 Deploying your artist NFT contract in the background...");

@@ -15,7 +15,7 @@ export type SecureSession = {
   expiresInSeconds: number;
 };
 
-type ChallengeResponse = {
+export type ChallengeResponse = {
   wallet: string;
   nonce: string;
   issuedAt: string;
@@ -69,7 +69,11 @@ export async function signChallengeMessage(message: string, wallet: string): Pro
   return signature;
 }
 
-export async function verifyWalletChallenge(wallet: string, signature: string): Promise<SecureSession> {
+export async function verifyWalletChallenge(
+  wallet: string,
+  signature: string,
+  nonce: string
+): Promise<SecureSession> {
   requireSecureApi();
 
   const url = `${secureApiBaseUrl}/auth/verify`;
@@ -78,7 +82,7 @@ export async function verifyWalletChallenge(wallet: string, signature: string): 
   const response = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ wallet, signature }),
+    body: JSON.stringify({ wallet, signature, nonce }),
     credentials: "include",
   });
 
@@ -106,7 +110,7 @@ export async function establishSecureSession(wallet: string): Promise<SecureSess
     console.log("✅ Message signed, signature length:", signature.length);
 
     console.log("🔍 Step 3: Verifying wallet challenge...");
-    const session = await verifyWalletChallenge(wallet, signature);
+    const session = await verifyWalletChallenge(wallet, signature, challenge.nonce);
     console.log("✅ Session verified:", { wallet: session.wallet, role: session.role });
 
     console.log("💾 Step 4: Storing runtime session...");

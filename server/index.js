@@ -4,8 +4,26 @@ import helmet from "helmet";
 import cookieParser from "cookie-parser";
 import multer from "multer";
 import jwt from "jsonwebtoken";
+import dotenv from "dotenv";
 import { createClient } from "@supabase/supabase-js";
 import { ethers } from "ethers";
+import fs from "fs";
+import path from "path";
+import { fileURLToPath } from "url";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+[
+  path.resolve(process.cwd(), ".env.local"),
+  path.resolve(process.cwd(), ".env"),
+  path.resolve(__dirname, ".env.local"),
+  path.resolve(__dirname, ".env"),
+].forEach((envPath) => {
+  if (fs.existsSync(envPath)) {
+    dotenv.config({ path: envPath, override: false });
+  }
+});
 
 const {
   PORT = "8787",
@@ -81,11 +99,10 @@ async function issueNonce(wallet) {
   return { nonce, issuedAt };
 }
 
-async function verifyNonce(wallet, nonce) {
+async function getValidNonceRecord(wallet, nonce) {
   const normalized = normalizeWallet(wallet);
   const now = new Date().toISOString();
 
-  // Get unused nonce
   const { data, error: selectError } = await supabase
     .from("nonces")
     .select("id, nonce, issued_at, expires_at")
@@ -105,17 +122,6 @@ async function verifyNonce(wallet, nonce) {
   // Check expiration
   if (data.expires_at < now) {
     throw new Error("Challenge expired");
-  }
-
-  // Mark as used (one-time use)
-  const { error: updateError } = await supabase
-    .from("nonces")
-    .update({ used: true, used_at: now })
-    .eq("id", data.id);
-
-  if (updateError) {
-    console.error("Failed to mark nonce as used:", updateError);
-    // Don't throw - let verification succeed even if marking fails
   }
 
   return data;
@@ -405,31 +411,16 @@ app.post("/auth/verify", async (req, res) => {
   try {
     const wallet = normalizeWallet(req.body?.wallet);
     const signature = req.body?.signature;
+    const nonce = req.body?.nonce;
 
-    if (!ethers.isAddress(wallet) || !signature) {
-      return res.status(400).json({ error: "Wallet and signature are required" });
+    if (!ethers.isAddress(wallet) || !signature || !nonce) {
+      return res.status(400).json({ error: "Wallet, signature, and nonce are required" });
     }
 
     // Clean up expired nonces from database
     await cleanupExpiredNonces();
 
-    // Verify nonce (marks as used, enforces one-time use)
-    const nonce_record = await verifyNonce(wallet, signature.includes("\n") ? null : req.body?.nonce);
-    
-    // In production: For each submission attempt, search for the corresponding nonce
-    // This prevents replay attacks across multiple instances
-    const { data: nonceRecord, error: nonceError } = await supabase
-      .from("nonces")
-      .select("id, nonce, issued_at")
-      .eq("wallet", wallet)
-      .eq("used", false)
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-
-    if (nonceError || !nonceRecord) {
-      return res.status(400).json({ error: "Challenge expired or missing" });
-    }
+    const nonceRecord = await getValidNonceRecord(wallet, nonce);
 
     const message = makeChallengeMessage(wallet, nonceRecord.nonce, nonceRecord.issued_at);
     const recovered = normalizeWallet(ethers.verifyMessage(message, signature));
@@ -438,11 +429,15 @@ app.post("/auth/verify", async (req, res) => {
       return res.status(401).json({ error: "Signature verification failed" });
     }
 
-    // Mark nonce as used
-    await supabase
+    const { error: updateError } = await supabase
       .from("nonces")
       .update({ used: true, used_at: new Date().toISOString() })
       .eq("id", nonceRecord.id);
+
+    if (updateError) {
+      console.error("Failed to mark nonce as used:", updateError);
+      return res.status(500).json({ error: "Failed to finalize authenticated session" });
+    }
 
     const role = await resolveRole(wallet);
     const apiToken = issueAppToken({ wallet, role });

@@ -61,6 +61,30 @@ type Order = {
   trackingCode: string;
 };
 
+type OrderQueryRow = {
+  id: string;
+  buyer_wallet: string | null;
+  quantity: number | string | null;
+  status: Order["status"] | null;
+  shipping_address: string | null;
+  tracking_code: string | null;
+  created_at: string | null;
+  product_id: string | null;
+  products?: { name?: string | null } | { name?: string | null }[] | null;
+};
+
+type WhitelistEntryWithContract = WhitelistEntry & {
+  contract_address?: string | null;
+};
+
+type DropSummary = {
+  id: string;
+};
+
+function getErrorMessage(error: unknown) {
+  return error instanceof Error ? error.message : "Unknown error";
+}
+
 // ─── Colour helpers ───────────────────────────────────────────────────────────
 const orderColor: Record<string, string> = {
   pending: "bg-yellow-100 text-yellow-800",
@@ -512,9 +536,9 @@ const AdminPage = () => {
         return;
       }
 
-      const mappedOrders = (data || []).map((order: any) => ({
+      const mappedOrders = ((data ?? []) as OrderQueryRow[]).map((order) => ({
         id: order.id,
-        product: order.products?.name || order.product_id || "Unknown product",
+        product: (Array.isArray(order.products) ? order.products[0]?.name : order.products?.name) || order.product_id || "Unknown product",
         buyer: order.buyer_wallet || "Unknown buyer",
         qty: Number(order.quantity || 0),
         status: order.status || "pending",
@@ -563,11 +587,11 @@ const AdminPage = () => {
       }
       
       resolveArtistForWallet(entry.wallet);
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error("❌ Approval failed:", err);
       // Roll back optimistic update
       setWhitelist(p => p.map(e => e.id === id ? { ...e, status: entry.status } : e));
-      toast.error(`Approval failed: ${err?.message || "Unknown error"}`);
+      toast.error(`Approval failed: ${getErrorMessage(err)}`);
     } finally {
       setDeployingWallet(null);
     }
@@ -757,7 +781,7 @@ const AdminPage = () => {
 
     const topViewedDropEntry = Object.entries(snapshot.dropViews).sort((a, b) => b[1] - a[1])[0];
     const topViewedArt = topViewedDropEntry
-      ? { drop: supabaseDrops.find((d: any) => d.id === topViewedDropEntry[0]) ?? null, views: topViewedDropEntry[1] }
+      ? { drop: (supabaseDrops as DropSummary[]).find((drop) => drop.id === topViewedDropEntry[0]) ?? null, views: topViewedDropEntry[1] }
       : null;
 
     return {
@@ -768,7 +792,7 @@ const AdminPage = () => {
       topProduct,
       topViewedArt,
     };
-  }, [products, orders, whitelist]);
+  }, [products, supabaseDrops]);
 
   useEffect(() => {
     // Only sync cache when data is loaded from server, not on optimistic updates
@@ -900,10 +924,10 @@ const AdminPage = () => {
                     </div>
                     <p className="text-xs font-mono text-muted-foreground mt-1 truncate">{entry.wallet}</p>
                     <p className="text-[10px] text-muted-foreground mt-0.5">Added {entry.joinedAt}</p>
-                    {(entry as any).contract_address && (
+                    {(entry as WhitelistEntryWithContract).contract_address && (
                       <div className="mt-2 p-2 rounded-lg bg-green-50 dark:bg-green-950 border border-green-200 dark:border-green-800">
                         <p className="text-[9px] font-semibold text-green-700 dark:text-green-300 mb-1">Contract Deployed</p>
-                        <p className="text-[9px] font-mono text-green-600 dark:text-green-400 break-all">{(entry as any).contract_address}</p>
+                        <p className="text-[9px] font-mono text-green-600 dark:text-green-400 break-all">{(entry as WhitelistEntryWithContract).contract_address}</p>
                       </div>
                     )}
                   </div>
@@ -957,9 +981,9 @@ const AdminPage = () => {
                 setProducts(prev => [...prev, p]);
                 await saveProductToDBs(p, wallet || "0x0");
                 toast.success("✅ Product saved to database");
-              } catch (err: any) {
+              } catch (err: unknown) {
                 console.error("Failed to save product to database:", err);
-                toast.error(`Database save failed: ${err?.message || "Unknown error"}`);
+                toast.error(`Database save failed: ${getErrorMessage(err)}`);
                 // Remove from local state if Supabase save failed
                 setProducts(prev => prev.filter(prod => prod.id !== p.id));
                 throw err; // Re-throw so dialog knows to keep trying

@@ -1,13 +1,14 @@
-import { useState, useEffect } from "react";
-import { ArrowLeft, Heart, Users, Flame } from "lucide-react";
+import { useState, useEffect, useMemo } from "react";
+import { ArrowLeft, Heart } from "lucide-react";
 import { useNavigate, Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { useWallet } from "@/hooks/useContracts";
-import { getAllArtists } from "@/lib/artistStore";
+import { getAllArtists, type ArtistPublicProfile } from "@/lib/artistStore";
 import { trackSubscriptionsView, trackCampaignInteraction } from "@/lib/analyticsStore";
 import { toggleArtistFavorite, isArtistFavorited, getFavorites } from "@/lib/favoritesStore";
 import { createPublicClient, http, getAddress } from "viem";
-import { ART_DROP_ADDRESS } from "@/lib/contracts/artDrop";
+import { ARTIST_DROP_ABI } from "@/lib/contracts/artDropArtist";
 import { ACTIVE_CHAIN } from "@/lib/wagmi";
 
 const MySubscriptionsPage = () => {
@@ -31,7 +32,7 @@ const MySubscriptionsPage = () => {
     }
   }, [isConnected, address]);
 
-  const [subscriptions, setSubscriptions] = useState<any[]>([]);
+  const [subscriptions, setSubscriptions] = useState<ArtistPublicProfile[]>([]);
   const [subscriptionsLoading, setSubscriptionsLoading] = useState(false);
 
   useEffect(() => {
@@ -46,38 +47,29 @@ const MySubscriptionsPage = () => {
       setSubscriptionsLoading(true);
       try {
         const publicClient = createPublicClient({ chain: ACTIVE_CHAIN, transport: http() });
-        const logs = await publicClient.getLogs({
-          address: ART_DROP_ADDRESS,
-          event: {
-            type: "event",
-            name: "ArtistSubscribed",
-            inputs: [
-              { name: "artist", type: "address", indexed: true },
-              { name: "subscriber", type: "address", indexed: true },
-              { name: "amount", type: "uint256", indexed: false },
-              { name: "artistShare", type: "uint256", indexed: false },
-              { name: "adminShare", type: "uint256", indexed: false },
-            ],
-          },
-          args: {
-            subscriber: getAddress(address),
-          },
-          fromBlock: "earliest",
-          toBlock: "latest",
-        });
+        const userAddress = getAddress(address);
+        const artists = getAllArtists().filter((artist) => Boolean(artist.contractAddress));
+        const results = await Promise.all(
+          artists.map(async (artist) => {
+            try {
+              const contractAddress = getAddress(artist.contractAddress!);
+              const isSubscribed = await publicClient.readContract({
+                address: contractAddress,
+                abi: ARTIST_DROP_ABI,
+                functionName: "isSubscriptionActive",
+                args: [userAddress],
+              });
 
-        if (!active) return;
-
-        const artistAddresses = Array.from(new Set(logs.map((log) => (log.args as any).artist.toLowerCase())));
-
-        const artists = getAllArtists();
-
-        const matched = artists.filter((artist) =>
-          artistAddresses.includes((artist.wallet || "").toLowerCase())
+              return isSubscribed ? artist : null;
+            } catch (error) {
+              console.warn(`Subscription check failed for artist ${artist.id}:`, error);
+              return null;
+            }
+          })
         );
 
         if (!active) return;
-        setSubscriptions(matched);
+        setSubscriptions(results.filter((artist): artist is ArtistPublicProfile => artist !== null));
       } catch (err) {
         console.error("Error fetching subscriptions:", err);
         if (active) setSubscriptions([]);
@@ -165,7 +157,11 @@ const MySubscriptionsPage = () => {
       </div>
 
       {/* Subscriptions list */}
-      {sortedSubscriptions.length === 0 ? (
+      {subscriptionsLoading ? (
+        <div className="px-4 py-12 text-center">
+          <p className="text-sm text-muted-foreground font-body">Loading your subscriptions...</p>
+        </div>
+      ) : sortedSubscriptions.length === 0 ? (
         <div className="px-4 py-12 text-center">
           <Heart className="h-12 w-12 text-muted-foreground mx-auto mb-3" />
           <p className="text-sm text-muted-foreground font-body">

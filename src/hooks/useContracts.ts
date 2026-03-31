@@ -12,6 +12,7 @@ import { injected, walletConnect, coinbaseWallet, metaMask } from "wagmi/connect
 import { createPublicClient, http, decodeEventLog, parseEther, getAddress } from "viem";
 import { ACTIVE_CHAIN, appKit } from "@/lib/wagmi";
 import { ART_DROP_ABI, ART_DROP_ADDRESS } from "@/lib/contracts/artDrop";
+import { ARTIST_DROP_ABI } from "@/lib/contracts/artDropArtist";
 import { POAP_CAMPAIGN_ABI, POAP_CAMPAIGN_ADDRESS } from "@/lib/contracts/poapCampaign";
 
 // ── Wallet ──────────────────────────────────────
@@ -725,7 +726,7 @@ export function useSubscribeToArtistContract(artistContractAddress?: string | nu
 
     return writeContract({
       address: validatedContract as `0x${string}`,
-      abi: ART_DROP_ABI,
+      abi: ARTIST_DROP_ABI,
       functionName: "subscribe",
       args: [],
       value: weiAmount,
@@ -740,7 +741,7 @@ export function useSubscribeToArtistContract(artistContractAddress?: string | nu
       .map((log) => {
         try {
           const decoded = decodeEventLog({
-            abi: ART_DROP_ABI,
+            abi: ARTIST_DROP_ABI,
             data: log.data,
             topics: log.topics,
           });
@@ -806,7 +807,7 @@ export function useCreateDropInArtistContract(artistContractAddress?: string | n
 
     return writeContract({
       address: validatedContract as `0x${string}`,
-      abi: ART_DROP_ABI,
+      abi: ARTIST_DROP_ABI,
       functionName: "createDrop",
       args: [metadataURI, weiPrice, BigInt(maxSupply), BigInt(startTime), BigInt(endTime)],
       account: address,
@@ -820,7 +821,7 @@ export function useCreateDropInArtistContract(artistContractAddress?: string | n
       .map((log) => {
         try {
           const decoded = decodeEventLog({
-            abi: ART_DROP_ABI,
+            abi: ARTIST_DROP_ABI,
             data: log.data,
             topics: log.topics,
           });
@@ -871,7 +872,7 @@ export function useMintFromArtistContract(artistContractAddress?: string | null)
 
     return writeContract({
       address: validatedContract as `0x${string}`,
-      abi: ART_DROP_ABI,
+      abi: ARTIST_DROP_ABI,
       functionName: "mint",
       args: [BigInt(dropId)],
       value: priceWei,
@@ -886,7 +887,7 @@ export function useMintFromArtistContract(artistContractAddress?: string | null)
       .map((log) => {
         try {
           const decoded = decodeEventLog({
-            abi: ART_DROP_ABI,
+            abi: ARTIST_DROP_ABI,
             data: log.data,
             topics: log.topics,
           });
@@ -930,8 +931,8 @@ export function useIsSubscribedToArtistContract(
   // This contract's isSubscribed takes only subscriber address (artist is implicit)
   const { data, isLoading, error, refetch } = useReadContract({
     address: validatedContract ? (validatedContract as `0x${string}`) : undefined,
-    abi: ART_DROP_ABI,
-    functionName: "isSubscribed",
+    abi: ARTIST_DROP_ABI,
+    functionName: "isSubscriptionActive",
     args: validatedUser ? [validatedUser] : undefined,
     enabled: Boolean(validatedContract && validatedUser),
   });
@@ -962,7 +963,7 @@ export function useGetSubscriberCountFromArtistContract(artistContractAddress?: 
 
   const { data, isLoading, error, refetch } = useReadContract({
     address: validatedContract ? (validatedContract as `0x${string}`) : undefined,
-    abi: ART_DROP_ABI,
+    abi: ARTIST_DROP_ABI,
     functionName: "getSubscriberCount",
     args: [],
     enabled: Boolean(validatedContract),
@@ -998,7 +999,7 @@ export function useGetDropFromArtistContract(
 
   const { data, isLoading, error, refetch } = useReadContract({
     address: validatedContract ? (validatedContract as `0x${string}`) : undefined,
-    abi: ART_DROP_ABI,
+    abi: ARTIST_DROP_ABI,
     functionName: "getDrop",
     args: dropId !== null && dropId !== undefined ? [BigInt(dropId)] : undefined,
     enabled: Boolean(validatedContract && dropId !== null && dropId !== undefined),
