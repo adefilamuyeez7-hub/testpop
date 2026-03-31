@@ -7,6 +7,7 @@
     "dev": "vite",
     "build": "vite build",
     "build:dev": "vite build --mode development",
+    "build:vercel": "vite build && node -e \"const fs = require('fs'); const path = require('path'); const src = 'dist'; const dst = 'server/dist'; if (fs.existsSync(dst)) fs.rmSync(dst, {recursive: true}); fs.cpSync(src, dst, {recursive: true}); console.log('✅ Copied dist to server/dist');\"",
     "lint": "eslint .",
     "preview": "vite preview",
     "test": "vitest run",

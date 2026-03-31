@@ -1,5 +1,5 @@
 {
-  "buildCommand": "npm run build && cp -r dist server/",
+  "buildCommand": "npm run build:vercel",
   "builds": [
     {
       "src": "server/api/index.js",
