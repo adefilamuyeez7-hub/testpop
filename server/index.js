@@ -1622,7 +1622,7 @@ const getAdminArtistsImpl = async (req, res) => {
   try {
     const { status } = req.query; // "pending", "approved", or undefined for all
     
-    let query = supabase.from("whitelist").select("*, artists(*)");
+    let query = supabase.from("whitelist").select("*");
     
     if (status && ["pending", "approved", "rejected"].includes(status)) {
       query = query.eq("status", status);
@@ -1634,9 +1634,35 @@ const getAdminArtistsImpl = async (req, res) => {
       return res.status(400).json({ error: error.message });
     }
 
+    const whitelistEntries = data || [];
+    const wallets = whitelistEntries
+      .map((entry) => normalizeWallet(entry.wallet))
+      .filter(Boolean);
+
+    let artistsByWallet = new Map();
+    if (wallets.length > 0) {
+      const { data: artistRows, error: artistError } = await supabase
+        .from("artists")
+        .select("id, wallet, name, avatar_url, bio, contract_address")
+        .in("wallet", wallets);
+
+      if (artistError) {
+        return res.status(400).json({ error: artistError.message });
+      }
+
+      artistsByWallet = new Map(
+        (artistRows || []).map((artist) => [normalizeWallet(artist.wallet), artist])
+      );
+    }
+
+    const merged = whitelistEntries.map((entry) => ({
+      ...entry,
+      artists: artistsByWallet.get(normalizeWallet(entry.wallet)) || null,
+    }));
+
     return res.json({
-      artists: data || [],
-      total: data?.length || 0,
+      artists: merged,
+      total: merged.length,
     });
   } catch (error) {
     console.error("❌ Admin artists fetch error:", error);
