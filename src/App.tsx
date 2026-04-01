@@ -6,6 +6,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Loader2 } from "lucide-react";
 import AppLayout from "./components/AppLayout";
+import WalletRuntimeProvider from "./components/wallet/WalletRuntimeProvider";
 import NotFound from "./pages/NotFound";
 
 const WalletIndexRoute = lazy(() => import("./routes/WalletIndexRoute"));
@@ -47,38 +48,40 @@ const queryClient = new QueryClient({
 
 const App = () => (
   <QueryClientProvider client={queryClient}>
-    <TooltipProvider>
-      <Toaster />
-      <Sonner />
-      <BrowserRouter>
-        <Suspense fallback={<PageLoader />}>
-          <Routes>
-            <Route element={<AppLayout />}>
-              <Route path="/" element={<WalletIndexRoute />} />
-              <Route path="/apply" element={<WalletArtistApplicationRoute />} />
-              <Route path="/drops" element={<DropsPage />} />
-              <Route path="/drops/:id" element={<DropDetailPage />} />
-              <Route path="/artists" element={<WalletArtistsRoute />} />
-              <Route path="/artists/:id" element={<WalletArtistProfileRoute />} />
-              <Route path="/invest" element={<WalletMarketplaceRoute />} />
-              <Route path="/profile" element={<WalletProfileRoute />} />
-              <Route path="/collection" element={<WalletCollectionRoute />} />
-              <Route path="/poaps" element={<WalletPOAPsRoute />} />
-              <Route path="/subscriptions" element={<WalletSubscriptionsRoute />} />
-              <Route path="/products" element={<ProductsPage />} />
-              <Route path="/products/:id" element={<ProductDetailPage />} />
-              <Route path="/cart" element={<CartPage />} />
-              <Route path="/checkout" element={<CheckoutPage />} />
-              <Route path="/orders" element={<OrderHistoryPage />} />
-            </Route>
+    <WalletRuntimeProvider>
+      <TooltipProvider>
+        <Toaster />
+        <Sonner />
+        <BrowserRouter>
+          <Suspense fallback={<PageLoader />}>
+            <Routes>
+              <Route element={<AppLayout />}>
+                <Route path="/" element={<WalletIndexRoute />} />
+                <Route path="/apply" element={<WalletArtistApplicationRoute />} />
+                <Route path="/drops" element={<DropsPage />} />
+                <Route path="/drops/:id" element={<DropDetailPage />} />
+                <Route path="/artists" element={<WalletArtistsRoute />} />
+                <Route path="/artists/:id" element={<WalletArtistProfileRoute />} />
+                <Route path="/invest" element={<WalletMarketplaceRoute />} />
+                <Route path="/profile" element={<WalletProfileRoute />} />
+                <Route path="/collection" element={<WalletCollectionRoute />} />
+                <Route path="/poaps" element={<WalletPOAPsRoute />} />
+                <Route path="/subscriptions" element={<WalletSubscriptionsRoute />} />
+                <Route path="/products" element={<ProductsPage />} />
+                <Route path="/products/:id" element={<ProductDetailPage />} />
+                <Route path="/cart" element={<CartPage />} />
+                <Route path="/checkout" element={<CheckoutPage />} />
+                <Route path="/orders" element={<OrderHistoryPage />} />
+              </Route>
 
-            <Route path="/admin" element={<WalletAdminRoute />} />
-            <Route path="/studio" element={<WalletStudioRoute />} />
-            <Route path="*" element={<NotFound />} />
-          </Routes>
-        </Suspense>
-      </BrowserRouter>
-    </TooltipProvider>
+              <Route path="/admin" element={<WalletAdminRoute />} />
+              <Route path="/studio" element={<WalletStudioRoute />} />
+              <Route path="*" element={<NotFound />} />
+            </Routes>
+          </Suspense>
+        </BrowserRouter>
+      </TooltipProvider>
+    </WalletRuntimeProvider>
   </QueryClientProvider>
 );
 

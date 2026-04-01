@@ -127,12 +127,22 @@ export interface OrderWithItems extends Order {
       name?: string | null;
       image_url?: string | null;
       image_ipfs_uri?: string | null;
+      product_type?: Product["product_type"] | null;
+      asset_type?: Product["asset_type"] | null;
+      preview_uri?: string | null;
+      delivery_uri?: string | null;
+      is_gated?: boolean | null;
       creator_wallet?: string | null;
     } | Array<{
       id?: string | null;
       name?: string | null;
       image_url?: string | null;
       image_ipfs_uri?: string | null;
+      product_type?: Product["product_type"] | null;
+      asset_type?: Product["asset_type"] | null;
+      preview_uri?: string | null;
+      delivery_uri?: string | null;
+      is_gated?: boolean | null;
       creator_wallet?: string | null;
     }> | null;
   }>;
@@ -524,6 +534,11 @@ const ORDER_SELECT = `
       name,
       image_url,
       image_ipfs_uri,
+      product_type,
+      asset_type,
+      preview_uri,
+      delivery_uri,
+      is_gated,
       creator_wallet
     )
   )

@@ -2,7 +2,6 @@ import { useState, useEffect } from "react";
 import { Bell, X, Loader2 } from "lucide-react";
 import { useAccount } from "wagmi";
 import { supabase } from "@/lib/db";
-import WalletRuntimeProvider from "./WalletRuntimeProvider";
 import WalletConnect from "@/components/WalletConnect";
 
 function NotificationsPanel({ onClose }: { onClose: () => void }) {
@@ -137,12 +136,6 @@ function TopBarWalletControlsInner() {
   );
 }
 
-const TopBarWalletControls = () => {
-  return (
-    <WalletRuntimeProvider>
-      <TopBarWalletControlsInner />
-    </WalletRuntimeProvider>
-  );
-};
+const TopBarWalletControls = () => <TopBarWalletControlsInner />;
 
 export default TopBarWalletControls;

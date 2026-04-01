@@ -1,12 +1,5 @@
 import Index from "@/pages/Index";
-import WalletRuntimeProvider from "@/components/wallet/WalletRuntimeProvider";
 
-const WalletIndexRoute = () => {
-  return (
-    <WalletRuntimeProvider>
-      <Index />
-    </WalletRuntimeProvider>
-  );
-};
+const WalletIndexRoute = () => <Index />;
 
 export default WalletIndexRoute;

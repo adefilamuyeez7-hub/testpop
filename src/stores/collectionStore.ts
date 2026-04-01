@@ -9,7 +9,7 @@ export interface CollectedDropItem {
   imageUrl?: string;
   previewUri?: string;
   deliveryUri?: string;
-  assetType?: "image" | "video" | "audio" | "pdf" | "epub";
+  assetType?: "image" | "video" | "audio" | "pdf" | "epub" | "digital" | "merchandise";
   isGated?: boolean;
   mintedTokenId?: number | null;
   contractAddress?: string | null;

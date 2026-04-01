@@ -231,6 +231,31 @@ function isMissingProductColumnError(error, columnName) {
   );
 }
 
+let artistContractColumnsReady = null;
+
+async function ensureArtistContractColumnsReady() {
+  if (artistContractColumnsReady !== null) {
+    return artistContractColumnsReady;
+  }
+
+  const { error } = await supabase
+    .from("artists")
+    .select("contract_address, contract_deployment_tx, contract_deployed_at")
+    .limit(1);
+
+  if (error && isMissingArtistContractColumnError(error)) {
+    artistContractColumnsReady = false;
+    return false;
+  }
+
+  if (error) {
+    throw new Error(`Unable to verify artist contract metadata columns: ${error.message}`);
+  }
+
+  artistContractColumnsReady = true;
+  return true;
+}
+
 async function findArtistIdByWallet(wallet) {
   const normalized = normalizeWallet(wallet);
   if (!normalized) return null;
@@ -1289,6 +1314,11 @@ const ORDER_SELECT = `
       name,
       image_url,
       image_ipfs_uri,
+      product_type,
+      asset_type,
+      preview_uri,
+      delivery_uri,
+      is_gated,
       creator_wallet
     )
   )
@@ -1596,6 +1626,13 @@ const approveArtistImpl = async (req, res) => {
         });
       }
 
+      const hasArtistContractColumns = await ensureArtistContractColumnsReady();
+      if (!hasArtistContractColumns) {
+        return res.status(500).json({
+          error: "Artist contract metadata columns are missing in Supabase. Apply the artist contract migration before deploying artists.",
+        });
+      }
+
       try {
         onchainUpdate = await setArtistApprovalOnchain(normalized, true);
         console.log("✅ Artist approval set onchain:", normalized);
@@ -1695,35 +1732,9 @@ const approveArtistImpl = async (req, res) => {
       .single();
 
     if (updateError && contractAddress && isMissingArtistContractColumnError(updateError)) {
-      console.warn("Artist contract metadata columns missing on artists table. Retrying without contract deployment fields.");
-
-      const fallbackArtistPayload = {
-        wallet: normalized,
-        name: artistName,
-        bio: artistData.bio || latestApplication?.bio || null,
-        tag: artistData.tag || null,
-        twitter_url: artistData.twitter_url || latestApplication?.twitter_url || null,
-        instagram_url: artistData.instagram_url || latestApplication?.instagram_url || null,
-        website_url: artistData.website_url || latestApplication?.website_url || latestApplication?.portfolio_url || null,
-        portfolio:
-          Array.isArray(artistData.portfolio) && artistData.portfolio.length > 0
-            ? artistData.portfolio
-            : latestApplication?.portfolio_url
-              ? [latestApplication.portfolio_url]
-              : [],
-        updated_at: now,
-      };
-
-      const fallbackResult = await supabase
-        .from("artists")
-        .upsert(fallbackArtistPayload, { onConflict: "wallet" })
-        .select("*")
-        .single();
-
-      updatedArtist = fallbackResult.data;
-      updateError = fallbackResult.error;
-      updateWarning =
-        "Artist approved and contract deployed, but the Supabase artists table is missing contract metadata columns. Apply the artist contract migration to persist contract_address.";
+      return res.status(500).json({
+        error: "Artist contract deployed onchain, but Supabase could not persist contract metadata. Apply the artist contract migration before approving more artists.",
+      });
     }
 
     if (updateError) {

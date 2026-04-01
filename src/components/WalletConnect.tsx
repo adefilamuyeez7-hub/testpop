@@ -4,9 +4,20 @@ import { useState } from "react";
 import { useWallet } from "@/hooks/useContracts";
 import { formatEther } from "viem";
 import { ACTIVE_CHAIN } from "@/lib/wagmi";
+import { toast } from "sonner";
 
 const WalletConnect = () => {
-  const { address, isConnected, isConnecting, chain, balance, connectWallet, disconnect } = useWallet();
+  const {
+    address,
+    isConnected,
+    isConnecting,
+    chain,
+    balance,
+    connectWallet,
+    switchToActiveChain,
+    isSwitchingNetwork,
+    disconnect,
+  } = useWallet();
   const [copied, setCopied] = useState(false);
   const [showDetails, setShowDetails] = useState(false);
 
@@ -42,11 +53,25 @@ const WalletConnect = () => {
   if (isWrongNetwork) {
     return (
       <div className="flex items-center gap-1 md:gap-2">
-        <div className="flex items-center gap-1 px-2 py-1 md:px-3 md:py-1.5 rounded-full bg-destructive/10 text-destructive text-xs font-medium">
-          <AlertTriangle className="h-3 w-3" />
-          <span className="hidden sm:inline">Wrong network</span>
-          <span className="sm:hidden">Wrong</span>
-        </div>
+        <Button
+          size="sm"
+          onClick={async () => {
+            try {
+              await switchToActiveChain();
+            } catch (error) {
+              const message = error instanceof Error ? error.message : `Switch to ${ACTIVE_CHAIN.name} in your wallet`;
+              toast.error(message);
+            }
+          }}
+          disabled={isSwitchingNetwork}
+          className="rounded-full bg-destructive text-destructive-foreground hover:bg-destructive/90 text-xs h-8 px-3"
+        >
+          <AlertTriangle className="h-3 w-3 mr-1" />
+          <span className="hidden sm:inline">
+            {isSwitchingNetwork ? `Switching...` : `Switch to ${ACTIVE_CHAIN.name}`}
+          </span>
+          <span className="sm:hidden">{isSwitchingNetwork ? "..." : "Switch"}</span>
+        </Button>
         <button
           onClick={() => disconnect()}
           className="p-1.5 rounded-full bg-secondary hover:bg-destructive/10 transition-colors"

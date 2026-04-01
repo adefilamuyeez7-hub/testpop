@@ -1,12 +1,5 @@
 import MarketplacePage from "@/pages/MarketplacePage";
-import WalletRuntimeProvider from "@/components/wallet/WalletRuntimeProvider";
 
-const WalletMarketplaceRoute = () => {
-  return (
-    <WalletRuntimeProvider>
-      <MarketplacePage />
-    </WalletRuntimeProvider>
-  );
-};
+const WalletMarketplaceRoute = () => <MarketplacePage />;
 
 export default WalletMarketplaceRoute;

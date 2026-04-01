@@ -7,19 +7,7 @@ import { trackCollectionView } from "@/lib/analyticsStore";
 import { ImageViewer, VideoViewer, AudioPlayer, PdfReader, EpubReader, DownloadPanel } from "@/components/collection";
 import { ipfsToHttp } from "@/lib/pinata";
 import { useCollectionStore, type CollectedDropItem } from "@/stores/collectionStore";
-import { fetchAllArtistsFromSupabase, fetchAllDropsFromSupabase } from "@/lib/supabaseStore";
-import { createPublicClient, getAddress, http } from "viem";
-import { ACTIVE_CHAIN } from "@/lib/wagmi";
-
-const artMintedEvent = {
-  type: "event" as const,
-  name: "ArtMinted" as const,
-  inputs: [
-    { name: "dropId", type: "uint256", indexed: true },
-    { name: "tokenId", type: "uint256", indexed: true },
-    { name: "collector", type: "address", indexed: true },
-  ],
-};
+import { getOrdersByBuyer, type OrderWithItems } from "@/lib/db";
 
 function getCollectionItemKey(item: CollectedDropItem) {
   const normalizedWallet = item.ownerWallet.toLowerCase();
@@ -66,8 +54,8 @@ const MyCollectionPage = () => {
   );
   const collection = useCollectionStore((state) => state.items);
   const addCollectedDrop = useCollectionStore((state) => state.addCollectedDrop);
-  const [chainCollection, setChainCollection] = useState<CollectedDropItem[]>([]);
-  const [chainCollectionLoading, setChainCollectionLoading] = useState(false);
+  const [purchasedCollection, setPurchasedCollection] = useState<CollectedDropItem[]>([]);
+  const [purchasedCollectionLoading, setPurchasedCollectionLoading] = useState(false);
 
   useEffect(() => {
     if (isConnected && address) {
@@ -89,108 +77,57 @@ const MyCollectionPage = () => {
 
   useEffect(() => {
     if (!isConnected || !address) {
-      setChainCollection([]);
-      setChainCollectionLoading(false);
+      setPurchasedCollection([]);
+      setPurchasedCollectionLoading(false);
       return;
     }
 
     let active = true;
 
-    const fetchChainCollection = async () => {
-      setChainCollectionLoading(true);
+    const loadPurchasedCollection = async () => {
+      setPurchasedCollectionLoading(true);
 
       try {
-        const [drops, artists] = await Promise.all([
-          fetchAllDropsFromSupabase(),
-          fetchAllArtistsFromSupabase(),
-        ]);
-
-        const indexedDrops = (drops || []).filter(
-          (drop) => drop.contract_address && drop.contract_drop_id !== null && drop.contract_drop_id !== undefined
-        );
-
-        if (indexedDrops.length === 0) {
-          if (active) setChainCollection([]);
-          return;
-        }
-
-        const artistMap = new Map((artists || []).map((artist) => [artist.id, artist]));
-        const dropsByContractAndDropId = new Map(
-          indexedDrops.map((drop) => [
-            `${String(drop.contract_address).toLowerCase()}:${Number(drop.contract_drop_id)}`,
-            drop,
-          ])
-        );
-        const publicClient = createPublicClient({ chain: ACTIVE_CHAIN, transport: http() });
-        const collector = getAddress(address);
-        const uniqueContracts = Array.from(
-          new Set(indexedDrops.map((drop) => String(drop.contract_address).toLowerCase()))
-        );
-
-        const logsByContract = await Promise.all(
-          uniqueContracts.map(async (contractAddress) => {
-            try {
-              return await publicClient.getLogs({
-                address: getAddress(contractAddress),
-                event: artMintedEvent,
-                args: { collector },
-                fromBlock: "earliest",
-                toBlock: "latest",
-              });
-            } catch (error) {
-              console.warn(`Failed to read mint logs for ${contractAddress}:`, error);
-              return [];
-            }
-          })
-        );
-
+        const orders = await getOrdersByBuyer(address.toLowerCase());
         if (!active) return;
 
-        const merged = new Map<string, CollectedDropItem>();
+        const mappedItems = (orders || []).flatMap((order) => {
+          const typedOrder = order as OrderWithItems;
 
-        logsByContract.flat().forEach((log) => {
-          const contractAddress = String(log.address).toLowerCase();
-          const contractDropId = Number(log.args.dropId);
-          const mintedTokenId = Number(log.args.tokenId);
-          const drop = dropsByContractAndDropId.get(`${contractAddress}:${contractDropId}`);
+          return (typedOrder.order_items || []).map((item, index) => {
+            const product = Array.isArray(item.products) ? item.products[0] : item.products;
+            const imageUrl = product?.image_url || product?.image_ipfs_uri || "";
+            const assetType = product?.asset_type || (product?.product_type === "digital" ? "digital" : "image");
 
-          if (!drop) {
-            return;
-          }
-
-          const artist = artistMap.get(drop.artist_id);
-          const item: CollectedDropItem = {
-            id: drop.id,
-            ownerWallet: address,
-            title: drop.title || "Untitled",
-            artist: artist?.name || "Unknown Artist",
-            imageUrl: drop.image_url || "",
-            previewUri: drop.preview_uri || undefined,
-            deliveryUri: drop.delivery_uri || drop.image_ipfs_uri || undefined,
-            assetType: drop.asset_type || "image",
-            mintedTokenId,
-            contractAddress,
-            contractDropId,
-            collectedAt: new Date().toISOString(),
-          };
-
-          merged.set(getCollectionItemKey(item), item);
+            return {
+              id: `${typedOrder.id}:${item.id || item.product_id || index}`,
+              ownerWallet: address,
+              title: product?.name?.trim() || `Order item ${index + 1}`,
+              artist: product?.creator_wallet || "Marketplace",
+              imageUrl,
+              previewUri: product?.preview_uri || undefined,
+              deliveryUri: product?.delivery_uri || product?.image_ipfs_uri || undefined,
+              assetType,
+              isGated: Boolean(product?.is_gated),
+              collectedAt: typedOrder.created_at || new Date().toISOString(),
+            } satisfies CollectedDropItem;
+          });
         });
 
-        setChainCollection(Array.from(merged.values()));
+        setPurchasedCollection(mappedItems);
       } catch (error) {
-        console.error("Failed to rebuild collection from chain:", error);
+        console.error("Failed to load purchased collection:", error);
         if (active) {
-          setChainCollection([]);
+          setPurchasedCollection([]);
         }
       } finally {
         if (active) {
-          setChainCollectionLoading(false);
+          setPurchasedCollectionLoading(false);
         }
       }
     };
 
-    fetchChainCollection();
+    loadPurchasedCollection();
 
     return () => {
       active = false;
@@ -214,7 +151,7 @@ const MyCollectionPage = () => {
     const normalizedAddress = address.toLowerCase();
     const merged = new Map<string, CollectedDropItem>();
 
-    chainCollection.forEach((item) => {
+    purchasedCollection.forEach((item) => {
       if (item.ownerWallet.toLowerCase() !== normalizedAddress) return;
       merged.set(getCollectionItemKey(item), item);
     });
@@ -236,7 +173,7 @@ const MyCollectionPage = () => {
       const bTime = new Date(b.collectedAt).getTime();
       return bTime - aTime;
     });
-  }, [address, chainCollection, collection, routeCollectedItem]);
+  }, [address, purchasedCollection, collection, routeCollectedItem]);
 
   const collectedDrops = useMemo(() => {
     if (filter === "all") return ownedCollection;
@@ -362,13 +299,13 @@ const MyCollectionPage = () => {
         ))}
       </div>
 
-      {chainCollectionLoading && collectedDrops.length === 0 && (
+      {purchasedCollectionLoading && collectedDrops.length === 0 && (
         <div className="px-4 py-12 text-center">
-          <p className="text-sm text-muted-foreground font-body">Loading your collected art...</p>
+          <p className="text-sm text-muted-foreground font-body">Loading your collection...</p>
         </div>
       )}
 
-      {!chainCollectionLoading && collectedDrops.length === 0 ? (
+      {!purchasedCollectionLoading && collectedDrops.length === 0 ? (
         <div className="px-4 py-12 text-center">
           <Grid3X3 className="h-12 w-12 text-muted-foreground mx-auto mb-3" />
           <p className="text-sm text-muted-foreground font-body">You haven&apos;t collected any art yet.</p>

@@ -8,7 +8,6 @@ import { Input } from "@/components/ui/input";
 import { useWallet, usePlaceBid } from "@/hooks/useContracts";
 import { useMintArtist } from "@/hooks/useContractsArtist";
 import type { Web3Error } from "@/lib/types";
-import WalletRuntimeProvider from "./WalletRuntimeProvider";
 
 type DropActionData = {
   id: string;
@@ -215,12 +214,6 @@ function DropPrimaryActionCardInner({ drop, onCollectSuccess }: DropPrimaryActio
   );
 }
 
-const DropPrimaryActionCard = (props: DropPrimaryActionCardProps) => {
-  return (
-    <WalletRuntimeProvider>
-      <DropPrimaryActionCardInner {...props} />
-    </WalletRuntimeProvider>
-  );
-};
+const DropPrimaryActionCard = (props: DropPrimaryActionCardProps) => <DropPrimaryActionCardInner {...props} />;
 
 export default DropPrimaryActionCard;

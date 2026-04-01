@@ -1,12 +1,5 @@
 import ArtistApplicationPage from "@/pages/ArtistApplicationPage";
-import WalletRuntimeProvider from "@/components/wallet/WalletRuntimeProvider";
 
-const WalletArtistApplicationRoute = () => {
-  return (
-    <WalletRuntimeProvider>
-      <ArtistApplicationPage />
-    </WalletRuntimeProvider>
-  );
-};
+const WalletArtistApplicationRoute = () => <ArtistApplicationPage />;
 
 export default WalletArtistApplicationRoute;

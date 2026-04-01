@@ -3,6 +3,7 @@ import {
   useAccount,
   useDisconnect,
   useBalance,
+  useSwitchChain,
   useReadContract,
   useWriteContract,
   useWaitForTransactionReceipt,
@@ -18,10 +19,19 @@ export function useWallet() {
   const { address, isConnected, chain } = useAccount();
   const { disconnect } = useDisconnect();
   const { data: balance } = useBalance({ address });
+  const {
+    switchChain,
+    isPending: isSwitchingNetwork,
+    error: switchNetworkError,
+  } = useSwitchChain();
 
   const connectWallet = async () => {
     const { openAppKit } = await import("@/lib/appKit");
     await openAppKit();
+  };
+
+  const switchToActiveChain = async () => {
+    await switchChain({ chainId: ACTIVE_CHAIN.id });
   };
 
   return {
@@ -31,6 +41,9 @@ export function useWallet() {
     chain,
     balance,
     connectWallet,
+    switchToActiveChain,
+    isSwitchingNetwork,
+    switchNetworkError,
     disconnect,
   };
 }
