@@ -333,8 +333,7 @@ export async function fetchLiveDropsFromSupabase() {
       .from("drops")
       .select(getLiveDropsSelectClause())
       .eq("status", "live")
-      .not("contract_address", "is", null)
-      .not("contract_drop_id", "is", null)
+      .or("type.eq.campaign,and(contract_address.not.is.null,contract_drop_id.not.is.null)")
       .order("created_at", { ascending: false });
 
     updateDropSchemaModes(error);
@@ -345,8 +344,7 @@ export async function fetchLiveDropsFromSupabase() {
         .from("drops")
         .select(getLiveDropsSelectClause())
         .eq("status", "live")
-        .not("contract_address", "is", null)
-        .not("contract_drop_id", "is", null)
+        .or("type.eq.campaign,and(contract_address.not.is.null,contract_drop_id.not.is.null)")
         .order("created_at", { ascending: false }));
 
       if (!error) {

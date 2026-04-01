@@ -167,11 +167,15 @@ const Index = () => {
     if (supabaseLiveDrops && supabaseLiveDrops.length > 0) {
       setLiveDrops(supabaseLiveDrops.map((drop) => {
         const artist = drop.artists && !Array.isArray(drop.artists) ? drop.artists : null;
-        // Only include drops that have both contract_address and contract_drop_id (properly deployed)
+        const normalizedType = (drop.type || "drop").toLowerCase() as "drop" | "auction" | "campaign";
+        // Campaign drops are app-driven right now, so they do not require onchain contract IDs.
         if (
-          drop.contract_drop_id === null ||
-          drop.contract_drop_id === undefined ||
-          !drop.contract_address
+          normalizedType !== "campaign" &&
+          (
+            drop.contract_drop_id === null ||
+            drop.contract_drop_id === undefined ||
+            !drop.contract_address
+          )
         ) {
           console.warn(`⚠️ Drop "${drop.title}" missing contract_address or contract_drop_id - skipping`);
           return null;
@@ -187,7 +191,7 @@ const Index = () => {
           previewUri: drop.preview_uri || "",
           deliveryUri: drop.delivery_uri || "",
           assetType: drop.asset_type || "image",
-          type: (drop.type || "drop").toLowerCase() as "drop" | "auction" | "campaign",
+          type: normalizedType,
           status: drop.status as "live" | "draft" | "ended",
           endsIn: drop.ends_at ? `${Math.max(0, Math.floor((new Date(drop.ends_at).getTime() - Date.now()) / (1000 * 60 * 60)))}h` : "--",
         };
@@ -570,6 +574,14 @@ const Index = () => {
                               ) : (
                                 <><Gavel className="h-3 w-3 mr-1" /> Bid</>
                               )}
+                            </Button>
+                          ) : drop.type === "campaign" ? (
+                            <Button
+                              size="sm"
+                              onClick={() => navigate(`/drops/${drop.id}`)}
+                              className="flex-1 h-8 rounded-full gradient-primary text-primary-foreground font-semibold text-xs"
+                            >
+                              View
                             </Button>
                           ) : (
                             <Button
