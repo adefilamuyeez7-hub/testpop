@@ -213,6 +213,41 @@ function isMissingArtistContractColumnError(error) {
   );
 }
 
+function isMissingArtistProfileColumnError(error, columnName) {
+  const message = error?.message || "";
+  return (
+    typeof message === "string" &&
+    message.includes("does not exist") &&
+    message.includes(`artists.${columnName}`)
+  );
+}
+
+function isMissingProductColumnError(error, columnName) {
+  const message = error?.message || "";
+  return (
+    typeof message === "string" &&
+    message.includes("does not exist") &&
+    message.includes(`products.${columnName}`)
+  );
+}
+
+async function findArtistIdByWallet(wallet) {
+  const normalized = normalizeWallet(wallet);
+  if (!normalized) return null;
+
+  const { data, error } = await supabase
+    .from("artists")
+    .select("id")
+    .eq("wallet", normalized)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(`Failed to resolve artist for wallet ${normalized}: ${error.message}`);
+  }
+
+  return data?.id || null;
+}
+
 function getContractDeploymentReadiness() {
   const missing = [];
   const invalid = [];
@@ -536,6 +571,17 @@ async function setArtistApprovalOnchain(wallet, isApproved) {
     throw new Error(
       `DEPLOYER_PRIVATE_KEY wallet ${signerAddress} is not the factory owner ${ownerAddress}`
     );
+  }
+
+  const currentlyApproved = await factory.isArtistApproved(artistWallet);
+  if (currentlyApproved === isApproved) {
+    return {
+      transactionHash: null,
+      blockNumber: null,
+      gasUsed: null,
+      skipped: true,
+      alreadyInState: true,
+    };
   }
 
   // Call setArtistApproval on the factory contract
@@ -1095,11 +1141,39 @@ app.post("/products", authRequired, async (req, res) => {
     return res.status(403).json({ error: "Cannot create products for another wallet" });
   }
 
-  const { data, error } = await supabase
+  let inferredArtistId = product.artist_id ?? null;
+  if (!inferredArtistId) {
+    try {
+      inferredArtistId = await findArtistIdByWallet(creatorWallet);
+    } catch (resolveError) {
+      return res.status(400).json({ error: resolveError.message || "Failed to resolve artist for product" });
+    }
+  }
+
+  let insertPayload = {
+    ...product,
+    creator_wallet: creatorWallet,
+    artist_id: inferredArtistId,
+  };
+
+  let { data, error } = await supabase
     .from("products")
-    .insert({ ...product, creator_wallet: creatorWallet })
+    .insert(insertPayload)
     .select("*")
     .single();
+
+  if (error && isMissingProductColumnError(error, "artist_id")) {
+    insertPayload = {
+      ...product,
+      creator_wallet: creatorWallet,
+    };
+
+    ({ data, error } = await supabase
+      .from("products")
+      .insert(insertPayload)
+      .select("*")
+      .single());
+  }
 
   if (error) return res.status(400).json({ error: error.message });
   return res.json(data);
@@ -1136,13 +1210,64 @@ app.post("/orders", authRequired, async (req, res) => {
     return res.status(403).json({ error: "Cannot create an order for another wallet" });
   }
 
+  const normalizedItems = Array.isArray(order.items)
+    ? order.items
+        .filter((item) => item && item.product_id)
+        .map((item) => ({
+          product_id: item.product_id,
+          quantity: Number(item.quantity || 1),
+          unit_price_eth: item.unit_price_eth,
+          line_total_eth: item.line_total_eth,
+          fulfillment_type: item.fulfillment_type || "physical",
+          delivery_status: item.delivery_status || null,
+        }))
+    : [];
+
+  const insertPayload = {
+    ...order,
+    buyer_wallet: buyerWallet,
+    product_id:
+      order.product_id ??
+      (normalizedItems.length === 1 ? normalizedItems[0].product_id : null),
+  };
+
+  const { items: _ignoredItems, ...orderInsert } = insertPayload;
+
   const { data, error } = await supabase
     .from("orders")
-    .insert({ ...order, buyer_wallet: buyerWallet })
+    .insert(orderInsert)
     .select("*")
     .single();
 
   if (error) return res.status(400).json({ error: error.message });
+
+  if (normalizedItems.length > 0) {
+    const orderItemsPayload = normalizedItems.map((item) => ({
+      order_id: data.id,
+      product_id: item.product_id,
+      quantity: item.quantity,
+      unit_price_eth:
+        item.unit_price_eth ??
+        (item.quantity > 0 && item.line_total_eth != null
+          ? Number(item.line_total_eth) / item.quantity
+          : 0),
+      line_total_eth:
+        item.line_total_eth ??
+        ((item.unit_price_eth ?? 0) * item.quantity),
+      fulfillment_type: item.fulfillment_type,
+      delivery_status: item.delivery_status,
+    }));
+
+    const { error: orderItemsError } = await supabase
+      .from("order_items")
+      .insert(orderItemsPayload);
+
+    if (orderItemsError) {
+      await supabase.from("orders").delete().eq("id", data.id);
+      return res.status(400).json({ error: `Failed to create order items: ${orderItemsError.message}` });
+    }
+  }
+
   return res.json(data);
 });
 
@@ -1641,10 +1766,17 @@ const getAdminArtistsImpl = async (req, res) => {
 
     let artistsByWallet = new Map();
     if (wallets.length > 0) {
-      const { data: artistRows, error: artistError } = await supabase
+      let { data: artistRows, error: artistError } = await supabase
         .from("artists")
         .select("id, wallet, name, avatar_url, bio, contract_address")
         .in("wallet", wallets);
+
+      if (artistError && isMissingArtistProfileColumnError(artistError, "contract_address")) {
+        ({ data: artistRows, error: artistError } = await supabase
+          .from("artists")
+          .select("id, wallet, name, avatar_url, bio")
+          .in("wallet", wallets));
+      }
 
       if (artistError) {
         return res.status(400).json({ error: artistError.message });

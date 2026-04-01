@@ -55,15 +55,21 @@ export interface Drop {
 
 export interface Product {
   id: string;
+  artist_id?: string | null;
   creator_wallet: string;
   name: string;
   description?: string;
   category?: string;
+  product_type?: "physical" | "digital" | "hybrid";
+  asset_type?: "image" | "video" | "audio" | "pdf" | "epub" | "merchandise" | "digital" | null;
   price_eth: number;
   stock?: number;
   sold?: number;
   image_url?: string;
   image_ipfs_uri?: string;
+  preview_uri?: string | null;
+  delivery_uri?: string | null;
+  is_gated?: boolean;
   nft_link?: string;
   status?: "draft" | "published" | "out_of_stock";
   metadata?: Record<string, unknown>;
@@ -71,16 +77,45 @@ export interface Product {
   updated_at?: string;
 }
 
+export interface OrderItem {
+  id: string;
+  order_id: string;
+  product_id: string;
+  quantity: number;
+  unit_price_eth: number;
+  line_total_eth: number;
+  fulfillment_type?: "physical" | "digital";
+  delivery_status?: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
 export interface Order {
   id: string;
-  product_id?: string;
+  product_id?: string | null;
   buyer_wallet: string;
-  quantity: number;
+  quantity?: number;
+  currency?: string;
+  subtotal_eth?: number;
+  shipping_eth?: number;
+  tax_eth?: number;
   total_price_eth: number;
-  status?: "pending" | "paid" | "shipped" | "delivered" | "cancelled";
-  shipping_address?: string;
+  status?: "pending" | "paid" | "processing" | "shipped" | "delivered" | "cancelled" | "refunded";
+  shipping_address?: string | Record<string, unknown> | null;
+  shipping_address_jsonb?: Record<string, unknown> | null;
   tracking_code?: string;
   tx_hash?: string;
+  paid_at?: string;
+  shipped_at?: string;
+  delivered_at?: string;
+  items?: Array<{
+    product_id: string;
+    quantity: number;
+    unit_price_eth?: number;
+    line_total_eth?: number;
+    fulfillment_type?: "physical" | "digital";
+    delivery_status?: string;
+  }>;
   created_at?: string;
   updated_at?: string;
 }
@@ -100,10 +135,18 @@ export interface WhitelistEntry {
 
 export interface AnalyticsRecord {
   id: string;
-  page: string;
+  page?: string;
+  event_type?: string;
   artist_id?: string;
+  drop_id?: string;
+  product_id?: string;
+  order_id?: string;
+  wallet?: string;
+  session_id?: string;
   user_agent?: string;
   referrer?: string;
+  metadata?: Record<string, unknown>;
+  created_at?: string;
   timestamp?: string;
 }
 
@@ -572,6 +615,25 @@ export async function recordPageView(page: string, artistId?: string) {
       return;
     }
 
+    const { error: modernError } = await supabase.from("analytics_events").insert([
+      {
+        event_type: page === "artist_profile" ? "artist_view" : "page_view",
+        artist_id: artistId,
+        session_id: "client",
+        user_agent: navigator.userAgent,
+        referrer: document.referrer,
+        metadata: {
+          page,
+        },
+        created_at: new Date().toISOString(),
+      },
+    ]);
+
+    if (!modernError) {
+      console.log(`📊 Recorded analytics event: ${page}`);
+      return;
+    }
+
     const { error } = await supabase.from("analytics").insert([
       {
         page,
@@ -606,12 +668,21 @@ export async function getArtistAnalytics(artistId: string, days: number = 30) {
     since.setDate(since.getDate() - days);
 
     console.log(`📊 Fetching analytics for artist: ${artistId}`);
-    const { data, error } = await supabase
-      .from("analytics")
+    let { data, error } = await supabase
+      .from("analytics_events")
       .select("*")
       .eq("artist_id", artistId)
-      .gte("timestamp", since.toISOString())
-      .order("timestamp", { ascending: false });
+      .gte("created_at", since.toISOString())
+      .order("created_at", { ascending: false });
+
+    if (error) {
+      ({ data, error } = await supabase
+        .from("analytics")
+        .select("*")
+        .eq("artist_id", artistId)
+        .gte("timestamp", since.toISOString())
+        .order("timestamp", { ascending: false }));
+    }
 
     if (error) {
       console.error("❌ Error fetching analytics:", error.message);

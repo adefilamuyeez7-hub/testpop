@@ -1,4 +1,5 @@
 import { supabase } from "@/lib/db";
+import { getOrCreateGuestCustomerId, getRuntimeSession } from "@/lib/runtimeSession";
 
 export type PopupAnalyticsSnapshot = {
   dailyVisits: Record<string, number>;
@@ -64,20 +65,53 @@ function incrementDailyVisit() {
   saveAnalytics(snapshot);
 }
 
-async function trackToSupabase(page: string, artistId?: string) {
+type AnalyticsEventPayload = {
+  page: string;
+  eventType: "page_view" | "artist_view" | "drop_view" | "product_view";
+  artistId?: string;
+  dropId?: string;
+  productId?: string;
+};
+
+function getAnalyticsSessionId() {
+  const runtimeWallet = getRuntimeSession().wallet;
+  return runtimeWallet || getOrCreateGuestCustomerId();
+}
+
+async function trackToSupabase(payload: AnalyticsEventPayload) {
   try {
-    const { error } = await supabase
+    const { error: modernError } = await supabase
+      .from("analytics_events")
+      .insert({
+        event_type: payload.eventType,
+        artist_id: payload.artistId || null,
+        drop_id: payload.dropId || null,
+        product_id: payload.productId || null,
+        session_id: getAnalyticsSessionId(),
+        user_agent: navigator.userAgent,
+        referrer: document.referrer || null,
+        metadata: {
+          page: payload.page,
+        },
+        created_at: new Date().toISOString(),
+      });
+
+    if (!modernError) {
+      return;
+    }
+
+    const { error: legacyError } = await supabase
       .from("analytics")
       .insert({
-        page,
-        artist_id: artistId || null,
+        page: payload.page,
+        artist_id: payload.artistId || null,
         user_agent: navigator.userAgent,
         referrer: document.referrer || null,
         timestamp: new Date().toISOString(),
       });
 
-    if (error) {
-      console.error("Failed to track analytics to Supabase:", error.message);
+    if (legacyError) {
+      console.error("Failed to track analytics to Supabase:", legacyError.message);
     }
   } catch (error) {
     console.error("Error tracking analytics:", error);
@@ -86,7 +120,10 @@ async function trackToSupabase(page: string, artistId?: string) {
 
 export function recordPageVisit() {
   incrementDailyVisit();
-  void trackToSupabase("page_visit");
+  void trackToSupabase({
+    page: "page_visit",
+    eventType: "page_view",
+  });
 }
 
 export function recordArtistView(artistId: string) {
@@ -94,7 +131,11 @@ export function recordArtistView(artistId: string) {
   snapshot.dailyVisits = incrementRecord(snapshot.dailyVisits, todayKey());
   snapshot.artistViews = incrementRecord(snapshot.artistViews, artistId);
   saveAnalytics(snapshot);
-  void trackToSupabase("artist_view", artistId);
+  void trackToSupabase({
+    page: "artist_view",
+    eventType: "artist_view",
+    artistId,
+  });
 }
 
 export function recordDropView(dropId: string) {
@@ -102,7 +143,11 @@ export function recordDropView(dropId: string) {
   snapshot.dailyVisits = incrementRecord(snapshot.dailyVisits, todayKey());
   snapshot.dropViews = incrementRecord(snapshot.dropViews, dropId);
   saveAnalytics(snapshot);
-  void trackToSupabase("drop_view");
+  void trackToSupabase({
+    page: "drop_view",
+    eventType: "drop_view",
+    dropId,
+  });
 }
 
 export function recordProductView(productId: string) {
@@ -110,7 +155,11 @@ export function recordProductView(productId: string) {
   snapshot.dailyVisits = incrementRecord(snapshot.dailyVisits, todayKey());
   snapshot.productViews = incrementRecord(snapshot.productViews, productId);
   saveAnalytics(snapshot);
-  void trackToSupabase("product_view");
+  void trackToSupabase({
+    page: "product_view",
+    eventType: "product_view",
+    productId,
+  });
 }
 
 export function getAnalyticsSnapshot() {

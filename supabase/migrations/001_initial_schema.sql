@@ -91,7 +91,7 @@ CREATE INDEX IF NOT EXISTS idx_products_created_at ON products(created_at DESC);
 -- ═══════════════════════════════════════════════════════════════════════════════
 CREATE TABLE IF NOT EXISTS orders (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  product_id UUID NOT NULL REFERENCES products(id) ON DELETE SET NULL,
+  product_id UUID REFERENCES products(id) ON DELETE SET NULL,
   buyer_wallet TEXT NOT NULL,
   quantity INT NOT NULL DEFAULT 1,
   total_price_eth DECIMAL(18, 8) NOT NULL,

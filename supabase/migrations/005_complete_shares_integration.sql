@@ -16,23 +16,31 @@ CREATE INDEX IF NOT EXISTS idx_artists_shares_contract ON artists(shares_contrac
 CREATE INDEX IF NOT EXISTS idx_artists_shares_campaign ON artists(shares_campaign_active);
 
 -- Trigger to auto-update shares_deployed_at on shares_contract_address change
-DO $$
+CREATE OR REPLACE FUNCTION set_shares_deployed_at_timestamp()
+RETURNS TRIGGER AS $$
 BEGIN
-  IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'update_shares_deployed_at') THEN
-    CREATE TRIGGER update_shares_deployed_at
-    BEFORE UPDATE ON artists
-    FOR EACH ROW
-    WHEN (NEW.shares_contract_address IS DISTINCT FROM OLD.shares_contract_address AND NEW.shares_contract_address IS NOT NULL)
-    EXECUTE FUNCTION current_timestamp();
+  IF NEW.shares_contract_address IS DISTINCT FROM OLD.shares_contract_address
+     AND NEW.shares_contract_address IS NOT NULL THEN
+    NEW.shares_deployed_at = COALESCE(NEW.shares_deployed_at, NOW());
   END IF;
-END $$;
+
+  NEW.updated_at = NOW();
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS update_shares_deployed_at ON artists;
+CREATE TRIGGER update_shares_deployed_at
+BEFORE UPDATE ON artists
+FOR EACH ROW
+EXECUTE FUNCTION set_shares_deployed_at_timestamp();
 
 -- View for shares discovery across the platform
 CREATE OR REPLACE VIEW artists_with_active_shares AS
 SELECT 
   id,
   name,
-  wallet_address,
+  wallet,
   shares_contract_address,
   shares_enabled,
   shares_campaign_active,
