@@ -14,6 +14,7 @@ import { ProductCard, ProductGrid } from "@/components/ProductCard";
 import { useProductStore } from "@/stores/productStore";
 import { useCartStore } from "@/stores/cartStore";
 import { useSupabasePublishedProducts } from "@/hooks/useSupabase";
+import { resolveMediaUrl } from "@/lib/pinata";
 
 export function ProductsPage() {
   const navigate = useNavigate();
@@ -33,7 +34,7 @@ export function ProductsPage() {
       const storeProducts = supabaseProducts.map((p: any) => ({
         id: p.id,
         name: p.name,
-        image: p.image_url || "",
+        image: resolveMediaUrl(p.image_url, p.image_ipfs_uri),
         price: BigInt(Math.floor(parseFloat(p.price_eth) * 1e18)), // Convert ETH to wei
         creator: p.creator_wallet || "0x0",
         description: p.description || "",
@@ -65,7 +66,7 @@ export function ProductsPage() {
   const displayProducts = filteredProducts.length > 0 ? filteredProducts : supabaseProducts.map((p: any) => ({
     id: p.id,
     name: p.name,
-    image: p.image_url || "",
+    image: resolveMediaUrl(p.image_url, p.image_ipfs_uri),
     price: BigInt(Math.floor(parseFloat(p.price_eth) * 1e18)),
     creator: p.creator_wallet || "0x0",
     description: p.description || "",

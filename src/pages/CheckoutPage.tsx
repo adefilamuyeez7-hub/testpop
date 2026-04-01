@@ -11,6 +11,13 @@ import { useCartStore } from "@/stores/cartStore";
 import { formatEther } from "viem";
 import { toast } from "sonner";
 import { createOrder as dbCreateOrder, getProducts as dbGetProducts, updateProduct as dbUpdateProduct } from "@/lib/db";
+import {
+  CHECKOUT_COUNTRIES,
+  detectCheckoutCountry,
+  formatCheckoutPhone,
+  getCheckoutCountryMeta,
+  type CheckoutCountry,
+} from "@/lib/checkout";
 
 export function CheckoutPage() {
   const navigate = useNavigate();
@@ -18,14 +25,16 @@ export function CheckoutPage() {
   const { items, getTotalPrice, clearCart } = useCartStore();
 
   const [email, setEmail] = useState("");
+  const [phone, setPhone] = useState("");
   const [shippingAddress, setShippingAddress] = useState("");
   const [city, setCity] = useState("");
   const [postalCode, setPostalCode] = useState("");
-  const [country, setCountry] = useState("");
+  const [country, setCountry] = useState<CheckoutCountry>(detectCheckoutCountry());
   const [notes, setNotes] = useState("");
   const [orderPlaced, setOrderPlaced] = useState(false);
   const [isCheckingOut, setIsCheckingOut] = useState(false);
   const checkoutInFlightRef = useRef(false);
+  const countryMeta = getCheckoutCountryMeta(country);
 
   if (items.length === 0 && !orderPlaced) {
     return (
@@ -49,7 +58,7 @@ export function CheckoutPage() {
       return;
     }
 
-    if (!email || !shippingAddress || !city || !postalCode || !country) {
+    if (!email || !phone || !shippingAddress || !city || !postalCode || !country) {
       toast.error("Please fill in all shipping details");
       return;
     }
@@ -63,7 +72,15 @@ export function CheckoutPage() {
       checkoutInFlightRef.current = true;
       setIsCheckingOut(true);
       const allProducts = await dbGetProducts();
-      const shipping = [shippingAddress, city, postalCode, country, notes].filter(Boolean).join(", ");
+      const formattedPhone = formatCheckoutPhone(country, phone);
+      const shipping = [
+        shippingAddress,
+        city,
+        postalCode,
+        country,
+        `Phone: ${formattedPhone}`,
+        notes ? `Notes: ${notes}` : "",
+      ].filter(Boolean).join(", ");
 
       for (const item of items) {
         const matchedProduct = allProducts.find((product: any) => product.id === item.productId);
@@ -178,6 +195,23 @@ export function CheckoutPage() {
                 </div>
 
                 <div>
+                  <Label htmlFor="phone">Phone Number *</Label>
+                  <div className="flex rounded-md border border-input bg-background shadow-sm focus-within:ring-1 focus-within:ring-ring">
+                    <div className="flex items-center border-r border-input px-3 text-sm text-muted-foreground">
+                      {countryMeta.dialCode}
+                    </div>
+                    <Input
+                      id="phone"
+                      value={phone}
+                      onChange={(e) => setPhone(e.target.value)}
+                      placeholder={countryMeta.phonePlaceholder}
+                      className="border-0 shadow-none focus-visible:ring-0"
+                      required
+                    />
+                  </div>
+                </div>
+
+                <div>
                   <Label htmlFor="address">Street Address *</Label>
                   <Input
                     id="address"
@@ -213,13 +247,19 @@ export function CheckoutPage() {
 
                 <div>
                   <Label htmlFor="country">Country *</Label>
-                  <Input
+                  <select
                     id="country"
                     value={country}
-                    onChange={(e) => setCountry(e.target.value)}
-                    placeholder="United States"
+                    onChange={(e) => setCountry(e.target.value as CheckoutCountry)}
+                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background"
                     required
-                  />
+                  >
+                    {CHECKOUT_COUNTRIES.map((option) => (
+                      <option key={option.name} value={option.name}>
+                        {option.name}
+                      </option>
+                    ))}
+                  </select>
                 </div>
 
                 <div>

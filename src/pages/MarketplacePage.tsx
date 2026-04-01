@@ -20,12 +20,20 @@ import { useWallet } from "@/hooks/useContracts";
 import { toast } from "sonner";
 import { recordPageVisit, recordProductView } from "@/lib/analyticsStore";
 import {
+  CHECKOUT_COUNTRIES,
+  detectCheckoutCountry,
+  formatCheckoutPhone,
+  getCheckoutCountryMeta,
+  type CheckoutCountry,
+} from "@/lib/checkout";
+import {
   createOrder as dbCreateOrder,
   getOrdersByBuyer,
   getProducts as dbGetProducts,
   updateProduct as dbUpdateProduct,
 } from "@/lib/db";
 import { getOrCreateGuestCustomerId } from "@/lib/runtimeSession";
+import { resolveMediaUrl } from "@/lib/pinata";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type Product = {
@@ -97,16 +105,6 @@ const DELIVERY_STEPS: Record<Order["status"], number> = {
   processing: 0, shipped: 1, out_for_delivery: 2, delivered: 3,
 };
 const DELIVERY_LABELS = ["Processing", "Shipped", "Out for Delivery", "Delivered"];
-const COUNTRY_CURRENCY = {
-  Nigeria: { currency: "NGN", locale: "en-NG" },
-  "United States": { currency: "USD", locale: "en-US" },
-  "United Kingdom": { currency: "GBP", locale: "en-GB" },
-  Canada: { currency: "CAD", locale: "en-CA" },
-  Germany: { currency: "EUR", locale: "de-DE" },
-  France: { currency: "EUR", locale: "fr-FR" },
-  Netherlands: { currency: "EUR", locale: "nl-NL" },
-} as const;
-
 const DEFAULT_ETH_RATES = {
   NGN: 4200000,
   USD: 3800,
@@ -115,7 +113,6 @@ const DEFAULT_ETH_RATES = {
   EUR: 3500,
 } as const;
 
-type CheckoutCountry = keyof typeof COUNTRY_CURRENCY;
 type SupportedCurrency = keyof typeof DEFAULT_ETH_RATES;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -134,21 +131,6 @@ function normalizeStoredProduct(product: Partial<AdminProduct> & { id?: string; 
     image: product.image ?? "",
     imageUri: product.imageUri ?? "",
   };
-}
-
-function detectCheckoutCountry(): CheckoutCountry {
-  if (typeof navigator === "undefined") return "United States";
-
-  const locale = navigator.language || "en-US";
-  const region = locale.split("-")[1]?.toUpperCase();
-
-  if (region === "NG") return "Nigeria";
-  if (region === "GB") return "United Kingdom";
-  if (region === "CA") return "Canada";
-  if (region === "DE") return "Germany";
-  if (region === "FR") return "France";
-  if (region === "NL") return "Netherlands";
-  return "United States";
 }
 
 async function fetchEthRates(): Promise<Record<SupportedCurrency, number>> {
@@ -174,7 +156,7 @@ async function fetchEthRates(): Promise<Record<SupportedCurrency, number>> {
 }
 
 function formatLocalPrice(ethAmount: number, country: CheckoutCountry, rates: Record<SupportedCurrency, number>) {
-  const { currency, locale } = COUNTRY_CURRENCY[country];
+  const { currency, locale } = getCheckoutCountryMeta(country);
   const converted = ethAmount * rates[currency];
 
   return new Intl.NumberFormat(locale, {
@@ -223,7 +205,7 @@ function mapAdminProductToMarketplace(product: AdminProduct): Product {
     rating: fallback.rating,
     reviews: fallback.reviews,
     stock: product.stock,
-    image: product.image || fallback.image,
+    image: resolveMediaUrl(product.image, product.imageUri) || fallback.image,
     nftPerk: fallback.nftPerk,
     badge: productBadge(product.stock),
     description: product.description,
@@ -474,6 +456,7 @@ const MarketplacePage = () => {
   const cartCount = cart.reduce((s, i) => s + i.qty, 0);
   const cartTotal = cart.reduce((s, i) => s + i.priceEth * i.qty, 0);
   const displayCountry = checkoutForm.country;
+  const displayCountryMeta = getCheckoutCountryMeta(displayCountry);
   const cartTotalLocal = formatLocalPrice(cartTotal, displayCountry, ethRates);
 
   // ── Filtered products ───────────────────────────────────────────────────────
@@ -502,13 +485,20 @@ const placeOrder = async () => {
     }
     setIsPlacingOrder(true);
 
+    const formattedPhone = formatCheckoutPhone(checkoutForm.country, checkoutForm.phone);
     const newOrder: Order = {
       id: `ORD-${Date.now().toString(36).toUpperCase()}`,
       items: [...cart],
       total: cartTotal,
       status: "processing",
       trackingCode: `TRK-${Math.random().toString(36).substring(2, 8).toUpperCase()}`,
-      address: [checkoutForm.address, checkoutForm.city, checkoutForm.state, checkoutForm.country].filter(Boolean).join(", "),
+      address: [
+        checkoutForm.address,
+        checkoutForm.city,
+        checkoutForm.state,
+        checkoutForm.country,
+        `Phone: ${formattedPhone}`,
+      ].filter(Boolean).join(", "),
       date: new Date().toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" }),
       estimatedDelivery: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toLocaleDateString("en-GB", { day: "numeric", month: "short" }),
     };
@@ -904,14 +894,30 @@ const placeOrder = async () => {
               </div>
               <div>
                 <Label className="text-xs">Phone</Label>
-                <Input value={checkoutForm.phone} onChange={e => setCheckoutForm(f => ({ ...f, phone: e.target.value }))} placeholder="080XXXXXXXX" className="h-9 rounded-lg text-sm" />
+                <div className="flex rounded-lg border border-border bg-background">
+                  <div className="flex items-center border-r border-border px-3 text-sm text-muted-foreground">
+                    {displayCountryMeta.dialCode}
+                  </div>
+                  <Input
+                    value={checkoutForm.phone}
+                    onChange={e => setCheckoutForm(f => ({ ...f, phone: e.target.value }))}
+                    placeholder={displayCountryMeta.phonePlaceholder}
+                    className="h-9 rounded-none border-0 text-sm shadow-none focus-visible:ring-0"
+                  />
+                </div>
               </div>
             </div>
             <div>
               <Label className="text-xs">Country</Label>
-              <select value={checkoutForm.country} onChange={e => setCheckoutForm(f => ({ ...f, country: e.target.value as CheckoutCountry }))}
+              <select
+                value={checkoutForm.country}
+                onChange={e => setCheckoutForm(f => ({ ...f, country: e.target.value as CheckoutCountry }))}
                 className="w-full h-9 rounded-lg border border-border bg-background px-3 text-sm">
-                {Object.keys(COUNTRY_CURRENCY).map(country => <option key={country}>{country}</option>)}
+                {CHECKOUT_COUNTRIES.map((country) => (
+                  <option key={country.name} value={country.name}>
+                    {country.name}
+                  </option>
+                ))}
               </select>
             </div>
             <div>

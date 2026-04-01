@@ -84,3 +84,13 @@ export function ipfsToHttp(uri: string): string {
   }
   return uri;
 }
+
+export function resolveMediaUrl(...candidates: Array<string | null | undefined>): string {
+  for (const candidate of candidates) {
+    const value = candidate?.trim();
+    if (!value) continue;
+    return ipfsToHttp(value);
+  }
+
+  return "";
+}

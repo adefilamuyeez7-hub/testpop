@@ -9,6 +9,7 @@ import { useWallet } from "@/hooks/useContracts";
 import { Product, CartItem, OrderInfo } from "@/lib/types";
 import { toast } from "sonner";
 import { useSupabasePublishedProducts } from "@/hooks/useSupabase";
+import { resolveMediaUrl } from "@/lib/pinata";
 
 const categories = ["All", "Prints", "Apparel", "Sculptures", "Collectibles", "Zines", "Other"];
 const sorts = ["Popular", "Price low-high", "Price high-low"];
@@ -40,7 +41,7 @@ const InvestPage = () => {
         stock: p.stock || 0,
         rating: 4.5, // Default rating
         bestSeller: false,
-        image: p.image_url || "",
+        image: resolveMediaUrl(p.image_url, p.image_ipfs_uri),
         nftLink: "https://basescan.org",
         description: p.description || "Premium digital/physical product.",
       }));
