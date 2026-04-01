@@ -113,7 +113,7 @@ function getLiveDropsSelectClause() {
 
   if (shouldUseEmbeddedArtistRelation()) {
     columns.push(`
-      artists:artist_id (
+      artists (
         id,
         name,
         avatar_url
@@ -150,7 +150,7 @@ function getDropDetailSelectClause() {
 
   if (shouldUseEmbeddedArtistRelation()) {
     columns.push(`
-      artists:artist_id (
+      artists (
         id,
         name,
         handle,
