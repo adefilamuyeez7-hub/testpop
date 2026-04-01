@@ -17,7 +17,6 @@ import { ipfsToHttp, uploadFileToPinata } from "@/lib/pinata";
 import {
   type ArtistWhitelistEntry as WhitelistEntry,
   getStoredArtistWhitelist,
-  getServerArtistWhitelist,
   syncArtistWhitelist,
 } from "@/lib/whitelist";
 import { getAnalyticsSnapshot, getRecentVisitSeries } from "@/lib/analyticsStore";
@@ -31,7 +30,7 @@ import {
   updateOrder as dbUpdateOrder,
 } from "@/lib/db";
 import { useSupabaseAllProducts, useSupabaseAllDrops } from "@/hooks/useSupabase";
-import { useApproveArtist, useRejectArtist } from "@/lib/adminApi";
+import { useAdminArtists, useApproveArtist, useRejectArtist } from "@/lib/adminApi";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type MarketProduct = {
@@ -79,6 +78,28 @@ type WhitelistEntryWithContract = WhitelistEntry & {
 type DropSummary = {
   id: string;
 };
+
+function mapAdminArtistsToWhitelist(
+  artists: Array<{
+    id: string;
+    wallet: string;
+    status: "pending" | "approved" | "rejected";
+    created_at: string;
+    artists?: {
+      name?: string | null;
+    } | null;
+  }>
+): WhitelistEntry[] {
+  return artists.map((entry) => ({
+    id: entry.id,
+    wallet: entry.wallet.toLowerCase(),
+    name: entry.artists?.name?.trim() || "Unnamed Artist",
+    tag: "Other",
+    status: entry.status,
+    joinedAt: new Date(entry.created_at || Date.now()).toLocaleDateString("en-GB", { month: "short", year: "numeric" }),
+    joined_at: entry.created_at,
+  }));
+}
 
 function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : "Unknown error";
@@ -672,20 +693,42 @@ const AdminPage = () => {
   const [activeTab, setActiveTab] = useState("whitelist");
   const { data: supabaseProducts, loading: productsLoading } = useSupabaseAllProducts();
   const { data: supabaseDrops } = useSupabaseAllDrops(activeTab === "analytics");
+  const { fetch_artists: fetchAdminArtists, data: adminArtistsData } = useAdminArtists();
 
   const [whitelist, setWhitelist] = useState<WhitelistEntry[]>(() => getStoredArtistWhitelist());
+  const refreshWhitelist = useCallback(async () => {
+    try {
+      await fetchAdminArtists();
+    } catch (error) {
+      console.error("Failed to load whitelist from admin API, using cached whitelist:", error);
+      setWhitelist(getStoredArtistWhitelist());
+    }
+  }, [fetchAdminArtists]);
 
-  // Load whitelist from Supabase on mount.
+  // Prime the screen from cached whitelist data while the admin API refreshes.
   useEffect(() => {
-    getServerArtistWhitelist()
+    Promise.resolve(getStoredArtistWhitelist())
       .then(entries => {
         setWhitelist(entries);
-        console.log(`✅ Whitelist loaded from Supabase: ${entries.length} entries`);
+        console.log(`Loaded ${entries.length} whitelist entries from cache`);
       })
       .catch(err => {
-        console.error("❌ Failed to load whitelist from Supabase, using cache:", err);
+        console.error("Failed to load cached whitelist:", err);
       })
   }, []);
+  useEffect(() => {
+    refreshWhitelist().catch((error) => {
+      console.error("Failed to refresh whitelist:", error);
+    });
+  }, [refreshWhitelist]);
+
+  useEffect(() => {
+    if (!adminArtistsData?.artists) return;
+    const entries = mapAdminArtistsToWhitelist(adminArtistsData.artists);
+    setWhitelist(entries);
+    console.log(`Loaded ${entries.length} whitelist entries from admin API`);
+  }, [adminArtistsData]);
+
   const [products, setProducts] = useState<MarketProduct[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
   const [ordersLoaded, setOrdersLoaded] = useState(false);
@@ -802,8 +845,7 @@ const AdminPage = () => {
       
       // Reload whitelist from server to get updated status
       if (result.success) {
-        const updatedEntries = await getServerArtistWhitelist();
-        setWhitelist(updatedEntries);
+        await refreshWhitelist();
       }
       
       resolveArtistForWallet(entry.wallet);
@@ -816,7 +858,7 @@ const AdminPage = () => {
       setDeployingWallet(null);
       setWhitelistActionLabel(null);
     }
-  }, [approve, approvalError, whitelist]);
+  }, [approve, approvalError, refreshWhitelist, whitelist]);
 
   const rejectArtist = useCallback(async (id: string) => {
     const entry = whitelist.find(e => e.id === id);
@@ -832,8 +874,7 @@ const AdminPage = () => {
         throw new Error(rejectionError || "Failed to reject artist");
       }
 
-      const updatedEntries = await getServerArtistWhitelist();
-      setWhitelist(updatedEntries);
+      await refreshWhitelist();
       toast.error("Artist rejected");
     } catch (error) {
       console.error("❌ Failed to reject artist via admin API:", error);
@@ -843,7 +884,7 @@ const AdminPage = () => {
       setDeployingWallet(null);
       setWhitelistActionLabel(null);
     }
-  }, [reject, rejectionError, whitelist]);
+  }, [reject, rejectionError, refreshWhitelist, whitelist]);
 
   const removeArtist = useCallback(async (id: string) => {
     const entry = whitelist.find(e => e.id === id);

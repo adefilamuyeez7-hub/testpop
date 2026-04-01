@@ -18,6 +18,41 @@ export const ARTIST_WHITELIST_STORAGE_KEY = "popup_whitelist_cache";
 
 let whitelistCache: ArtistWhitelistEntry[] = [];
 
+function canUseStorage() {
+  return typeof window !== "undefined" && typeof window.localStorage !== "undefined";
+}
+
+function readStoredWhitelist(): ArtistWhitelistEntry[] {
+  if (!canUseStorage()) return [];
+
+  try {
+    const raw = window.localStorage.getItem(ARTIST_WHITELIST_STORAGE_KEY);
+    if (!raw) return [];
+
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+
+    return dedupeEntries(
+      parsed
+        .map((entry) => normalizeEntry(entry))
+        .filter((entry): entry is ArtistWhitelistEntry => Boolean(entry))
+    );
+  } catch (error) {
+    console.error("Failed to read whitelist cache from localStorage:", error);
+    return [];
+  }
+}
+
+function writeStoredWhitelist(entries: ArtistWhitelistEntry[]) {
+  if (!canUseStorage()) return;
+
+  try {
+    window.localStorage.setItem(ARTIST_WHITELIST_STORAGE_KEY, JSON.stringify(entries));
+  } catch (error) {
+    console.error("Failed to write whitelist cache to localStorage:", error);
+  }
+}
+
 function normalizeWallet(address: string | undefined) {
   return address?.trim().toLowerCase() ?? "";
 }
@@ -57,6 +92,10 @@ function dedupeEntries(entries: ArtistWhitelistEntry[]) {
 }
 
 export function getStoredArtistWhitelist(): ArtistWhitelistEntry[] {
+  if (whitelistCache.length === 0) {
+    whitelistCache = readStoredWhitelist();
+  }
+
   return whitelistCache;
 }
 
@@ -91,6 +130,7 @@ export async function getServerArtistWhitelist(): Promise<ArtistWhitelistEntry[]
 
   const deduped = dedupeEntries(normalized);
   whitelistCache = deduped;
+  writeStoredWhitelist(deduped);
   return deduped;
 }
 
@@ -106,6 +146,7 @@ export function syncArtistWhitelist(entries: ArtistWhitelistEntry[]) {
   );
 
   whitelistCache = normalized;
+  writeStoredWhitelist(normalized);
   return normalized;
 }
 

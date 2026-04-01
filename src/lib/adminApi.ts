@@ -4,7 +4,7 @@
  * Hooks for admin-only operations like approving artists and managing whitelist.
  */
 
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { getRuntimeApiToken } from "@/lib/runtimeSession";
 import { SECURE_API_BASE } from "@/lib/apiBase";
 
@@ -148,6 +148,7 @@ export function useRejectArtist() {
 
 export interface AdminArtistsResponse {
   artists: Array<{
+    id: string;
     wallet: string;
     status: "pending" | "approved" | "rejected";
     created_at: string;
@@ -168,7 +169,7 @@ export function useAdminArtists(status?: "pending" | "approved" | "rejected") {
   const [error, setError] = useState<string | null>(null);
   const [data, setData] = useState<AdminArtistsResponse | null>(null);
 
-  const fetch_artists = async () => {
+  const fetch_artists = useCallback(async () => {
     setIsLoading(true);
     setError(null);
 
@@ -196,10 +197,11 @@ export function useAdminArtists(status?: "pending" | "approved" | "rejected") {
       const message = err instanceof Error ? err.message : "Unknown error";
       setError(message);
       console.error("Fetch error:", err);
+      throw err;
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [status]);
 
   return { fetch_artists, data, isLoading, error };
 }
