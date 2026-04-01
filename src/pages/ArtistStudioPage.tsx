@@ -23,6 +23,7 @@ import { ipfsToHttp, uploadFileToPinata, uploadMetadataToPinata } from "@/lib/pi
 import { formatEther } from "viem";
 import { toast } from "sonner";
 import { CampaignManagementPanel } from "@/components/campaign/CampaignManagementPanel";
+import { CampaignArchitectureCard } from "@/components/campaign/CampaignArchitectureCard";
 import { detectAssetTypeFromFile, type AssetType } from "@/lib/assetTypes";
 import { POAP_CAMPAIGN_ADDRESS } from "@/lib/contracts/poapCampaign";
 import { useCampaignStore } from "@/stores/campaignStore";
@@ -1317,6 +1318,7 @@ const ArtistStudioPage = () => {
               </div>
             )}
 
+            <CampaignArchitectureCard />
             <CampaignManagementPanel artistWallet={address} />
           </div>
         )}

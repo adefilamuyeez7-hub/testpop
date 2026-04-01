@@ -11,6 +11,7 @@ import { ipfsToHttp } from "@/lib/pinata";
 import { VideoViewer } from "@/components/collection/VideoViewer";
 import { AudioPlayer } from "@/components/collection/AudioPlayer";
 import { useCollectionStore } from "@/stores/collectionStore";
+import { CampaignArchitectureCard } from "@/components/campaign/CampaignArchitectureCard";
 
 const DropPrimaryActionCard = lazy(() => import("@/components/wallet/DropPrimaryActionCard"));
 
@@ -214,7 +215,9 @@ const DropDetailPage = () => {
           </p>
         </div>
 
-        {!hasContractAddress ? (
+        {drop.type === "campaign" ? (
+          <CampaignArchitectureCard />
+        ) : !hasContractAddress ? (
           <div className="rounded-xl border border-warning/60 bg-warning/10 p-3 text-warning text-xs flex items-center gap-2">
             <AlertTriangle className="h-4 w-4" />
             Contract not deployed yet
