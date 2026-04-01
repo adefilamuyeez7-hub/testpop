@@ -74,6 +74,14 @@ type Drop = {
   contractKind?: "artDrop" | "poapCampaign" | null;
 };
 
+type DropMode = Drop["type"];
+
+const toStoredDropType = (mode: DropMode): "drop" | "auction" | "campaign" =>
+  mode === "buy" ? "drop" : mode;
+
+const fromStoredDropType = (type?: string | null): DropMode =>
+  type === "auction" ? "auction" : type === "campaign" ? "campaign" : "buy";
+
 type Notification = {
   id: string;
   text: string;
@@ -116,16 +124,47 @@ const StatCard = ({ icon: Icon, label, value, sub, accent }: StatCardProps) => (
 );
 
 // ─── Create Drop Sheet ────────────────────────────────────────────────────────
-const CreateDropSheet = ({ open, onClose, onCreated, artistContractAddress }: { open: boolean; onClose: () => void; onCreated: (d: Drop) => void; artistContractAddress?: string | null }) => {
+const CreateDropSheet = ({
+  open,
+  onClose,
+  onCreated,
+  artistContractAddress,
+  defaultPoapAllocation,
+}: {
+  open: boolean;
+  onClose: () => void;
+  onCreated: (d: Drop) => void;
+  artistContractAddress?: string | null;
+  defaultPoapAllocation: {
+    subscribers: number;
+    bidders: number;
+    creators: number;
+  };
+}) => {
   const [step, setStep] = useState(0);
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadErr, setUploadErr] = useState<string | null>(null);
-  const [pendingResult, setPendingResult] = useState<{ metadataUri: string; imageUri: string } | null>(null);
+  const [pendingResult, setPendingResult] = useState<{ metadataUri: string; imageUri: string; mode: DropMode } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const { isConnected, connectWallet, address } = useWallet();
-  const { createDrop, createdDropId, isPending, isConfirming, isSuccess, error } = useCreateDropArtist(artistContractAddress);
+  const {
+    createDrop,
+    createdDropId,
+    isPending: isCreateDropPending,
+    isConfirming: isCreateDropConfirming,
+    isSuccess: isCreateDropSuccess,
+    error: createDropError,
+  } = useCreateDropArtist(artistContractAddress);
+  const {
+    createCampaign,
+    createdCampaignId,
+    isPending: isCreateCampaignPending,
+    isConfirming: isCreateCampaignConfirming,
+    isSuccess: isCreateCampaignSuccess,
+    error: createCampaignError,
+  } = useCreateCampaign();
   const [form, setForm] = useState({ title: "", description: "", price: "", duration: "24", supply: "1", type: "buy" as Drop["type"] });
 
   const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -138,7 +177,7 @@ const CreateDropSheet = ({ open, onClose, onCreated, artistContractAddress }: { 
     r.readAsDataURL(f);
   };
 
-  const handleMint = async () => {
+  const handlePublish = async () => {
     if (!file) return;
     
     // Validate form before uploading
@@ -168,8 +207,12 @@ const CreateDropSheet = ({ open, onClose, onCreated, artistContractAddress }: { 
       return;
     }
 
-    // Check if artist has deployed contract
-    if (!artistContractAddress || artistContractAddress === ZERO_ADDRESS) {
+    if (form.type === "campaign") {
+      toast.error("Campaign drops need a dedicated allocation workflow and are not publishable yet.");
+      return;
+    }
+
+    if (form.type === "buy" && (!artistContractAddress || artistContractAddress === ZERO_ADDRESS)) {
       alert("Your artist contract has not been deployed yet. Please ask an admin to approve and deploy your contract first.");
       return;
     }
@@ -185,13 +228,24 @@ const CreateDropSheet = ({ open, onClose, onCreated, artistContractAddress }: { 
       const imageUri = `ipfs://${imageCid}`;
       toast.info("Pinning metadata…");
       const uri = await uploadMetadataToPinata({ name: form.title, description: form.description, image: imageUri });
-      setPendingResult({ metadataUri: uri, imageUri });
+      setPendingResult({ metadataUri: uri, imageUri, mode: form.type });
       
       const now = Math.floor(Date.now() / 1000);
       try {
-        // Call createDrop - don't await, just trigger the transaction
-        // The useEffect below will handle the async receipt/success
-        createDrop(uri, form.price, Number(form.supply), now, now + Number(form.duration) * 3600);
+        if (form.type === "buy") {
+          createDrop(uri, form.price, Number(form.supply), now, now + Number(form.duration) * 3600);
+        } else if (form.type === "auction") {
+          createCampaign(
+            uri,
+            0,
+            Number(form.supply),
+            now,
+            now + Number(form.duration) * 3600,
+            defaultPoapAllocation.subscribers,
+            defaultPoapAllocation.bidders,
+            defaultPoapAllocation.creators
+          );
+        }
       } catch (contractError: unknown) {
         const errorMessage = contractError instanceof Error ? contractError.message : "Contract call failed";
         setUploadErr(errorMessage);
@@ -208,11 +262,23 @@ const CreateDropSheet = ({ open, onClose, onCreated, artistContractAddress }: { 
   };
 
   useEffect(() => {
-    if (!isSuccess || createdDropId === null || !pendingResult?.metadataUri) return;
+    const publishedId =
+      pendingResult?.mode === "auction"
+        ? createdCampaignId
+        : createdDropId;
+    const publishSucceeded =
+      pendingResult?.mode === "auction"
+        ? isCreateCampaignSuccess
+        : isCreateDropSuccess;
+
+    if (!publishSucceeded || publishedId === null || publishedId === undefined || !pendingResult?.metadataUri) return;
     
     (async () => {
       try {
-        // Save drop to Supabase with contractDropId
+        const storedType = toStoredDropType(pendingResult.mode);
+        const contractKind = pendingResult.mode === "auction" ? "poapCampaign" : "artDrop";
+        const contractAddress = pendingResult.mode === "auction" ? POAP_CAMPAIGN_ADDRESS : artistContractAddress;
+
         const savedDrop = await dbCreateDrop({
           artist_id: resolveArtistForWallet(address).id, // Get artist ID from wallet
           title: form.title,
@@ -220,18 +286,20 @@ const CreateDropSheet = ({ open, onClose, onCreated, artistContractAddress }: { 
           price_eth: parseFloat(form.price),
           supply: Number(form.supply),
           status: "live",
-          type: form.type === "buy" ? "drop" : form.type,
+          type: storedType,
           image_url: preview || undefined,
           metadata_ipfs_uri: pendingResult.metadataUri,
           image_ipfs_uri: pendingResult.imageUri,
-          contract_address: artistContractAddress,
-          contract_drop_id: createdDropId, // Save the on-chain drop ID
-          contract_kind: "artDrop",
+          contract_address: contractAddress,
+          contract_drop_id: publishedId,
+          contract_kind: contractKind,
           ends_at: new Date(Date.now() + Number(form.duration) * 3600 * 1000).toISOString(),
         });
 
         if (savedDrop) {
-          await updateArtistDropContractId(savedDrop.id, createdDropId);
+          if (contractKind === "artDrop") {
+            await updateArtistDropContractId(savedDrop.id, publishedId);
+          }
 
           onCreated({
             id: savedDrop.id,
@@ -240,15 +308,15 @@ const CreateDropSheet = ({ open, onClose, onCreated, artistContractAddress }: { 
             supply: Number(form.supply),
             sold: 0,
             status: "live",
-            type: form.type,
+            type: pendingResult.mode,
             endsIn: `${form.duration}h`,
             revenue: "0",
             image: preview,
             metadataUri: pendingResult.metadataUri,
             imageUri: pendingResult.imageUri,
-            contractAddress: artistContractAddress ?? null,
-            contractDropId: createdDropId,
-            contractKind: "artDrop",
+            contractAddress: contractAddress ?? null,
+            contractDropId: publishedId,
+            contractKind,
           });
           toast.success("Drop minted and saved to database! 🎉");
           
@@ -269,9 +337,38 @@ const CreateDropSheet = ({ open, onClose, onCreated, artistContractAddress }: { 
         setIsUploading(false);
       }
     })();
-  }, [createdDropId, isSuccess, pendingResult, form, preview, address, onCreated, onClose, artistContractAddress]);
+  }, [
+    address,
+    artistContractAddress,
+    createdCampaignId,
+    createdDropId,
+    form,
+    isCreateCampaignSuccess,
+    isCreateDropSuccess,
+    onClose,
+    onCreated,
+    pendingResult,
+    preview,
+  ]);
 
-  const busy = isUploading || isPending || isConfirming;
+  const activePublishError = form.type === "auction" ? createCampaignError : createDropError;
+  const isPending = isCreateDropPending || isCreateCampaignPending;
+  const isConfirming = isCreateDropConfirming || isCreateCampaignConfirming;
+  const busy =
+    isUploading ||
+    isCreateDropPending ||
+    isCreateDropConfirming ||
+    isCreateCampaignPending ||
+    isCreateCampaignConfirming;
+  const publishButtonContent = isUploading
+    ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Uploading to IPFS...</>
+    : isCreateDropPending || isCreateCampaignPending
+    ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Confirm in wallet...</>
+    : isCreateDropConfirming || isCreateCampaignConfirming
+    ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Publishing...</>
+    : form.type === "buy"
+    ? <><Zap className="h-4 w-4 mr-2" />Mint & Publish</>
+    : <><Gavel className="h-4 w-4 mr-2" />Create Auction</>;
   const canNext0 = !!preview;
   const canNext1 = !!(form.title && form.price);
 
@@ -366,8 +463,9 @@ const CreateDropSheet = ({ open, onClose, onCreated, artistContractAddress }: { 
                 ))}
               </div>
               {uploadErr && <div className="flex gap-2 p-3 rounded-xl bg-destructive/10 text-destructive text-xs"><AlertTriangle className="h-4 w-4 shrink-0" />{uploadErr}</div>}
-              {error && <p className="text-xs text-destructive">{(error as Web3Error).shortMessage ?? (error as Web3Error).message}</p>}
-              <Button onClick={handleMint} disabled={busy} className="w-full rounded-xl gradient-primary text-primary-foreground font-bold h-11">
+              {form.type === "campaign" && <div className="flex gap-2 p-3 rounded-xl bg-secondary text-muted-foreground text-xs"><AlertTriangle className="h-4 w-4 shrink-0" />Campaign mode is being redesigned before launch. Buy and auction are supported right now.</div>}
+              {activePublishError && <p className="text-xs text-destructive">{(activePublishError as Web3Error).shortMessage ?? (activePublishError as Web3Error).message}</p>}
+              <Button onClick={handlePublish} disabled={busy || form.type === "campaign"} className="w-full rounded-xl gradient-primary text-primary-foreground font-bold h-11">
                 {isUploading ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Uploading to IPFS…</>
                   : isPending ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Confirm in wallet…</>
                   : isConfirming ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Minting…</>
@@ -457,7 +555,7 @@ const ArtistStudioPage = () => {
       supply: drop.maxBuy ?? 1,
       sold: drop.bought ?? 0,
       status: drop.status === "upcoming" ? "draft" : drop.status === "ended" ? "ended" : "live",
-      type: drop.type.toLowerCase() as Drop["type"],
+      type: fromStoredDropType(drop.type),
       endsIn: drop.endsIn,
       revenue: drop.currentBidEth ?? drop.priceEth,
       image: drop.image,
@@ -1230,6 +1328,7 @@ const ArtistStudioPage = () => {
         open={showDropSheet}
         onClose={() => setShowDropSheet(false)}
         artistContractAddress={deployedContractAddress}
+        defaultPoapAllocation={profile.defaultPoapAllocation}
         onCreated={d => {
           setDrops(prev => [d, ...prev]);
           syncArtistDropCache({
