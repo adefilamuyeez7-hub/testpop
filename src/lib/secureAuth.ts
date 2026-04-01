@@ -6,6 +6,7 @@ import {
   setRuntimeSession,
 } from "@/lib/runtimeSession";
 import { SECURE_API_BASE } from "@/lib/apiBase";
+import { config as wagmiConfig } from "@/lib/wagmi";
 
 const secureApiBaseUrl = SECURE_API_BASE;
 const AUTH_REQUEST_TIMEOUT_MS = 15000;
@@ -98,9 +99,32 @@ export async function requestWalletChallenge(wallet: string): Promise<ChallengeR
 }
 
 export async function signChallengeMessage(message: string, wallet: string): Promise<string> {
+  try {
+    const { getAccount, signMessage } = await import("@wagmi/core");
+    const account = getAccount(wagmiConfig);
+    const normalizedWallet = wallet.trim().toLowerCase();
+
+    if (account.address && account.address.toLowerCase() === normalizedWallet) {
+      const signature = await withTimeout(
+        signMessage(wagmiConfig, {
+          account: account.address,
+          message,
+        }),
+        SIGNATURE_TIMEOUT_MS,
+        "Wallet signature request timed out. Reopen your wallet and try again."
+      );
+
+      if (signature && typeof signature === "string") {
+        return signature;
+      }
+    }
+  } catch (error) {
+    console.warn("Wagmi message signing unavailable, falling back to injected provider:", error);
+  }
+
   const ethereum = (window as Window & { ethereum?: { request?: (...args: unknown[]) => Promise<unknown> } }).ethereum;
   if (!ethereum?.request) {
-    throw new Error("No injected wallet provider found for secure signing.");
+    throw new Error("No wallet signing provider found for secure signing.");
   }
 
   const signature = await withTimeout(

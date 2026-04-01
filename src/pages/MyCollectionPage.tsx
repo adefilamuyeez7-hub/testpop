@@ -5,9 +5,10 @@ import { Button } from "@/components/ui/button";
 import { useWallet } from "@/hooks/useContracts";
 import { trackCollectionView } from "@/lib/analyticsStore";
 import { ImageViewer, VideoViewer, AudioPlayer, PdfReader, EpubReader, DownloadPanel } from "@/components/collection";
-import { ipfsToHttp } from "@/lib/pinata";
+import { ipfsToHttp, resolveMediaUrl } from "@/lib/pinata";
 import { useCollectionStore, type CollectedDropItem } from "@/stores/collectionStore";
 import { getOrdersByBuyer, type OrderWithItems } from "@/lib/db";
+import { detectAssetTypeFromUri, type AssetType } from "@/lib/assetTypes";
 
 function getCollectionItemKey(item: CollectedDropItem) {
   const normalizedWallet = item.ownerWallet.toLowerCase();
@@ -18,6 +19,42 @@ function getCollectionItemKey(item: CollectedDropItem) {
   }
 
   return `${normalizedWallet}:${item.id}`;
+}
+
+function inferCollectedAssetType(item: Pick<CollectedDropItem, "assetType" | "deliveryUri" | "previewUri" | "imageUrl">): AssetType {
+  if (item.assetType && item.assetType !== "digital") {
+    return item.assetType;
+  }
+
+  const mediaCandidates = [item.deliveryUri, item.previewUri, item.imageUrl];
+  for (const candidate of mediaCandidates) {
+    if (!candidate?.trim()) continue;
+    const detected = detectAssetTypeFromUri(candidate);
+    if (detected) {
+      return detected;
+    }
+  }
+
+  return item.assetType || "image";
+}
+
+function normalizeCollectedItem(item: CollectedDropItem): CollectedDropItem {
+  const imageUrl = resolveMediaUrl(item.imageUrl, item.previewUri, item.deliveryUri);
+  const previewUri = item.previewUri || imageUrl || item.deliveryUri;
+  const deliveryUri = item.deliveryUri || item.previewUri || item.imageUrl;
+
+  return {
+    ...item,
+    imageUrl,
+    previewUri: previewUri || undefined,
+    deliveryUri: deliveryUri || undefined,
+    assetType: inferCollectedAssetType({
+      assetType: item.assetType,
+      deliveryUri,
+      previewUri,
+      imageUrl,
+    }),
+  };
 }
 
 const CollectionPlaceholder = ({
@@ -96,8 +133,15 @@ const MyCollectionPage = () => {
 
           return (typedOrder.order_items || []).map((item, index) => {
             const product = Array.isArray(item.products) ? item.products[0] : item.products;
-            const imageUrl = product?.image_url || product?.image_ipfs_uri || "";
-            const assetType = product?.asset_type || (product?.product_type === "digital" ? "digital" : "image");
+            const imageUrl = resolveMediaUrl(product?.image_url, product?.image_ipfs_uri, product?.preview_uri, product?.delivery_uri);
+            const previewUri = product?.preview_uri || product?.image_url || product?.image_ipfs_uri || undefined;
+            const deliveryUri = product?.delivery_uri || product?.image_ipfs_uri || product?.image_url || undefined;
+            const assetType = inferCollectedAssetType({
+              assetType: product?.asset_type || undefined,
+              deliveryUri,
+              previewUri,
+              imageUrl,
+            });
 
             return {
               id: `${typedOrder.id}:${item.id || item.product_id || index}`,
@@ -105,8 +149,8 @@ const MyCollectionPage = () => {
               title: product?.name?.trim() || `Order item ${index + 1}`,
               artist: product?.creator_wallet || "Marketplace",
               imageUrl,
-              previewUri: product?.preview_uri || undefined,
-              deliveryUri: product?.delivery_uri || product?.image_ipfs_uri || undefined,
+              previewUri,
+              deliveryUri,
               assetType,
               isGated: Boolean(product?.is_gated),
               collectedAt: typedOrder.created_at || new Date().toISOString(),
@@ -168,7 +212,7 @@ const MyCollectionPage = () => {
       }
     });
 
-    return Array.from(merged.values()).sort((a, b) => {
+    return Array.from(merged.values()).map(normalizeCollectedItem).sort((a, b) => {
       const aTime = new Date(a.collectedAt).getTime();
       const bTime = new Date(b.collectedAt).getTime();
       return bTime - aTime;
@@ -340,13 +384,29 @@ const MyCollectionPage = () => {
                         Audio Collect
                       </div>
                     ) : drop.assetType === "pdf" ? (
-                      <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-red-600 to-red-900 text-white text-xs font-semibold">
-                        PDF Collect
-                      </div>
+                      drop.imageUrl ? (
+                        <img
+                          src={ipfsToHttp(drop.imageUrl)}
+                          alt={drop.title}
+                          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                        />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-red-600 to-red-900 text-white text-xs font-semibold">
+                          PDF Collect
+                        </div>
+                      )
                     ) : drop.assetType === "epub" ? (
-                      <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-amber-600 to-amber-900 text-white text-xs font-semibold">
-                        eBook Collect
-                      </div>
+                      drop.imageUrl ? (
+                        <img
+                          src={ipfsToHttp(drop.imageUrl)}
+                          alt={drop.title}
+                          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                        />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-amber-600 to-amber-900 text-white text-xs font-semibold">
+                          eBook Collect
+                        </div>
+                      )
                     ) : drop.assetType === "digital" ? (
                       <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-sky-700 to-slate-900 text-white text-xs font-semibold px-3 text-center">
                         Downloadable Tool

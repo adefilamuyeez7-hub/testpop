@@ -2,6 +2,8 @@ import { getRuntimeApiToken } from "@/lib/runtimeSession";
 
 const DEFAULT_PINATA_API_BASE = "/api/pinata";
 const PINATA_API_BASE = (import.meta.env.VITE_PINATA_API_BASE_URL || DEFAULT_PINATA_API_BASE).replace(/\/$/, "");
+const DEFAULT_IPFS_GATEWAY_BASE = "https://ipfs.io/ipfs";
+const IPFS_GATEWAY_BASE = (import.meta.env.VITE_IPFS_GATEWAY_URL || DEFAULT_IPFS_GATEWAY_BASE).replace(/\/$/, "");
 
 type PinataUploadResponse = {
   cid: string;
@@ -84,17 +86,28 @@ function isBareIpfsCid(value: string): boolean {
 
 export function ipfsToHttp(uri: string): string {
   const normalized = uri.trim();
+  const gatewayPrefixes = [
+    "https://gateway.pinata.cloud/ipfs/",
+    "https://ipfs.io/ipfs/",
+    "https://cloudflare-ipfs.com/ipfs/",
+  ];
+
+  for (const prefix of gatewayPrefixes) {
+    if (normalized.startsWith(prefix)) {
+      return `${IPFS_GATEWAY_BASE}/${normalized.slice(prefix.length)}`;
+    }
+  }
 
   if (normalized.startsWith("ipfs://ipfs/")) {
-    return `https://gateway.pinata.cloud/ipfs/${normalized.slice("ipfs://ipfs/".length)}`;
+    return `${IPFS_GATEWAY_BASE}/${normalized.slice("ipfs://ipfs/".length)}`;
   }
 
   if (normalized.startsWith("ipfs://")) {
-    return `https://gateway.pinata.cloud/ipfs/${normalized.slice(7)}`;
+    return `${IPFS_GATEWAY_BASE}/${normalized.slice(7)}`;
   }
 
   if (isBareIpfsCid(normalized)) {
-    return `https://gateway.pinata.cloud/ipfs/${normalized}`;
+    return `${IPFS_GATEWAY_BASE}/${normalized}`;
   }
 
   return normalized;
