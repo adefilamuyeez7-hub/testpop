@@ -121,6 +121,29 @@ export interface Order {
 }
 
 export interface OrderWithItems extends Order {
+  products?: {
+    id?: string | null;
+    name?: string | null;
+    image_url?: string | null;
+    image_ipfs_uri?: string | null;
+    product_type?: Product["product_type"] | null;
+    asset_type?: Product["asset_type"] | null;
+    preview_uri?: string | null;
+    delivery_uri?: string | null;
+    is_gated?: boolean | null;
+    creator_wallet?: string | null;
+  } | Array<{
+    id?: string | null;
+    name?: string | null;
+    image_url?: string | null;
+    image_ipfs_uri?: string | null;
+    product_type?: Product["product_type"] | null;
+    asset_type?: Product["asset_type"] | null;
+    preview_uri?: string | null;
+    delivery_uri?: string | null;
+    is_gated?: boolean | null;
+    creator_wallet?: string | null;
+  }> | null;
   order_items?: Array<OrderItem & {
     products?: {
       id?: string | null;
@@ -508,7 +531,7 @@ export async function createOrder(order: Partial<Order>): Promise<Order | null> 
   });
 }
 
-const ORDER_SELECT = `
+const LEGACY_ORDER_SELECT = `
   id,
   product_id,
   buyer_wallet,
@@ -527,6 +550,22 @@ const ORDER_SELECT = `
   delivered_at,
   created_at,
   updated_at,
+  products(
+    id,
+    name,
+    image_url,
+    image_ipfs_uri,
+    product_type,
+    asset_type,
+    preview_uri,
+    delivery_uri,
+    is_gated,
+    creator_wallet
+  )
+`;
+
+const ORDER_SELECT = `
+  ${LEGACY_ORDER_SELECT},
   order_items(
     id,
     product_id,
@@ -550,6 +589,60 @@ const ORDER_SELECT = `
   )
 `;
 
+function isMissingOrderSchemaCompatError(errorOrMessage: unknown): boolean {
+  const message =
+    typeof errorOrMessage === "string"
+      ? errorOrMessage
+      : typeof errorOrMessage === "object" && errorOrMessage !== null && "message" in errorOrMessage
+      ? String((errorOrMessage as { message?: unknown }).message || "")
+      : "";
+  const normalized = message.toLowerCase();
+
+  return (
+    normalized.includes("schema cache") &&
+    (normalized.includes("order_items") || normalized.includes("create_checkout_order"))
+  );
+}
+
+function firstRelationRecord<T>(value: T | T[] | null | undefined): T | null {
+  if (Array.isArray(value)) return value[0] ?? null;
+  return value ?? null;
+}
+
+function normalizeOrderRecord(order: OrderWithItems): OrderWithItems {
+  if (order.order_items?.length) {
+    return order;
+  }
+
+  const product = firstRelationRecord(order.products);
+  if (!order.product_id || !product) {
+    return {
+      ...order,
+      order_items: [],
+    };
+  }
+
+  const quantity = Math.max(1, Number(order.quantity) || 1);
+  const lineTotal = Number(order.total_price_eth) || 0;
+
+  return {
+    ...order,
+    order_items: [
+      {
+        id: `${order.id}:${order.product_id}`,
+        order_id: order.id,
+        product_id: order.product_id,
+        quantity,
+        unit_price_eth: quantity > 0 ? lineTotal / quantity : lineTotal,
+        line_total_eth: lineTotal,
+        fulfillment_type: product.product_type === "physical" ? "physical" : "digital",
+        delivery_status: order.status || "paid",
+        products: product,
+      },
+    ],
+  };
+}
+
 export async function getOrdersByBuyer(buyerWallet: string): Promise<OrderWithItems[]> {
   try {
     const normalizedWallet = buyerWallet.toLowerCase();
@@ -561,11 +654,19 @@ export async function getOrdersByBuyer(buyerWallet: string): Promise<OrderWithIt
     if (!supabaseUrl || !supabaseAnonKey) return [];
 
     console.log(`📖 Fetching orders for buyer: ${buyerWallet}`);
-    const { data, error } = await supabase
+    let { data, error } = await supabase
       .from("orders")
       .select(ORDER_SELECT)
       .eq("buyer_wallet", normalizedWallet)
       .order("created_at", { ascending: false });
+
+    if (error && isMissingOrderSchemaCompatError(error)) {
+      ({ data, error } = await supabase
+        .from("orders")
+        .select(LEGACY_ORDER_SELECT)
+        .eq("buyer_wallet", normalizedWallet)
+        .order("created_at", { ascending: false }));
+    }
 
     if (error) {
       console.error("❌ Error fetching buyer orders:", error.message);
@@ -573,7 +674,7 @@ export async function getOrdersByBuyer(buyerWallet: string): Promise<OrderWithIt
     }
 
     console.log(`✅ Found ${data?.length || 0} orders`);
-    return (data as OrderWithItems[]) || [];
+    return ((data as OrderWithItems[]) || []).map(normalizeOrderRecord);
   } catch (error: any) {
     console.error("❌ getOrdersByBuyer failed:", error.message);
     return [];

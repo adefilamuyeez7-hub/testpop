@@ -1282,7 +1282,7 @@ function normalizeShippingAddress(rawShipping) {
   };
 }
 
-const ORDER_SELECT = `
+const LEGACY_ORDER_SELECT = `
   id,
   product_id,
   buyer_wallet,
@@ -1301,6 +1301,22 @@ const ORDER_SELECT = `
   delivered_at,
   created_at,
   updated_at,
+  products(
+    id,
+    name,
+    image_url,
+    image_ipfs_uri,
+    product_type,
+    asset_type,
+    preview_uri,
+    delivery_uri,
+    is_gated,
+    creator_wallet
+  )
+`;
+
+const ORDER_SELECT = `
+  ${LEGACY_ORDER_SELECT},
   order_items(
     id,
     product_id,
@@ -1324,6 +1340,185 @@ const ORDER_SELECT = `
   )
 `;
 
+function isMissingOrderSchemaCompatError(errorOrMessage) {
+  const message = typeof errorOrMessage === "string"
+    ? errorOrMessage
+    : errorOrMessage?.message || "";
+  const normalized = message.toLowerCase();
+
+  return (
+    normalized.includes("schema cache") &&
+    (
+      normalized.includes("create_checkout_order") ||
+      normalized.includes("order_items")
+    )
+  );
+}
+
+function firstRelationRecord(value) {
+  if (Array.isArray(value)) return value[0] || null;
+  return value || null;
+}
+
+function normalizeOrderRecord(order) {
+  if (!order || (Array.isArray(order.order_items) && order.order_items.length > 0)) {
+    return order;
+  }
+
+  const product = firstRelationRecord(order.products);
+  if (!order.product_id || !product) {
+    return {
+      ...order,
+      order_items: [],
+    };
+  }
+
+  const quantity = Number(order.quantity) > 0 ? Number(order.quantity) : 1;
+  const lineTotal = Number(order.total_price_eth) || 0;
+
+  return {
+    ...order,
+    order_items: [
+      {
+        id: `${order.id}:${order.product_id}`,
+        product_id: order.product_id,
+        quantity,
+        unit_price_eth: quantity > 0 ? lineTotal / quantity : lineTotal,
+        line_total_eth: lineTotal,
+        fulfillment_type: product.product_type === "physical" ? "physical" : "digital",
+        delivery_status: order.status || "paid",
+        products: product,
+      },
+    ],
+  };
+}
+
+async function listOrdersForBuyer(wallet) {
+  let { data, error } = await supabase
+    .from("orders")
+    .select(ORDER_SELECT)
+    .eq("buyer_wallet", wallet)
+    .order("created_at", { ascending: false });
+
+  if (error && isMissingOrderSchemaCompatError(error)) {
+    ({ data, error } = await supabase
+      .from("orders")
+      .select(LEGACY_ORDER_SELECT)
+      .eq("buyer_wallet", wallet)
+      .order("created_at", { ascending: false }));
+  }
+
+  if (error) throw error;
+  return (data || []).map(normalizeOrderRecord);
+}
+
+async function getOrderById(orderId) {
+  let { data, error } = await supabase
+    .from("orders")
+    .select(ORDER_SELECT)
+    .eq("id", orderId)
+    .single();
+
+  if (error && isMissingOrderSchemaCompatError(error)) {
+    ({ data, error } = await supabase
+      .from("orders")
+      .select(LEGACY_ORDER_SELECT)
+      .eq("id", orderId)
+      .single());
+  }
+
+  if (error) throw error;
+  return normalizeOrderRecord(data);
+}
+
+async function createLegacyCheckoutOrders({
+  buyerWallet,
+  normalizedItems,
+  shippingAddressJsonb,
+  currency,
+  trackingCode,
+}) {
+  const productIds = normalizedItems.map((item) => item.product_id);
+  const { data: products, error: productsError } = await supabase
+    .from("products")
+    .select("id, name, price_eth, stock, sold, status, product_type, asset_type, preview_uri, delivery_uri, image_url, image_ipfs_uri, is_gated, creator_wallet")
+    .in("id", productIds);
+
+  if (productsError) {
+    throw new Error(productsError.message || "Failed to load products for checkout");
+  }
+
+  const productsById = new Map((products || []).map((product) => [product.id, product]));
+  const createdOrderIds = [];
+
+  for (const item of normalizedItems) {
+    const product = productsById.get(item.product_id);
+    if (!product) {
+      throw new Error("One or more items are no longer available.");
+    }
+
+    if (product.status && product.status !== "published") {
+      throw new Error(`${product.name || "Item"} is no longer available.`);
+    }
+
+    const currentStock = product.stock == null ? null : Number(product.stock);
+    if (currentStock !== null && currentStock < item.quantity) {
+      throw new Error(`${product.name || "Item"} only has ${Math.max(currentStock, 0)} left in stock.`);
+    }
+
+    const quantity = Math.max(1, Number(item.quantity) || 1);
+    const unitPrice = Number(product.price_eth) || 0;
+    const totalPrice = roundEth(unitPrice * quantity);
+    const shippingAddress = typeof shippingAddressJsonb?.full_address === "string"
+      ? shippingAddressJsonb.full_address
+      : "";
+
+    const { data: insertedOrder, error: insertError } = await supabase
+      .from("orders")
+      .insert({
+        buyer_wallet: buyerWallet,
+        product_id: product.id,
+        quantity,
+        currency,
+        total_price_eth: totalPrice,
+        status: "paid",
+        shipping_address: shippingAddress,
+        tracking_code: trackingCode,
+      })
+      .select("id")
+      .single();
+
+    if (insertError || !insertedOrder?.id) {
+      throw new Error(insertError?.message || "Failed to create order");
+    }
+
+    createdOrderIds.push(insertedOrder.id);
+
+    const nextStock = currentStock === null ? null : Math.max(currentStock - quantity, 0);
+    const nextSold = Math.max(Number(product.sold) || 0, 0) + quantity;
+    const productUpdates = {
+      sold: nextSold,
+      ...(nextStock === null
+        ? {}
+        : {
+            stock: nextStock,
+            status: nextStock > 0 ? product.status || "published" : "out_of_stock",
+          }),
+    };
+
+    const { error: updateProductError } = await supabase
+      .from("products")
+      .update(productUpdates)
+      .eq("id", product.id);
+
+    if (updateProductError) {
+      throw new Error(updateProductError.message || "Failed to update product inventory");
+    }
+  }
+
+  return createdOrderIds;
+}
+
 app.get("/orders", authRequired, async (req, res) => {
   const requestedWallet = normalizeWallet(typeof req.query.buyer_wallet === "string" ? req.query.buyer_wallet : req.auth.wallet);
 
@@ -1331,14 +1526,12 @@ app.get("/orders", authRequired, async (req, res) => {
     return res.status(403).json({ error: "Cannot view another wallet's orders" });
   }
 
-  const { data, error } = await supabase
-    .from("orders")
-    .select(ORDER_SELECT)
-    .eq("buyer_wallet", requestedWallet)
-    .order("created_at", { ascending: false });
-
-  if (error) return res.status(400).json({ error: error.message });
-  return res.json(data || []);
+  try {
+    const data = await listOrdersForBuyer(requestedWallet);
+    return res.json(data);
+  } catch (error) {
+    return res.status(400).json({ error: error.message });
+  }
 });
 
 app.post("/orders", authRequired, async (req, res) => {
@@ -1382,7 +1575,10 @@ app.post("/orders", authRequired, async (req, res) => {
   const trackingCode = typeof order.tracking_code === "string" && order.tracking_code.trim()
     ? order.tracking_code.trim()
     : `TRK-${Date.now().toString(36).toUpperCase()}`;
-  const { data: createdOrderId, error: orderError } = await supabase.rpc("create_checkout_order", {
+  let createdOrderIds = [];
+  let orderError = null;
+
+  const { data: createdOrderId, error: rpcOrderError } = await supabase.rpc("create_checkout_order", {
     p_buyer_wallet: buyerWallet,
     p_items: normalizedItems,
     p_shipping_address_jsonb: shippingAddressJsonb,
@@ -1392,7 +1588,25 @@ app.post("/orders", authRequired, async (req, res) => {
     p_tracking_code: trackingCode,
   });
 
-  if (orderError || !createdOrderId) {
+  if (rpcOrderError && isMissingOrderSchemaCompatError(rpcOrderError)) {
+    try {
+      createdOrderIds = await createLegacyCheckoutOrders({
+        buyerWallet,
+        normalizedItems,
+        shippingAddressJsonb,
+        currency,
+        trackingCode,
+      });
+    } catch (legacyError) {
+      orderError = legacyError;
+    }
+  } else if (rpcOrderError || !createdOrderId) {
+    orderError = rpcOrderError || new Error("Failed to create order");
+  } else {
+    createdOrderIds = [createdOrderId];
+  }
+
+  if (orderError || createdOrderIds.length === 0) {
     const errorMessage = orderError?.message || "Failed to create order";
     const lowered = errorMessage.toLowerCase();
     const statusCode =
@@ -1405,25 +1619,28 @@ app.post("/orders", authRequired, async (req, res) => {
     return res.status(statusCode).json({ error: errorMessage });
   }
 
-  const { data: hydratedOrder, error: hydratedOrderError } = await supabase
-    .from("orders")
-    .select(ORDER_SELECT)
-    .eq("id", createdOrderId)
-    .single();
-
-  if (hydratedOrderError) {
-    return res.json({ id: createdOrderId });
+  try {
+    const hydratedOrder = await getOrderById(createdOrderIds[0]);
+    return res.json(hydratedOrder);
+  } catch (_hydratedOrderError) {
+    return res.json({ id: createdOrderIds[0] });
   }
-
-  return res.json(hydratedOrder);
 });
 
 app.patch("/orders/:id", authRequired, async (req, res) => {
-  const { data: existing, error: existingError } = await supabase
+  let { data: existing, error: existingError } = await supabase
     .from("orders")
     .select("id, buyer_wallet, product_id, products(creator_wallet), order_items(product_id, products(creator_wallet))")
     .eq("id", req.params.id)
     .single();
+
+  if (existingError && isMissingOrderSchemaCompatError(existingError)) {
+    ({ data: existing, error: existingError } = await supabase
+      .from("orders")
+      .select("id, buyer_wallet, product_id, products(creator_wallet)")
+      .eq("id", req.params.id)
+      .single());
+  }
 
   if (existingError) return res.status(404).json({ error: existingError.message });
 

@@ -57,6 +57,46 @@ function normalizeCollectedItem(item: CollectedDropItem): CollectedDropItem {
   };
 }
 
+function toOrderCollectionItems(order: OrderWithItems, ownerWallet: string): CollectedDropItem[] {
+  const typedOrder = order as OrderWithItems;
+  const orderItems = typedOrder.order_items?.length
+    ? typedOrder.order_items
+    : typedOrder.product_id
+    ? [{
+        id: `${typedOrder.id}:${typedOrder.product_id}`,
+        product_id: typedOrder.product_id,
+        quantity: typedOrder.quantity ?? 1,
+        products: typedOrder.products ?? null,
+      }]
+    : [];
+
+  return orderItems.map((item, index) => {
+    const product = Array.isArray(item.products) ? item.products[0] : item.products;
+    const imageUrl = resolveMediaUrl(product?.image_url, product?.image_ipfs_uri, product?.preview_uri, product?.delivery_uri);
+    const previewUri = product?.preview_uri || product?.image_url || product?.image_ipfs_uri || undefined;
+    const deliveryUri = product?.delivery_uri || product?.image_ipfs_uri || product?.image_url || undefined;
+    const assetType = inferCollectedAssetType({
+      assetType: product?.asset_type || undefined,
+      deliveryUri,
+      previewUri,
+      imageUrl,
+    });
+
+    return {
+      id: `${typedOrder.id}:${item.id || item.product_id || index}`,
+      ownerWallet,
+      title: product?.name?.trim() || `Order item ${index + 1}`,
+      artist: product?.creator_wallet || "Marketplace",
+      imageUrl,
+      previewUri,
+      deliveryUri,
+      assetType,
+      isGated: Boolean(product?.is_gated),
+      collectedAt: typedOrder.created_at || new Date().toISOString(),
+    } satisfies CollectedDropItem;
+  });
+}
+
 const CollectionPlaceholder = ({
   title,
   subtitle,
@@ -128,35 +168,7 @@ const MyCollectionPage = () => {
         const orders = await getOrdersByBuyer(address.toLowerCase());
         if (!active) return;
 
-        const mappedItems = (orders || []).flatMap((order) => {
-          const typedOrder = order as OrderWithItems;
-
-          return (typedOrder.order_items || []).map((item, index) => {
-            const product = Array.isArray(item.products) ? item.products[0] : item.products;
-            const imageUrl = resolveMediaUrl(product?.image_url, product?.image_ipfs_uri, product?.preview_uri, product?.delivery_uri);
-            const previewUri = product?.preview_uri || product?.image_url || product?.image_ipfs_uri || undefined;
-            const deliveryUri = product?.delivery_uri || product?.image_ipfs_uri || product?.image_url || undefined;
-            const assetType = inferCollectedAssetType({
-              assetType: product?.asset_type || undefined,
-              deliveryUri,
-              previewUri,
-              imageUrl,
-            });
-
-            return {
-              id: `${typedOrder.id}:${item.id || item.product_id || index}`,
-              ownerWallet: address,
-              title: product?.name?.trim() || `Order item ${index + 1}`,
-              artist: product?.creator_wallet || "Marketplace",
-              imageUrl,
-              previewUri,
-              deliveryUri,
-              assetType,
-              isGated: Boolean(product?.is_gated),
-              collectedAt: typedOrder.created_at || new Date().toISOString(),
-            } satisfies CollectedDropItem;
-          });
-        });
+        const mappedItems = (orders || []).flatMap((order) => toOrderCollectionItems(order as OrderWithItems, address));
 
         setPurchasedCollection(mappedItems);
       } catch (error) {
