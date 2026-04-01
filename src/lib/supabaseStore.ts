@@ -176,7 +176,24 @@ export async function fetchLiveDropsFromSupabase() {
     const { data, error } = await supabase
       .from("drops")
       .select(`
-        *,
+        id,
+        artist_id,
+        title,
+        price_eth,
+        image_url,
+        image_ipfs_uri,
+        metadata_ipfs_uri,
+        preview_uri,
+        delivery_uri,
+        asset_type,
+        status,
+        type,
+        ends_at,
+        supply,
+        sold,
+        contract_address,
+        contract_drop_id,
+        contract_kind,
         artists:artist_id (
           id,
           name,
@@ -184,6 +201,8 @@ export async function fetchLiveDropsFromSupabase() {
         )
       `)
       .eq("status", "live")
+      .not("contract_address", "is", null)
+      .not("contract_drop_id", "is", null)
       .order("created_at", { ascending: false });
 
     if (error) {
@@ -195,6 +214,53 @@ export async function fetchLiveDropsFromSupabase() {
     return data || [];
   } catch (error: any) {
     console.error("❌ fetchLiveDropsFromSupabase failed:", error.message);
+    throw error;
+  }
+}
+
+export async function fetchDropByIdFromSupabase(dropId: string) {
+  try {
+    console.log(`📖 Fetching drop by ID from Supabase: ${dropId}`);
+    const { data, error } = await supabase
+      .from("drops")
+      .select(`
+        id,
+        artist_id,
+        title,
+        description,
+        price_eth,
+        supply,
+        sold,
+        image_url,
+        image_ipfs_uri,
+        metadata_ipfs_uri,
+        preview_uri,
+        delivery_uri,
+        asset_type,
+        status,
+        type,
+        ends_at,
+        contract_address,
+        contract_drop_id,
+        contract_kind,
+        artists:artist_id (
+          id,
+          name,
+          handle,
+          avatar_url
+        )
+      `)
+      .eq("id", dropId)
+      .maybeSingle();
+
+    if (error) {
+      console.error("❌ Error fetching drop:", error.message);
+      throw error;
+    }
+
+    return data ?? null;
+  } catch (error: any) {
+    console.error("❌ fetchDropByIdFromSupabase failed:", error.message);
     throw error;
   }
 }

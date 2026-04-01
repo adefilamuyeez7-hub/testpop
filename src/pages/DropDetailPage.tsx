@@ -9,8 +9,7 @@ import { parseEther } from "viem";
 import { useWallet, usePlaceBid } from "@/hooks/useContracts";
 import { useMintArtist } from "@/hooks/useContractsArtist";
 import { recordDropView } from "@/lib/analyticsStore";
-import { getAllArtists } from "@/lib/artistStore";
-import { useSupabaseAllDrops } from "@/hooks/useSupabase";
+import { useSupabaseDropById } from "@/hooks/useSupabase";
 import { Web3Error } from "@/lib/types";
 import type { AssetType } from "@/lib/assetTypes";
 import { ipfsToHttp } from "@/lib/pinata";
@@ -32,52 +31,49 @@ const DropDetailPage = () => {
   const { placeBid, isPending: isBidPending, isConfirming: isBidConfirming, isSuccess: isBidSuccess, error: bidError } = usePlaceBid();
   const addCollectedDrop = useCollectionStore((state) => state.addCollectedDrop);
   const { mint: mintArtist, mintedTokenId, isConfirming: isMintConfirming, isSuccess: isMintSuccess, error: mintError } = useMintArtist();
-  const { data: allDrops, loading: dropsLoading, refetch: refetchDrops } = useSupabaseAllDrops();
+  const { data: dropRecord, loading: dropsLoading, refetch: refetchDrop } = useSupabaseDropById(id);
   const [bidAmount, setBidAmount] = useState("");
   const [isLiked, setIsLiked] = useState(false);
 
   const drop = useMemo(() => {
-    if (!id || !allDrops?.length) return null;
+    if (!dropRecord) return null;
 
-    const foundDrop = allDrops.find((entry: any) => entry.id === id);
-    if (!foundDrop) return null;
-
-    const artist = getAllArtists().find((entry) => entry.id === foundDrop.artist_id);
+    const artist = dropRecord.artists && !Array.isArray(dropRecord.artists) ? dropRecord.artists : null;
     const now = Date.now();
-    const endsAt = foundDrop.ends_at ? new Date(foundDrop.ends_at).getTime() : now + 24 * 60 * 60 * 1000;
+    const endsAt = dropRecord.ends_at ? new Date(dropRecord.ends_at).getTime() : now + 24 * 60 * 60 * 1000;
     const endsInHours = Math.max(0, Math.ceil((endsAt - now) / (60 * 60 * 1000)));
-    const normalizedType = (foundDrop.type || "drop") as "drop" | "auction" | "campaign";
+    const normalizedType = (dropRecord.type || "drop") as "drop" | "auction" | "campaign";
     const normalizedContractKind =
-      foundDrop.contract_kind || (normalizedType === "auction" ? "poapCampaign" : normalizedType === "campaign" ? null : "artDrop");
+      dropRecord.contract_kind || (normalizedType === "auction" ? "poapCampaign" : normalizedType === "campaign" ? null : "artDrop");
 
     return {
-      id: foundDrop.id,
-      title: foundDrop.title || "Untitled",
-      artistId: foundDrop.artist_id,
+      id: dropRecord.id,
+      title: dropRecord.title || "Untitled",
+      artistId: dropRecord.artist_id,
       artist: artist?.name || "Unknown Artist",
       edition: `by ${artist?.handle || "artist"}`,
-      description: foundDrop.description || "",
-      priceEth: foundDrop.price_eth ? String(foundDrop.price_eth) : "0",
+      description: dropRecord.description || "",
+      priceEth: dropRecord.price_eth ? String(dropRecord.price_eth) : "0",
       currentBidEth: undefined,
-      maxBuy: foundDrop.supply || 1,
-      bought: foundDrop.sold || 0,
+      maxBuy: dropRecord.supply || 1,
+      bought: dropRecord.sold || 0,
       bids: 0,
-      status: foundDrop.status || "draft",
+      status: dropRecord.status || "draft",
       type: normalizedType,
       endsIn: `${endsInHours}h left`,
-      image: foundDrop.image_url || "",
-      imageUri: foundDrop.image_ipfs_uri || "",
-      metadataUri: foundDrop.metadata_ipfs_uri || "",
-      deliveryUri: foundDrop.delivery_uri || foundDrop.image_ipfs_uri || "",
-      previewUri: foundDrop.preview_uri || undefined,
-      contractAddress: foundDrop.contract_address || null,
-      contractDropId: foundDrop.contract_drop_id !== null && foundDrop.contract_drop_id !== undefined ? Number(foundDrop.contract_drop_id) : null,
+      image: dropRecord.image_url || "",
+      imageUri: dropRecord.image_ipfs_uri || "",
+      metadataUri: dropRecord.metadata_ipfs_uri || "",
+      deliveryUri: dropRecord.delivery_uri || dropRecord.image_ipfs_uri || "",
+      previewUri: dropRecord.preview_uri || undefined,
+      contractAddress: dropRecord.contract_address || null,
+      contractDropId: dropRecord.contract_drop_id !== null && dropRecord.contract_drop_id !== undefined ? Number(dropRecord.contract_drop_id) : null,
       contractKind: normalizedContractKind as "artDrop" | "poapCampaign" | null,
       poap: false,
       poapNote: "",
-      assetType: (foundDrop.asset_type || "image") as AssetType,
-      };
-  }, [allDrops, id]);
+      assetType: (dropRecord.asset_type || "image") as AssetType,
+    };
+  }, [dropRecord]);
 
   const priceEth = drop?.priceEth ?? "0";
   const remaining = (drop?.maxBuy ?? 0) - (drop?.bought ?? 0);
@@ -113,7 +109,7 @@ const DropDetailPage = () => {
         collectedAt: new Date().toISOString(),
       });
       toast.success("Collected successfully!");
-      refetchDrops()?.catch((error) => {
+      refetchDrop()?.catch((error) => {
         console.warn("Failed to refresh drop data:", error);
       });
       window.setTimeout(() => {
@@ -124,7 +120,7 @@ const DropDetailPage = () => {
         });
       }, 500);
     }
-  }, [addCollectedDrop, address, drop, id, isMintSuccess, mintedTokenId, navigate, refetchDrops]);
+  }, [addCollectedDrop, address, drop, id, isMintSuccess, mintedTokenId, navigate, refetchDrop]);
 
   useEffect(() => {
     if (isBidSuccess) {

@@ -15,6 +15,7 @@ import {
   fetchOrdersByBuyerFromSupabase,
   fetchAllProductsFromSupabase,
   fetchAllDropsFromSupabase,
+  fetchDropByIdFromSupabase,
 } from "@/lib/supabaseStore";
 
 const STANDARD_QUERY_OPTIONS = {
@@ -145,9 +146,8 @@ export function useSupabaseLiveDrops() {
     queryKey: ["drops", "live"],
     queryFn: fetchLiveDropsFromSupabase,
     ...STANDARD_QUERY_OPTIONS,
-    staleTime: 0,
-    refetchOnMount: "always",
-    refetchOnWindowFocus: true,
+    staleTime: 60_000,
+    refetchOnMount: false,
   });
 
   return {
@@ -170,6 +170,25 @@ export function useSupabaseAllDrops(enabled = true) {
 
   return {
     data: data ?? [],
+    loading: isLoading,
+    error: error instanceof Error ? error : null,
+    refetch: async () => {
+      await refetch();
+    },
+  };
+}
+
+export function useSupabaseDropById(dropId: string | undefined) {
+  const { data, isLoading, error, refetch } = useQuery({
+    queryKey: ["drops", "detail", dropId],
+    queryFn: () => (dropId ? fetchDropByIdFromSupabase(dropId) : null),
+    enabled: !!dropId,
+    ...STANDARD_QUERY_OPTIONS,
+    staleTime: 60_000,
+  });
+
+  return {
+    data: data ?? null,
     loading: isLoading,
     error: error instanceof Error ? error : null,
     refetch: async () => {

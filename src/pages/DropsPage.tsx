@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { recordPageVisit } from "@/lib/analyticsStore";
 import { useSupabaseLiveDrops } from "@/hooks/useSupabase";
-import { detectAssetTypeFromUri, type AssetType } from "@/lib/assetTypes";
+import { type AssetType } from "@/lib/assetTypes";
 
 const filters = ["All", "Auction", "Drop", "Campaign"];
 
@@ -14,13 +14,6 @@ const DropsPage = () => {
   const allDrops = useMemo(() => {
     if (!supabaseDrops || supabaseDrops.length === 0) return [];
     return supabaseDrops
-      .filter(drop => {
-        // Only include drops that have both contract_address and contract_drop_id (properly deployed)
-        if (!drop.contract_address || !drop.contract_drop_id) {
-          return false;
-        }
-        return true;
-      })
       .map(drop => {
         const artist = drop.artists && !Array.isArray(drop.artists) ? drop.artists : null;
         return {
