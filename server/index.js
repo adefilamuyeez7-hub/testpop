@@ -26,6 +26,42 @@ const frontendDistPath =
   frontendDistCandidates.find((candidate) => fs.existsSync(candidate)) ||
   frontendDistCandidates[0];
 const frontendIndexPath = path.join(frontendDistPath, "index.html");
+const LEGACY_DROP_COLUMNS = new Set([
+  "id",
+  "artist_id",
+  "title",
+  "description",
+  "price_eth",
+  "supply",
+  "sold",
+  "image_url",
+  "image_ipfs_uri",
+  "metadata_ipfs_uri",
+  "status",
+  "type",
+  "contract_address",
+  "contract_drop_id",
+  "contract_kind",
+  "revenue",
+  "ends_at",
+  "created_at",
+  "updated_at",
+]);
+
+function stripUnsupportedDropColumns(drop = {}) {
+  return Object.fromEntries(
+    Object.entries(drop).filter(([key, value]) => LEGACY_DROP_COLUMNS.has(key) && value !== undefined)
+  );
+}
+
+function isMissingDropColumnError(message = "") {
+  const normalized = String(message).toLowerCase();
+  return (
+    normalized.includes("could not find the") ||
+    normalized.includes("schema cache") ||
+    normalized.includes("column") && normalized.includes("drops")
+  );
+}
 
 function loadEnvFile(envPath) {
   if (!fs.existsSync(envPath)) return;
@@ -987,11 +1023,21 @@ app.post("/drops", authRequired, async (req, res) => {
     return res.status(403).json({ error: "Cannot create a drop for another artist" });
   }
 
-  const { data, error } = await supabase
+  let insertPayload = { ...drop };
+  let { data, error } = await supabase
     .from("drops")
-    .insert({ ...drop })
+    .insert(insertPayload)
     .select("*")
     .single();
+
+  if (error && isMissingDropColumnError(error.message)) {
+    insertPayload = stripUnsupportedDropColumns(drop);
+    ({ data, error } = await supabase
+      .from("drops")
+      .insert(insertPayload)
+      .select("*")
+      .single());
+  }
 
   if (error) return res.status(400).json({ error: error.message });
   return res.json(data);
