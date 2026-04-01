@@ -99,23 +99,49 @@ export async function requestWalletChallenge(wallet: string): Promise<ChallengeR
 }
 
 export async function signChallengeMessage(message: string, wallet: string): Promise<string> {
+  const normalizedWallet = wallet.trim().toLowerCase();
+
   try {
-    const { getAccount, signMessage } = await import("@wagmi/core");
+    const { getAccount, getWalletClient, signMessage } = await import("@wagmi/core");
     const account = getAccount(wagmiConfig);
-    const normalizedWallet = wallet.trim().toLowerCase();
 
     if (account.address && account.address.toLowerCase() === normalizedWallet) {
-      const signature = await withTimeout(
-        signMessage(wagmiConfig, {
-          account: account.address,
-          message,
-        }),
-        SIGNATURE_TIMEOUT_MS,
-        "Wallet signature request timed out. Reopen your wallet and try again."
-      );
+      let signature: string | undefined;
+
+      try {
+        signature = await withTimeout(
+          signMessage(wagmiConfig, {
+            account: account.address,
+            message,
+          }),
+          SIGNATURE_TIMEOUT_MS,
+          "Wallet signature request timed out. Reopen your wallet and try again."
+        );
+      } catch (wagmiError) {
+        console.warn("Direct wagmi signMessage failed, trying wallet client fallback:", wagmiError);
+      }
 
       if (signature && typeof signature === "string") {
         return signature;
+      }
+
+      const walletClient = await getWalletClient(wagmiConfig, {
+        account: account.address,
+      });
+
+      if (walletClient) {
+        const clientSignature = await withTimeout(
+          walletClient.signMessage({
+            account: account.address,
+            message,
+          }),
+          SIGNATURE_TIMEOUT_MS,
+          "Wallet signature request timed out. Reopen your wallet and try again."
+        );
+
+        if (clientSignature && typeof clientSignature === "string") {
+          return clientSignature;
+        }
       }
     }
   } catch (error) {
@@ -130,7 +156,7 @@ export async function signChallengeMessage(message: string, wallet: string): Pro
   const signature = await withTimeout(
     ethereum.request({
       method: "personal_sign",
-      params: [message, wallet],
+      params: [message, normalizedWallet],
     }) as Promise<unknown>,
     SIGNATURE_TIMEOUT_MS,
     "Wallet signature request timed out. Reopen your wallet and try again."

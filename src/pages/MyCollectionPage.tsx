@@ -38,8 +38,27 @@ function inferCollectedAssetType(item: Pick<CollectedDropItem, "assetType" | "de
   return item.assetType || "image";
 }
 
+function resolveCollectionPreviewImage(...candidates: Array<string | null | undefined>): string {
+  for (const candidate of candidates) {
+    const value = candidate?.trim();
+    if (!value) continue;
+
+    const lower = value.toLowerCase();
+    const isDocumentLike =
+      lower.endsWith(".pdf") ||
+      lower.endsWith(".epub") ||
+      lower.includes(".pdf?") ||
+      lower.includes(".epub?");
+
+    if (isDocumentLike) continue;
+    return resolveMediaUrl(value);
+  }
+
+  return "";
+}
+
 function normalizeCollectedItem(item: CollectedDropItem): CollectedDropItem {
-  const imageUrl = resolveMediaUrl(item.imageUrl, item.previewUri, item.deliveryUri);
+  const imageUrl = resolveCollectionPreviewImage(item.imageUrl, item.previewUri);
   const previewUri = item.previewUri || imageUrl || item.deliveryUri;
   const deliveryUri = item.deliveryUri || item.previewUri || item.imageUrl;
 
@@ -72,7 +91,7 @@ function toOrderCollectionItems(order: OrderWithItems, ownerWallet: string): Col
 
   return orderItems.map((item, index) => {
     const product = Array.isArray(item.products) ? item.products[0] : item.products;
-    const imageUrl = resolveMediaUrl(product?.image_url, product?.image_ipfs_uri, product?.preview_uri, product?.delivery_uri);
+    const imageUrl = resolveCollectionPreviewImage(product?.image_url, product?.image_ipfs_uri, product?.preview_uri);
     const previewUri = product?.preview_uri || product?.image_url || product?.image_ipfs_uri || undefined;
     const deliveryUri = product?.delivery_uri || product?.image_ipfs_uri || product?.image_url || undefined;
     const assetType = inferCollectedAssetType({
