@@ -90,11 +90,11 @@ export function useCreateDropArtist(artistContractAddress?: string | null) {
       maxSupply,
       startTime,
       endTime,
-      contractAddress: normalized,
+      contractAddress: effectiveContractAddress,
     });
 
     return writeContract({
-      address: normalized as `0x${string}`,
+      address: effectiveContractAddress as `0x${string}`,
       abi: ARTIST_DROP_ABI,
       functionName: "createDrop",
       args: [metadataURI, weiPrice, BigInt(maxSupply), BigInt(startTime), BigInt(endTime)],
@@ -142,9 +142,18 @@ export function useMintArtist(artistContractAddress?: string | null) {
     normalized = null;
   }
 
-  const mint = (dropId: number, priceWei: bigint) => {
+  const mint = (dropId: number, priceWei: bigint, overrideContractAddress?: string | null) => {
     if (!address) throw new Error("Connect wallet to mint");
-    if (!normalized) throw new Error("Artist contract address not provided");
+
+    let effectiveContractAddress = normalized;
+    if (!effectiveContractAddress && overrideContractAddress?.trim()) {
+      try {
+        effectiveContractAddress = getAddress(overrideContractAddress.trim());
+      } catch {
+        effectiveContractAddress = null;
+      }
+    }
+    if (!effectiveContractAddress) throw new Error("Artist contract address not provided");
 
     // Validate drop ID
     if (!Number.isInteger(dropId) || dropId < 0) {

@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef, useCallback } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { ArrowRight, Heart, User, Loader2, Sparkles, ShoppingCart, Gavel, Clock } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -11,6 +11,7 @@ import { recordPageVisit, recordDropView } from "@/lib/analyticsStore";
 import { useSupabaseArtists, useSupabaseLiveDrops } from "@/hooks/useSupabase";
 import { useToast } from "@/hooks/use-toast";
 import { parseEther } from "viem";
+import { useCollectionStore } from "@/stores/collectionStore";
 
 const SubscribeButtonWrapper = ({ artist, isConnected, connectWallet, address, toast }: any) => {
   const effectiveContractAddress = useResolvedArtistContract(artist?.wallet, artist?.contractAddress);
@@ -109,11 +110,13 @@ const SubscribeButtonWrapper = ({ artist, isConnected, connectWallet, address, t
 };
 
 const Index = () => {
+  const navigate = useNavigate();
   const { isConnected, connectWallet, address } = useWallet();
   const { data: supabaseArtists, loading, error } = useSupabaseArtists();
   const { data: supabaseLiveDrops, loading: dropsLoading, error: dropsError, refetch: refetchDrops } = useSupabaseLiveDrops();
   const { placeBid, isPending: isBidding, error: bidError } = usePlaceBid();
   const { toast } = useToast();
+  const addCollectedDrop = useCollectionStore((state) => state.addCollectedDrop);
   
   const [featuredArtists, setFeaturedArtists] = useState([]);
   const [liveDrops, setLiveDrops] = useState([]);
@@ -124,11 +127,12 @@ const Index = () => {
   const [isSwiping, setIsSwiping] = useState(false);
   const [isDropSwiping, setIsDropSwiping] = useState(false);
   const [mintingDropId, setMintingDropId] = useState<string | null>(null);
+  const [collectingDrop, setCollectingDrop] = useState<any | null>(null);
+  const [flippingDropId, setFlippingDropId] = useState<string | null>(null);
   const [biddingDropId, setBiddingDropId] = useState<string | null>(null);
   
   // Mint state for per-artist contracts
-  const [activeMintContractAddress, setActiveMintContractAddress] = useState<string | null>(null);
-  const { mint: mintArtist, isPending: isMintingArtist, error: mintErrorArtist, isSuccess: isMintSuccessArtist } = useMintArtist(activeMintContractAddress);
+  const { mint: mintArtist, mintedTokenId: mintedArtistTokenId, isPending: isMintingArtist, error: mintErrorArtist, isSuccess: isMintSuccessArtist } = useMintArtist();
   
   const touchStartX = useRef(0);
   const touchStartY = useRef(0);
@@ -176,6 +180,8 @@ const Index = () => {
           artist: artist?.name || "Unknown Artist",
           priceEth: drop.price_eth ? parseFloat(drop.price_eth).toFixed(3) : "0",
           image: drop.image_url || "",
+          previewUri: drop.preview_uri || "",
+          assetType: drop.asset_type || "image",
           type: (drop.type || "drop").toLowerCase() as "drop" | "auction" | "campaign",
           status: drop.status as "live" | "draft" | "ended",
           endsIn: drop.ends_at ? `${Math.max(0, Math.floor((new Date(drop.ends_at).getTime() - Date.now()) / (1000 * 60 * 60)))}h` : "--",
@@ -279,8 +285,8 @@ const Index = () => {
     isDropHorizontalSwipe.current = null;
   }, [dropSwipeOffset, nextDropCard, prevDropCard]);
 
-  // Handle buying a drop
-  const handleBuyDrop = async (drop: any) => {
+  // Handle collecting a drop
+  const handleCollectDrop = async (drop: any) => {
     if (!isConnected) {
       await connectWallet();
       return;
@@ -294,11 +300,9 @@ const Index = () => {
       
       // Reset any previous state before starting new mint attempt
       setMintingDropId(drop.id);
+      setCollectingDrop(drop);
       recordDropView(drop.id);
       const priceWei = parseEther(drop.priceEth);
-      
-      // Set the contract address for the mint hook
-      setActiveMintContractAddress(drop.contractAddress);
       
       console.log(`🛒 Minting contract drop #${drop.contractDropId} on ${drop.contractAddress} for ${drop.priceEth} ETH (${priceWei} wei)...`, {
         contractAddress: drop.contractAddress,
@@ -307,19 +311,22 @@ const Index = () => {
         priceWei: priceWei.toString(),
       });
       
-      mintArtist(drop.contractDropId, priceWei);
+      mintArtist(drop.contractDropId, priceWei, drop.contractAddress);
       toast({
-        title: "Purchase Submitted",
-        description: `Buying "${drop.title}" for ${drop.priceEth} ETH...`,
+        title: "Collect Submitted",
+        description: `Collecting "${drop.title}" for ${drop.priceEth} ETH...`,
       });
     } catch (err) {
       console.error("❌ Mint error:", err);
       toast({
         title: "Error",
-        description: err instanceof Error ? err.message : "Failed to buy drop",
+        description: err instanceof Error ? err.message : "Failed to collect drop",
         variant: "destructive",
       });
       setMintingDropId(null);
+      setCollectingDrop(null);
+      setFlippingDropId(null);
+      setCollectingDrop(null);
     }
   };
 
@@ -350,11 +357,25 @@ const Index = () => {
 
   // Refetch drops after successful mint
   useEffect(() => {
-    if (isMintSuccessArtist && mintingDropId) {
+    if (isMintSuccessArtist && mintingDropId && collectingDrop && address) {
       console.log("✅ Mint succeeded! Refetching drops...");
+      addCollectedDrop({
+        id: collectingDrop.id,
+        ownerWallet: address,
+        title: collectingDrop.title,
+        artist: collectingDrop.artist,
+        imageUrl: collectingDrop.image,
+        previewUri: collectingDrop.previewUri,
+        assetType: collectingDrop.assetType,
+        mintedTokenId: mintedArtistTokenId,
+        contractAddress: collectingDrop.contractAddress,
+        contractDropId: collectingDrop.contractDropId,
+        collectedAt: new Date().toISOString(),
+      });
+      setFlippingDropId(collectingDrop.id);
       toast({
-        title: "Purchase Confirmed",
-        description: "Your drop has been purchased successfully!",
+        title: "Collected",
+        description: "This piece has been added to your collection.",
       });
       
       // Refetch to show updated inventory
@@ -363,11 +384,19 @@ const Index = () => {
         // Don't show error to user - they already have success message
       });
       
-      // Clear minting state
-      setMintingDropId(null);
-      setActiveMintContractAddress(null);
+      window.setTimeout(() => {
+        navigate("/collection", {
+          state: {
+            highlightDropId: collectingDrop.id,
+            fromDeckCollect: true,
+          },
+        });
+        setMintingDropId(null);
+        setCollectingDrop(null);
+        setFlippingDropId(null);
+      }, 700);
     }
-  }, [isMintSuccessArtist, mintingDropId, toast, refetchDrops]);
+  }, [addCollectedDrop, address, collectingDrop, isMintSuccessArtist, mintedArtistTokenId, mintingDropId, navigate, toast, refetchDrops]);
 
   // Listen for bid errors and clear state
   useEffect(() => {
@@ -470,11 +499,13 @@ const Index = () => {
                     key={`${drop.id}-${i}`}
                     className={`${isDropSwiping && isLeft ? '' : 'transition-all duration-500 ease-out'}`}
                     style={{
-                      transform: `translateX(${swipeX}px)`,
-                      opacity: swipeOpacity,
+                      transform: flippingDropId === drop.id
+                        ? "translateX(0) rotateY(180deg) scale(0.88)"
+                        : `translateX(${swipeX}px)`,
+                      opacity: flippingDropId === drop.id ? 0.2 : swipeOpacity,
                     }}
                   >
-                    <div className="rounded-2xl bg-card shadow-card overflow-hidden">
+                    <div className="rounded-2xl bg-card shadow-card overflow-hidden transition-all duration-700 [transform-style:preserve-3d]">
                       {/* Drop Image */}
                       <div className="relative aspect-square overflow-hidden">
                         <img
@@ -483,7 +514,7 @@ const Index = () => {
                           className="w-full h-full object-cover"
                         />
                         <Badge className="absolute top-2 left-2 bg-background/80 text-foreground backdrop-blur-sm text-[10px]">
-                          {drop.type}
+                          {drop.type === "drop" ? "collect" : drop.type}
                         </Badge>
                         {drop.status === "live" && (
                           <span className="absolute top-2 right-2 h-2.5 w-2.5 rounded-full bg-primary animate-pulse" />
@@ -503,7 +534,7 @@ const Index = () => {
                           )}
                         </div>
 
-                        {/* Buy/Bid Buttons */}
+                        {/* Collect/Bid Buttons */}
                         <div className="flex gap-2 mt-3">
                           {drop.type === "auction" ? (
                             <Button
@@ -521,14 +552,14 @@ const Index = () => {
                           ) : (
                             <Button
                               size="sm"
-                              onClick={() => handleBuyDrop(drop)}
+                              onClick={() => handleCollectDrop(drop)}
                               disabled={isMintingArtist || mintingDropId === drop.id}
                               className="flex-1 h-8 rounded-full gradient-primary text-primary-foreground font-semibold text-xs"
                             >
                               {mintingDropId === drop.id ? (
-                                <><Loader2 className="h-3 w-3 mr-1.5 animate-spin" /> Buying...</>
+                                <><Loader2 className="h-3 w-3 mr-1.5 animate-spin" /> Collecting...</>
                               ) : (
-                                <><ShoppingCart className="h-3 w-3 mr-1" /> Buy</>
+                                <><ShoppingCart className="h-3 w-3 mr-1" /> Collect</>
                               )}
                             </Button>
                           )}

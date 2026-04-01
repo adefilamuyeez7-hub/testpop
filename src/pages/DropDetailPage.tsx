@@ -17,19 +17,20 @@ import { VideoViewer } from "@/components/collection/VideoViewer";
 import { AudioPlayer } from "@/components/collection/AudioPlayer";
 import { PdfReader } from "@/components/collection/PdfReader";
 import { EpubReader } from "@/components/collection/EpubReader";
+import { useCollectionStore } from "@/stores/collectionStore";
 
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 
 const formatDropTypeLabel = (type: "drop" | "auction" | "campaign") =>
-  type === "drop" ? "buy" : type;
+  type === "drop" ? "collect" : type;
 
 const DropDetailPage = () => {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { isConnected, connectWallet } = useWallet();
+  const { address, isConnected, connectWallet } = useWallet();
   const { placeBid, isPending: isBidPending, isConfirming: isBidConfirming, isSuccess: isBidSuccess, error: bidError } = usePlaceBid();
-  const [activeMintContractAddress, setActiveMintContractAddress] = useState<string | null>(null);
-  const { mint: mintArtist, isConfirming: isMintConfirming, isSuccess: isMintSuccess, error: mintError } = useMintArtist(activeMintContractAddress);
+  const addCollectedDrop = useCollectionStore((state) => state.addCollectedDrop);
+  const { mint: mintArtist, mintedTokenId, isConfirming: isMintConfirming, isSuccess: isMintSuccess, error: mintError } = useMintArtist();
   const { data: allDrops, loading: dropsLoading, refetch: refetchDrops } = useSupabaseAllDrops();
   const [bidAmount, setBidAmount] = useState("");
   const [isLiked, setIsLiked] = useState(false);
@@ -92,13 +93,33 @@ const DropDetailPage = () => {
   }, [id]);
 
   useEffect(() => {
-    if (isMintSuccess && id) {
-      toast.success("Drop purchased successfully!");
+    if (isMintSuccess && id && drop && address) {
+      addCollectedDrop({
+        id: drop.id,
+        ownerWallet: address,
+        title: drop.title,
+        artist: drop.artist,
+        imageUrl: drop.image,
+        previewUri: drop.previewUri,
+        assetType: drop.assetType,
+        mintedTokenId,
+        contractAddress: drop.contractAddress,
+        contractDropId: drop.contractDropId,
+        collectedAt: new Date().toISOString(),
+      });
+      toast.success("Collected successfully!");
       refetchDrops()?.catch((error) => {
         console.warn("Failed to refresh drop data:", error);
       });
+      window.setTimeout(() => {
+        navigate("/collection", {
+          state: {
+            highlightDropId: drop.id,
+          },
+        });
+      }, 500);
     }
-  }, [id, isMintSuccess, refetchDrops]);
+  }, [addCollectedDrop, address, drop, id, isMintSuccess, mintedTokenId, navigate, refetchDrops]);
 
   useEffect(() => {
     if (isBidSuccess) {
@@ -148,13 +169,13 @@ const DropDetailPage = () => {
     );
   }
 
-  const handleBuyDrop = () => {
+  const handleCollectDrop = () => {
     if (!isConnected) {
       connectWallet();
       return;
     }
     if (!isBuyDrop) {
-      toast.error("This listing is not a direct-buy drop.");
+      toast.error("This listing is not a direct collect drop.");
       return;
     }
     if (remaining <= 0) {
@@ -170,8 +191,7 @@ const DropDetailPage = () => {
       return;
     }
 
-    setActiveMintContractAddress(drop.contractAddress);
-    mintArtist(drop.contractDropId, parseEther(priceEth));
+    mintArtist(drop.contractDropId, parseEther(priceEth), drop.contractAddress);
   };
 
   const handlePlaceBid = () => {
@@ -209,11 +229,11 @@ const DropDetailPage = () => {
             </p>
           </div>
           <Button
-            onClick={handleBuyDrop}
+            onClick={handleCollectDrop}
             disabled={!hasContractListing || remaining <= 0 || isMintConfirming || isMintSuccess}
             className="w-full rounded-full gradient-primary text-primary-foreground font-semibold h-11"
           >
-            {isMintConfirming ? "Purchasing..." : isMintSuccess ? "Purchased" : `Buy Now · ${drop.priceEth} ETH`}
+            {isMintConfirming ? "Collecting..." : isMintSuccess ? "Collected" : `Collect · ${drop.priceEth} ETH`}
           </Button>
           {mintError && (
             <p className="text-xs text-destructive mt-2">
