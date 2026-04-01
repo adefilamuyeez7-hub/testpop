@@ -468,6 +468,10 @@ const placeOrder = async () => {
       toast.error("Wallet address unavailable");
       return;
     }
+    if (cart.length === 0) {
+      toast.error("Your cart is empty");
+      return;
+    }
     if (!checkoutForm.name || !checkoutForm.phone || !checkoutForm.address) {
       toast.error("Fill in name, phone, and address");
       return;
@@ -543,7 +547,8 @@ const placeOrder = async () => {
       setShowOrderSuccess(true);
     } catch (error) {
       console.error("Failed to place marketplace order:", error);
-      toast.error("Order placement failed");
+      const errorMessage = error instanceof Error ? error.message : "Order placement failed";
+      toast.error(errorMessage);
     } finally {
       setIsPlacingOrder(false);
     }

@@ -6,10 +6,15 @@ import { recordPageVisit } from "@/lib/analyticsStore";
 import { useSupabaseLiveDrops } from "@/hooks/useSupabase";
 import { type AssetType } from "@/lib/assetTypes";
 
-const filters = ["All", "Auction", "Drop", "Campaign"];
+const filters = [
+  { label: "All", value: "all" },
+  { label: "Auction", value: "auction" },
+  { label: "Drop", value: "drop" },
+  { label: "Campaign", value: "campaign" },
+] as const;
 
 const DropsPage = () => {
-  const [active, setActive] = useState("All");
+  const [active, setActive] = useState<(typeof filters)[number]["value"]>("all");
   const { data: supabaseDrops, loading, error } = useSupabaseLiveDrops();
   const allDrops = useMemo(() => {
     if (!supabaseDrops || supabaseDrops.length === 0) return [];
@@ -31,7 +36,7 @@ const DropsPage = () => {
         };
       });
   }, [supabaseDrops]);
-  const filtered = active === "All" ? allDrops : allDrops.filter((drop) => drop.type === active);
+  const filtered = active === "all" ? allDrops : allDrops.filter((drop) => drop.type === active);
 
   useEffect(() => {
     recordPageVisit();
@@ -79,13 +84,13 @@ const DropsPage = () => {
       <div className="flex gap-2 overflow-x-auto no-scrollbar">
         {filters.map((filter) => (
           <button
-            key={filter}
-            onClick={() => setActive(filter)}
+            key={filter.value}
+            onClick={() => setActive(filter.value)}
             className={`px-4 py-1.5 rounded-full text-xs font-medium whitespace-nowrap transition-colors ${
-              active === filter ? "gradient-primary text-primary-foreground" : "bg-secondary text-secondary-foreground"
+              active === filter.value ? "gradient-primary text-primary-foreground" : "bg-secondary text-secondary-foreground"
             }`}
           >
-            {filter}
+            {filter.label}
           </button>
         ))}
       </div>

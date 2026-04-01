@@ -496,6 +496,12 @@ export async function updateProduct(productId: string, updates: Partial<Product>
 
 export async function createOrder(order: Partial<Order>): Promise<Order | null> {
   console.log(`💾 Creating order for ${order.buyer_wallet}`);
+
+  if (typeof order.buyer_wallet === "string" && order.buyer_wallet.trim()) {
+    const { establishSecureSession } = await import("@/lib/secureAuth");
+    await establishSecureSession(order.buyer_wallet.trim().toLowerCase());
+  }
+
   return secureApiRequest<Order | null>("/orders", {
     method: "POST",
     body: JSON.stringify(order),
