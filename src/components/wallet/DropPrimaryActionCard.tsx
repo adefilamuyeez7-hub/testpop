@@ -73,6 +73,10 @@ function DropPrimaryActionCardInner({ drop, onCollectSuccess }: DropPrimaryActio
     if (!mintError) return;
 
     const errMsg = (mintError as Web3Error)?.message || "Unknown error";
+    if (errMsg.includes("Failed to fetch")) {
+      toast.error(`Wallet or RPC connection failed. Switch to Base Sepolia and try again.`);
+      return;
+    }
     if (errMsg.includes("insufficient funds")) {
       toast.error("Insufficient balance for mint plus gas fees.");
       return;

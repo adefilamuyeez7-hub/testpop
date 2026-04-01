@@ -26,7 +26,7 @@ import { ARTIST_DROP_ABI } from "@/lib/contracts/artDropArtist";
  * @param artistContractAddress - The artist's deployed contract address
  */
 export function useCreateDropArtist(artistContractAddress?: string | null) {
-  const { address } = useAccount();
+  const { address, chain } = useAccount();
   const { writeContract, data: hash, isPending, error } = useWriteContract();
   const {
     data: receipt,
@@ -51,6 +51,9 @@ export function useCreateDropArtist(artistContractAddress?: string | null) {
     endTime: number = 0
   ) => {
     if (!address) throw new Error("Connect wallet to create a drop");
+    if (chain?.id !== ACTIVE_CHAIN.id) {
+      throw new Error(`Switch your wallet network to ${ACTIVE_CHAIN.name} before creating a drop`);
+    }
     if (!normalized) throw new Error("Artist contract address not provided");
 
     // Validate inputs
@@ -129,7 +132,7 @@ export function useCreateDropArtist(artistContractAddress?: string | null) {
  * @param artistContractAddress - The artist's deployed contract address
  */
 export function useMintArtist(artistContractAddress?: string | null) {
-  const { address } = useAccount();
+  const { address, chain } = useAccount();
   const { writeContract, data: hash, isPending, error } = useWriteContract();
   const { data: receipt, isLoading: isConfirming, isSuccess } = useWaitForTransactionReceipt({ hash });
 
@@ -144,6 +147,9 @@ export function useMintArtist(artistContractAddress?: string | null) {
 
   const mint = (dropId: number, priceWei: bigint, overrideContractAddress?: string | null) => {
     if (!address) throw new Error("Connect wallet to mint");
+    if (chain?.id !== ACTIVE_CHAIN.id) {
+      throw new Error(`Switch your wallet network to ${ACTIVE_CHAIN.name} before minting`);
+    }
 
     let effectiveContractAddress = normalized;
     if (!effectiveContractAddress && overrideContractAddress?.trim()) {
