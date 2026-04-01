@@ -2,7 +2,6 @@ import { useEffect, useState } from "react";
 import { Palette, Wallet, Lock, LogOut, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useWallet } from "@/hooks/useContracts";
-import { isWhitelistedArtist } from "@/lib/whitelist";
 import { establishSecureSession } from "@/lib/secureAuth";
 import { toast } from "sonner";
 
@@ -14,65 +13,27 @@ const ArtistGuard = ({ children }: { children: React.ReactNode }) => {
   const [sessionError, setSessionError] = useState<string | null>(null);
 
   useEffect(() => {
-    let cancelled = false;
-
-    async function checkArtistAccess() {
-      if (!isConnected || !address) {
-        setIsApproved(false);
-        setIsChecking(false);
-        setSessionEstablished(false);
-        setSessionError(null);
-        return;
-      }
-
-      setIsChecking(true);
-
-      try {
-        const approved = await isWhitelistedArtist(address);
-        if (!cancelled) {
-          setIsApproved(approved);
-          if (!approved) {
-            setSessionEstablished(false);
-            setSessionError(null);
-          }
-        }
-      } catch (error) {
-        console.error("Failed to verify artist whitelist status:", error);
-        if (!cancelled) {
-          setIsApproved(false);
-          setSessionEstablished(false);
-        }
-      } finally {
-        if (!cancelled) {
-          setIsChecking(false);
-        }
-      }
-    }
-
-    void checkArtistAccess();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [address, isConnected]);
-
-  useEffect(() => {
     if (!isConnected) {
+      setIsChecking(false);
+      setIsApproved(false);
       setSessionEstablished(false);
       setSessionError(null);
       return;
     }
 
-    if (!address || !isApproved || sessionEstablished) {
+    if (!address) {
       return;
     }
 
     let cancelled = false;
+    setIsChecking(true);
 
     establishSecureSession(address)
-      .then(() => {
+      .then((session) => {
         if (!cancelled) {
-          setSessionEstablished(true);
+          const approved = session.role === "artist" || session.role === "admin";
+          setIsApproved(approved);
+          setSessionEstablished(approved);
           setSessionError(null);
         }
       })
@@ -80,16 +41,22 @@ const ArtistGuard = ({ children }: { children: React.ReactNode }) => {
         const message = error instanceof Error ? error.message : "Failed to authenticate with backend";
         console.error("Failed to establish artist secure session:", error);
         if (!cancelled) {
+          setIsApproved(false);
           setSessionEstablished(false);
           setSessionError(message);
-          toast.error(`Artist authentication failed: ${message}`);
+          toast.error(`Artist access check failed: ${message}`);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setIsChecking(false);
         }
       });
 
     return () => {
       cancelled = true;
     };
-  }, [address, isApproved, isConnected, sessionEstablished]);
+  }, [address, isConnected]);
 
   if (!isConnected) {
     return (
@@ -138,7 +105,7 @@ const ArtistGuard = ({ children }: { children: React.ReactNode }) => {
         </div>
         <h1 className="text-2xl font-bold text-foreground mb-2">Authentication Error</h1>
         <p className="text-sm text-muted-foreground mb-2 max-w-xs">
-          We verified your whitelist access, but the secure backend session could not be created.
+          We could not verify this wallet with the secure backend.
         </p>
         <p className="text-xs font-mono text-muted-foreground bg-secondary px-3 py-1.5 rounded-lg mb-8 max-w-xs">
           {sessionError}
