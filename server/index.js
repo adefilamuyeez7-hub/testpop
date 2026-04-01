@@ -1202,6 +1202,115 @@ app.patch("/products/:id", authRequired, async (req, res) => {
   return res.json(data);
 });
 
+function toPositiveInteger(value, fallback = 1) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.max(1, Math.floor(parsed));
+}
+
+function toNonNegativeNumber(value, fallback = 0) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.max(0, parsed);
+}
+
+function roundEth(value) {
+  return Number(toNonNegativeNumber(value).toFixed(8));
+}
+
+function normalizeShippingAddress(rawShipping) {
+  if (typeof rawShipping === "string") {
+    const fullAddress = rawShipping.trim();
+    return fullAddress ? { full_address: fullAddress } : null;
+  }
+
+  if (!rawShipping || typeof rawShipping !== "object" || Array.isArray(rawShipping)) {
+    return null;
+  }
+
+  const shipping = {
+    name: typeof rawShipping.name === "string" ? rawShipping.name.trim() : "",
+    email: typeof rawShipping.email === "string" ? rawShipping.email.trim() : "",
+    phone: typeof rawShipping.phone === "string" ? rawShipping.phone.trim() : "",
+    dial_code: typeof rawShipping.dial_code === "string" ? rawShipping.dial_code.trim() : "",
+    street: typeof rawShipping.street === "string" ? rawShipping.street.trim() : "",
+    city: typeof rawShipping.city === "string" ? rawShipping.city.trim() : "",
+    state: typeof rawShipping.state === "string" ? rawShipping.state.trim() : "",
+    postal_code: typeof rawShipping.postal_code === "string" ? rawShipping.postal_code.trim() : "",
+    country: typeof rawShipping.country === "string" ? rawShipping.country.trim() : "",
+    notes: typeof rawShipping.notes === "string" ? rawShipping.notes.trim() : "",
+  };
+
+  const fullAddress = [
+    shipping.street,
+    shipping.city,
+    shipping.state,
+    shipping.postal_code,
+    shipping.country,
+    shipping.phone ? `Phone: ${shipping.phone}` : "",
+    shipping.notes ? `Notes: ${shipping.notes}` : "",
+  ].filter(Boolean).join(", ");
+
+  return {
+    ...shipping,
+    full_address: fullAddress,
+  };
+}
+
+const ORDER_SELECT = `
+  id,
+  product_id,
+  buyer_wallet,
+  quantity,
+  currency,
+  subtotal_eth,
+  shipping_eth,
+  tax_eth,
+  total_price_eth,
+  status,
+  shipping_address,
+  shipping_address_jsonb,
+  tracking_code,
+  paid_at,
+  shipped_at,
+  delivered_at,
+  created_at,
+  updated_at,
+  order_items(
+    id,
+    product_id,
+    quantity,
+    unit_price_eth,
+    line_total_eth,
+    fulfillment_type,
+    delivery_status,
+    products(
+      id,
+      name,
+      image_url,
+      image_ipfs_uri,
+      creator_wallet
+    )
+  )
+`;
+
+app.get("/orders", authRequired, async (req, res) => {
+  const requestedWallet = normalizeWallet(typeof req.query.buyer_wallet === "string" ? req.query.buyer_wallet : req.auth.wallet);
+
+  if (!sameWalletOrAdmin(requestedWallet, req.auth)) {
+    return res.status(403).json({ error: "Cannot view another wallet's orders" });
+  }
+
+  const { data, error } = await supabase
+    .from("orders")
+    .select(ORDER_SELECT)
+    .eq("buyer_wallet", requestedWallet)
+    .order("created_at", { ascending: false });
+
+  if (error) return res.status(400).json({ error: error.message });
+  return res.json(data || []);
+});
+
 app.post("/orders", authRequired, async (req, res) => {
   const order = req.body || {};
   const buyerWallet = normalizeWallet(order.buyer_wallet);
@@ -1210,77 +1319,98 @@ app.post("/orders", authRequired, async (req, res) => {
     return res.status(403).json({ error: "Cannot create an order for another wallet" });
   }
 
-  const normalizedItems = Array.isArray(order.items)
+  const rawItems = Array.isArray(order.items) && order.items.length > 0
     ? order.items
-        .filter((item) => item && item.product_id)
-        .map((item) => ({
-          product_id: item.product_id,
-          quantity: Number(item.quantity || 1),
-          unit_price_eth: item.unit_price_eth,
-          line_total_eth: item.line_total_eth,
-          fulfillment_type: item.fulfillment_type || "physical",
-          delivery_status: item.delivery_status || null,
-        }))
-    : [];
+    : order.product_id
+      ? [{
+          product_id: order.product_id,
+          quantity: order.quantity || 1,
+        }]
+      : [];
 
-  const insertPayload = {
-    ...order,
-    buyer_wallet: buyerWallet,
-    product_id:
-      order.product_id ??
-      (normalizedItems.length === 1 ? normalizedItems[0].product_id : null),
-  };
+  const mergedItems = new Map();
+  for (const item of rawItems) {
+    const productId = typeof item?.product_id === "string" ? item.product_id.trim() : "";
+    if (!productId) continue;
 
-  const { items: _ignoredItems, ...orderInsert } = insertPayload;
-
-  const { data, error } = await supabase
-    .from("orders")
-    .insert(orderInsert)
-    .select("*")
-    .single();
-
-  if (error) return res.status(400).json({ error: error.message });
-
-  if (normalizedItems.length > 0) {
-    const orderItemsPayload = normalizedItems.map((item) => ({
-      order_id: data.id,
-      product_id: item.product_id,
-      quantity: item.quantity,
-      unit_price_eth:
-        item.unit_price_eth ??
-        (item.quantity > 0 && item.line_total_eth != null
-          ? Number(item.line_total_eth) / item.quantity
-          : 0),
-      line_total_eth:
-        item.line_total_eth ??
-        ((item.unit_price_eth ?? 0) * item.quantity),
-      fulfillment_type: item.fulfillment_type,
-      delivery_status: item.delivery_status,
-    }));
-
-    const { error: orderItemsError } = await supabase
-      .from("order_items")
-      .insert(orderItemsPayload);
-
-    if (orderItemsError) {
-      await supabase.from("orders").delete().eq("id", data.id);
-      return res.status(400).json({ error: `Failed to create order items: ${orderItemsError.message}` });
-    }
+    mergedItems.set(productId, (mergedItems.get(productId) || 0) + toPositiveInteger(item.quantity, 1));
   }
 
-  return res.json(data);
+  const normalizedItems = Array.from(mergedItems.entries()).map(([product_id, quantity]) => ({
+    product_id,
+    quantity,
+  }));
+
+  if (normalizedItems.length === 0) {
+    return res.status(400).json({ error: "At least one order item is required" });
+  }
+
+  const shippingAddressJsonb = normalizeShippingAddress(order.shipping_address_jsonb ?? order.shipping_address);
+  const shippingEth = roundEth(order.shipping_eth ?? 0);
+  const taxEth = roundEth(order.tax_eth ?? 0);
+  const currency = typeof order.currency === "string" && order.currency.trim() ? order.currency.trim() : "ETH";
+  const trackingCode = typeof order.tracking_code === "string" && order.tracking_code.trim()
+    ? order.tracking_code.trim()
+    : `TRK-${Date.now().toString(36).toUpperCase()}`;
+  const { data: createdOrderId, error: orderError } = await supabase.rpc("create_checkout_order", {
+    p_buyer_wallet: buyerWallet,
+    p_items: normalizedItems,
+    p_shipping_address_jsonb: shippingAddressJsonb,
+    p_shipping_eth: shippingEth,
+    p_tax_eth: taxEth,
+    p_currency: currency,
+    p_tracking_code: trackingCode,
+  });
+
+  if (orderError || !createdOrderId) {
+    const errorMessage = orderError?.message || "Failed to create order";
+    const lowered = errorMessage.toLowerCase();
+    const statusCode =
+      lowered.includes("left in stock") ||
+      lowered.includes("no longer available") ||
+      lowered.includes("just changed stock")
+        ? 409
+        : 400;
+
+    return res.status(statusCode).json({ error: errorMessage });
+  }
+
+  const { data: hydratedOrder, error: hydratedOrderError } = await supabase
+    .from("orders")
+    .select(ORDER_SELECT)
+    .eq("id", createdOrderId)
+    .single();
+
+  if (hydratedOrderError) {
+    return res.json({ id: createdOrderId });
+  }
+
+  return res.json(hydratedOrder);
 });
 
 app.patch("/orders/:id", authRequired, async (req, res) => {
   const { data: existing, error: existingError } = await supabase
     .from("orders")
-    .select("id, buyer_wallet, product_id, products(creator_wallet)")
+    .select("id, buyer_wallet, product_id, products(creator_wallet), order_items(product_id, products(creator_wallet))")
     .eq("id", req.params.id)
     .single();
 
   if (existingError) return res.status(404).json({ error: existingError.message });
-  const creatorWallet = existing.products?.creator_wallet;
-  const canUpdate = req.auth.role === "admin" || normalizeWallet(creatorWallet) === req.auth.wallet;
+
+  const creatorWallets = new Set();
+  const directCreatorWallet = existing.products?.creator_wallet;
+  if (directCreatorWallet) creatorWallets.add(normalizeWallet(directCreatorWallet));
+
+  for (const item of existing.order_items || []) {
+    const itemProduct = Array.isArray(item.products) ? item.products[0] : item.products;
+    const creatorWallet = itemProduct?.creator_wallet;
+    if (creatorWallet) creatorWallets.add(normalizeWallet(creatorWallet));
+  }
+
+  const canUpdate =
+    req.auth.role === "admin" ||
+    Array.from(creatorWallets).includes(req.auth.wallet);
+
   if (!canUpdate) return res.status(403).json({ error: "Only the creator or admin can update this order" });
 
   const { data, error } = await supabase

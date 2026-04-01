@@ -120,6 +120,24 @@ export interface Order {
   updated_at?: string;
 }
 
+export interface OrderWithItems extends Order {
+  order_items?: Array<OrderItem & {
+    products?: {
+      id?: string | null;
+      name?: string | null;
+      image_url?: string | null;
+      image_ipfs_uri?: string | null;
+      creator_wallet?: string | null;
+    } | Array<{
+      id?: string | null;
+      name?: string | null;
+      image_url?: string | null;
+      image_ipfs_uri?: string | null;
+      creator_wallet?: string | null;
+    }> | null;
+  }>;
+}
+
 export interface WhitelistEntry {
   id: string;
   wallet: string;
@@ -474,15 +492,58 @@ export async function createOrder(order: Partial<Order>): Promise<Order | null> 
   });
 }
 
-export async function getOrdersByBuyer(buyerWallet: string) {
+const ORDER_SELECT = `
+  id,
+  product_id,
+  buyer_wallet,
+  quantity,
+  currency,
+  subtotal_eth,
+  shipping_eth,
+  tax_eth,
+  total_price_eth,
+  status,
+  shipping_address,
+  shipping_address_jsonb,
+  tracking_code,
+  paid_at,
+  shipped_at,
+  delivered_at,
+  created_at,
+  updated_at,
+  order_items(
+    id,
+    product_id,
+    quantity,
+    unit_price_eth,
+    line_total_eth,
+    fulfillment_type,
+    delivery_status,
+    products(
+      id,
+      name,
+      image_url,
+      image_ipfs_uri,
+      creator_wallet
+    )
+  )
+`;
+
+export async function getOrdersByBuyer(buyerWallet: string): Promise<OrderWithItems[]> {
   try {
+    const normalizedWallet = buyerWallet.toLowerCase();
+
+    if (secureApiBaseUrl && getApiAuthToken()) {
+      return secureApiRequest<OrderWithItems[]>(`/orders?buyer_wallet=${encodeURIComponent(normalizedWallet)}`);
+    }
+
     if (!supabaseUrl || !supabaseAnonKey) return [];
 
     console.log(`📖 Fetching orders for buyer: ${buyerWallet}`);
     const { data, error } = await supabase
       .from("orders")
-      .select("*")
-      .eq("buyer_wallet", buyerWallet.toLowerCase())
+      .select(ORDER_SELECT)
+      .eq("buyer_wallet", normalizedWallet)
       .order("created_at", { ascending: false });
 
     if (error) {
@@ -491,7 +552,7 @@ export async function getOrdersByBuyer(buyerWallet: string) {
     }
 
     console.log(`✅ Found ${data?.length || 0} orders`);
-    return data || [];
+    return (data as OrderWithItems[]) || [];
   } catch (error: any) {
     console.error("❌ getOrdersByBuyer failed:", error.message);
     return [];

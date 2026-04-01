@@ -10,7 +10,7 @@ import { useAccount } from "wagmi";
 import { useCartStore } from "@/stores/cartStore";
 import { formatEther } from "viem";
 import { toast } from "sonner";
-import { createOrder as dbCreateOrder, getProducts as dbGetProducts, updateProduct as dbUpdateProduct } from "@/lib/db";
+import { createOrder as dbCreateOrder } from "@/lib/db";
 import {
   CHECKOUT_COUNTRIES,
   detectCheckoutCountry,
@@ -71,47 +71,24 @@ export function CheckoutPage() {
     try {
       checkoutInFlightRef.current = true;
       setIsCheckingOut(true);
-      const allProducts = await dbGetProducts();
       const formattedPhone = formatCheckoutPhone(country, phone);
-      const shipping = [
-        shippingAddress,
-        city,
-        postalCode,
-        country,
-        `Phone: ${formattedPhone}`,
-        notes ? `Notes: ${notes}` : "",
-      ].filter(Boolean).join(", ");
-
-      for (const item of items) {
-        const matchedProduct = allProducts.find((product: any) => product.id === item.productId);
-        const availableStock = Number(matchedProduct?.stock ?? 0);
-
-        if (!matchedProduct) {
-          throw new Error(`Product ${item.name} is no longer available`);
-        }
-
-        if (availableStock > 0 && item.quantity > availableStock) {
-          throw new Error(`${item.name} only has ${availableStock} left in stock`);
-        }
-
-        const nextStock = Math.max(0, Number(matchedProduct?.stock || 0) - item.quantity);
-
-        await dbCreateOrder({
+      await dbCreateOrder({
+        buyer_wallet: address.toLowerCase(),
+        items: items.map((item) => ({
           product_id: item.productId,
-          buyer_wallet: address.toLowerCase(),
           quantity: item.quantity,
-          total_price_eth: Number(formatEther(BigInt(item.price) * BigInt(item.quantity))),
-          status: "pending",
-          shipping_address: shipping,
-        });
-
-        if (matchedProduct) {
-          await dbUpdateProduct(item.productId, {
-            stock: nextStock,
-            status: nextStock > 0 ? "published" : "out_of_stock",
-          });
-        }
-      }
+        })),
+        shipping_address_jsonb: {
+          email,
+          phone: formattedPhone,
+          dial_code: countryMeta.dialCode,
+          street: shippingAddress,
+          city,
+          postal_code: postalCode,
+          country,
+          notes,
+        },
+      });
 
       // Clear cart after successful checkout
       clearCart();

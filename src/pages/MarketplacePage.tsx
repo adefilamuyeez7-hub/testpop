@@ -30,10 +30,10 @@ import {
   createOrder as dbCreateOrder,
   getOrdersByBuyer,
   getProducts as dbGetProducts,
-  updateProduct as dbUpdateProduct,
 } from "@/lib/db";
 import { getOrCreateGuestCustomerId } from "@/lib/runtimeSession";
 import { resolveMediaUrl } from "@/lib/pinata";
+import { mapBuyerOrderToDisplay } from "@/lib/orders";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type Product = {
@@ -266,7 +266,6 @@ type View = "home" | "product" | "cart" | "checkout" | "orders";
 // ─── Main Component ───────────────────────────────────────────────────────────
 const MarketplacePage = () => {
   const { address, isConnected, connectWallet } = useWallet();
-  const customerKey = getCustomerKey(address);
 
   // Navigation state
   const [view, setView] = useState<View>("home");
@@ -377,48 +376,38 @@ const MarketplacePage = () => {
       const buyerOrders = await getOrdersByBuyer(address.toLowerCase());
       if (!active) return;
 
-      const adminProducts = catalogProducts.map((product) =>
-        normalizeStoredProduct({
-          id: product.id,
-          name: product.name,
-          category: product.category,
-          priceEth: product.priceEth.toString(),
-          stock: product.stock,
-          sold: 0,
-          status: product.stock > 0 ? "active" : "out_of_stock",
-          nftLink: "#",
-          description: product.description,
-          image: product.image,
-        })
-      );
+      const mappedOrders = (buyerOrders || []).map((order: any) => {
+        const mapped = mapBuyerOrderToDisplay(order);
 
-      const mappedOrders = (buyerOrders || []).map((order: any) =>
-        mapAdminOrderToMarketplace(
-          {
-            id: order.id,
-            productId: order.product_id || undefined,
-            product:
-              adminProducts.find((product) => product.id === order.product_id)?.name ||
-              order.product_id ||
-              "Unknown product",
-            buyer: order.buyer_wallet || address,
-            buyerWallet: order.buyer_wallet,
-            customerKey,
-            qty: Number(order.quantity || 0),
-            status: order.status || "pending",
-            address: order.shipping_address || "",
-            date: new Date(order.created_at || Date.now()).toLocaleDateString("en-GB", {
-              day: "numeric",
-              month: "short",
-              year: "numeric",
-            }),
-            trackingCode: order.tracking_code || "Pending",
-            unitPriceEth: undefined,
-            totalPriceEth: String(order.total_price_eth || 0),
-          },
-          adminProducts
-        )
-      );
+        return {
+          id: mapped.id,
+          items: mapped.items.map((item) => {
+            const fallback = getFallbackVisuals("Other", item.name);
+            return {
+              id: item.id,
+              name: item.name,
+              artist: fallback.artist,
+              category: "Other",
+              priceEth: item.quantity > 0 ? item.lineTotalEth / item.quantity : item.lineTotalEth,
+              rating: 4.5,
+              reviews: 0,
+              stock: 0,
+              image: item.image || fallback.image,
+              nftPerk: fallback.nftPerk,
+              badge: undefined,
+              description: item.name,
+              qty: item.quantity,
+            };
+          }),
+          total: mapped.totalEth,
+          currency: mapped.currency,
+          status: mapped.status,
+          trackingCode: mapped.trackingCode,
+          address: mapped.address,
+          date: mapped.date,
+          estimatedDelivery: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toLocaleDateString("en-GB", { day: "numeric", month: "short" }),
+        } satisfies Order;
+      });
 
       setOrders(mappedOrders);
     }
@@ -428,7 +417,7 @@ const MarketplacePage = () => {
     return () => {
       active = false;
     };
-  }, [address, customerKey, catalogProducts]);
+  }, [address, catalogProducts]);
 
   // ── Cart helpers ────────────────────────────────────────────────────────────
   const addToCart = (product: Product, qty = 1) => {
@@ -486,43 +475,25 @@ const placeOrder = async () => {
     setIsPlacingOrder(true);
 
     const formattedPhone = formatCheckoutPhone(checkoutForm.country, checkoutForm.phone);
-    const newOrder: Order = {
-      id: `ORD-${Date.now().toString(36).toUpperCase()}`,
-      items: [...cart],
-      total: cartTotal,
-      status: "processing",
-      trackingCode: `TRK-${Math.random().toString(36).substring(2, 8).toUpperCase()}`,
-      address: [
-        checkoutForm.address,
-        checkoutForm.city,
-        checkoutForm.state,
-        checkoutForm.country,
-        `Phone: ${formattedPhone}`,
-      ].filter(Boolean).join(", "),
-      date: new Date().toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" }),
-      estimatedDelivery: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toLocaleDateString("en-GB", { day: "numeric", month: "short" }),
-    };
 
     try {
-      for (const item of cart) {
-        const matchedProduct = catalogProducts.find((product) => product.id === item.id);
-        const nextStock = Math.max(0, (matchedProduct?.stock || item.stock) - item.qty);
-
-        await dbCreateOrder({
+      const createdOrder = await dbCreateOrder({
+        buyer_wallet: address.toLowerCase(),
+        items: cart.map((item) => ({
           product_id: item.id,
-          buyer_wallet: address.toLowerCase(),
           quantity: item.qty,
-          total_price_eth: item.priceEth * item.qty,
-          status: "pending",
-          shipping_address: newOrder.address,
-          tracking_code: `${newOrder.trackingCode}-${item.id.slice(0, 4)}`,
-        });
-
-        await dbUpdateProduct(item.id, {
-          stock: nextStock,
-          status: nextStock > 0 ? "published" : "out_of_stock",
-        });
-      }
+        })),
+        shipping_address_jsonb: {
+          name: checkoutForm.name,
+          phone: formattedPhone,
+          dial_code: displayCountryMeta.dialCode,
+          street: checkoutForm.address,
+          city: checkoutForm.city,
+          state: checkoutForm.state,
+          country: checkoutForm.country,
+          notes: checkoutForm.notes,
+        },
+      });
 
       const refreshedProducts = await dbGetProducts();
       const mappedProducts = (refreshedProducts || [])
@@ -548,6 +519,24 @@ const placeOrder = async () => {
         .map(mapAdminProductToMarketplace);
 
       setCatalogProducts(mappedProducts);
+      const displayOrder = createdOrder ? mapBuyerOrderToDisplay(createdOrder as any) : null;
+      const newOrder: Order = {
+        id: displayOrder?.id || `ORD-${Date.now().toString(36).toUpperCase()}`,
+        items: cart.map((item) => ({ ...item })),
+        total: displayOrder?.totalEth || cartTotal,
+        currency: displayOrder?.currency || "ETH",
+        status: displayOrder?.status || "processing",
+        trackingCode: displayOrder?.trackingCode || "Pending",
+        address: displayOrder?.address || [
+          checkoutForm.address,
+          checkoutForm.city,
+          checkoutForm.state,
+          checkoutForm.country,
+          `Phone: ${formattedPhone}`,
+        ].filter(Boolean).join(", "),
+        date: displayOrder?.date || new Date().toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" }),
+        estimatedDelivery: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toLocaleDateString("en-GB", { day: "numeric", month: "short" }),
+      };
       setOrders((prev) => [newOrder, ...prev]);
       setLastOrder(newOrder);
       setCart([]);
