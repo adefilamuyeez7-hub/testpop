@@ -1011,6 +1011,7 @@ export default ArtistProfilePage;
                       </div>
                     )}
                   </TabsContent>
+                </Tabs>
               </div>
             </div>
           </Tabs>
