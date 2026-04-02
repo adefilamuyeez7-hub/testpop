@@ -18,6 +18,8 @@ export interface Product {
   image?: string;
   image_url?: string;
   category?: string;
+  contractProductId?: number | null;
+  metadataUri?: string | null;
   // Asset metadata (new)
   asset_type?: "image" | "video" | "audio" | "pdf" | "epub" | "merchandise";
   preview_uri?: string;

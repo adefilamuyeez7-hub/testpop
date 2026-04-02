@@ -11,6 +11,7 @@ import { useCartStore } from "@/stores/cartStore";
 import { formatEther } from "viem";
 import { toast } from "sonner";
 import { createOrder as dbCreateOrder } from "@/lib/db";
+import { buyOnchainProduct } from "@/lib/productStoreChain";
 import {
   CHECKOUT_COUNTRIES,
   detectCheckoutCountry,
@@ -22,7 +23,7 @@ import {
 export function CheckoutPage() {
   const navigate = useNavigate();
   const { address } = useAccount();
-  const { items, getTotalPrice, clearCart } = useCartStore();
+  const { items, getTotalPrice, clearCart, removeItem } = useCartStore();
 
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
@@ -33,6 +34,7 @@ export function CheckoutPage() {
   const [notes, setNotes] = useState("");
   const [orderPlaced, setOrderPlaced] = useState(false);
   const [isCheckingOut, setIsCheckingOut] = useState(false);
+  const [checkoutProgress, setCheckoutProgress] = useState("");
   const checkoutInFlightRef = useRef(false);
   const countryMeta = getCheckoutCountryMeta(country);
 
@@ -68,17 +70,20 @@ export function CheckoutPage() {
       return;
     }
 
+    const completedPurchases: Array<{ productId: string; txHash: `0x${string}` }> = [];
+
     try {
       checkoutInFlightRef.current = true;
       setIsCheckingOut(true);
       const formattedPhone = formatCheckoutPhone(country, phone);
-      await dbCreateOrder({
-        buyer_wallet: address.toLowerCase(),
-        items: items.map((item) => ({
-          product_id: item.productId,
-          quantity: item.quantity,
-        })),
-        shipping_address_jsonb: {
+
+      for (const item of items) {
+        if (!item.contractProductId || item.contractProductId < 1) {
+          throw new Error(`"${item.name}" is not linked to the onchain product store yet.`);
+        }
+
+        setCheckoutProgress(`Purchasing ${item.name} onchain...`);
+        const orderMetadata = JSON.stringify({
           email,
           phone: formattedPhone,
           dial_code: countryMeta.dialCode,
@@ -87,15 +92,62 @@ export function CheckoutPage() {
           postal_code: postalCode,
           country,
           notes,
-        },
-      });
+          db_product_id: item.productId,
+          contract_product_id: item.contractProductId,
+          quantity: item.quantity,
+        });
 
-      // Clear cart after successful checkout
+        const purchase = await buyOnchainProduct({
+          contractProductId: item.contractProductId,
+          quantity: item.quantity,
+          unitPriceWei: BigInt(item.price),
+          orderMetadata,
+          account: address as `0x${string}`,
+        });
+        completedPurchases.push({ productId: item.productId, txHash: purchase.hash });
+
+        setCheckoutProgress(`Recording ${item.name} order...`);
+        try {
+          await dbCreateOrder({
+            buyer_wallet: address.toLowerCase(),
+            product_id: item.productId,
+            quantity: item.quantity,
+            tx_hash: purchase.hash,
+            items: [{
+              product_id: item.productId,
+              quantity: item.quantity,
+            }],
+            shipping_address_jsonb: {
+              email,
+              phone: formattedPhone,
+              dial_code: countryMeta.dialCode,
+              street: shippingAddress,
+              city,
+              postal_code: postalCode,
+              country,
+              notes,
+            },
+          });
+        } catch (recordError) {
+          const message = recordError instanceof Error ? recordError.message : "Unknown error";
+          throw new Error(
+            `Purchase confirmed onchain for "${item.name}" but the order could not be recorded. Tx: ${purchase.hash}. ${message}`
+          );
+        }
+      }
+
+      completedPurchases.forEach(({ productId }) => removeItem(productId));
       clearCart();
       setOrderPlaced(true);
-      toast.success("Order placed successfully!");
+      setCheckoutProgress("");
+      toast.success("Onchain purchase completed successfully!");
     } catch (error) {
+      completedPurchases.forEach(({ productId }) => removeItem(productId));
+      if (error instanceof Error) {
+        console.error("Checkout error:", error);
+      }
       const errorMessage = error instanceof Error ? error.message : "Checkout failed";
+      setCheckoutProgress("");
       toast.error(errorMessage);
     } finally {
       checkoutInFlightRef.current = false;
@@ -260,7 +312,7 @@ export function CheckoutPage() {
                   {isCheckingOut ? (
                     <>
                       <Loader2 className="w-4 h-4 animate-spin mr-2" />
-                      Processing...
+                      {checkoutProgress || "Processing..."}
                     </>
                   ) : (
                     "Complete Purchase"
@@ -310,7 +362,7 @@ export function CheckoutPage() {
               <div className="bg-blue-50 dark:bg-blue-950 border border-blue-200 dark:border-blue-800 rounded p-3 text-sm">
                 <p className="font-semibold mb-1">Powered by Base Sepolia</p>
                 <p className="text-muted-foreground">
-                  Make sure you have enough ETH in your wallet to complete this transaction.
+                  Checkout submits an onchain purchase for each product in your cart and records the matching tx hash in your order history.
                 </p>
               </div>
             </CardContent>

@@ -1896,6 +1896,9 @@ app.post("/orders", authRequired, async (req, res) => {
   const trackingCode = typeof order.tracking_code === "string" && order.tracking_code.trim()
     ? order.tracking_code.trim()
     : `TRK-${Date.now().toString(36).toUpperCase()}`;
+  const txHash = typeof order.tx_hash === "string" && order.tx_hash.trim()
+    ? order.tx_hash.trim()
+    : null;
   let createdOrderIds = [];
   let orderError = null;
 
@@ -1938,6 +1941,17 @@ app.post("/orders", authRequired, async (req, res) => {
         : 400;
 
     return res.status(statusCode).json({ error: errorMessage });
+  }
+
+  if (txHash) {
+    const { error: txUpdateError } = await supabase
+      .from("orders")
+      .update({ tx_hash: txHash, updated_at: new Date().toISOString() })
+      .in("id", createdOrderIds);
+
+    if (txUpdateError) {
+      console.warn("Order tx_hash update warning:", txUpdateError.message);
+    }
   }
 
   try {

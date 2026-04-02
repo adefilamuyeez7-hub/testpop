@@ -16,6 +16,7 @@ import {
   fetchAllProductsFromSupabase,
   fetchAllDropsFromSupabase,
   fetchDropByIdFromSupabase,
+  fetchProductByIdFromSupabase,
 } from "@/lib/supabaseStore";
 import { getArtistProfile } from "@/lib/db";
 
@@ -129,6 +130,24 @@ export function useSupabaseAllProducts() {
 
   return {
     data: data ?? [],
+    loading: isLoading,
+    error: error instanceof Error ? error : null,
+    refetch: async () => {
+      await refetch();
+    },
+  };
+}
+
+export function useSupabaseProductById(productId: string | undefined) {
+  const { data, isLoading, error, refetch } = useQuery({
+    queryKey: ["products", "detail", productId],
+    queryFn: () => (productId ? fetchProductByIdFromSupabase(productId) : null),
+    enabled: !!productId,
+    ...STANDARD_QUERY_OPTIONS,
+  });
+
+  return {
+    data: data ?? null,
     loading: isLoading,
     error: error instanceof Error ? error : null,
     refetch: async () => {

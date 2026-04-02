@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Search, Filter, ShoppingCart } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -15,10 +15,27 @@ import { useProductStore } from "@/stores/productStore";
 import { useCartStore } from "@/stores/cartStore";
 import { useSupabasePublishedProducts } from "@/hooks/useSupabase";
 import { resolveMediaUrl } from "@/lib/pinata";
+import { extractContractProductId, extractProductMetadataUri } from "@/lib/productMetadata";
+
+function mapSupabaseProductToStoreProduct(p: any) {
+  return {
+    id: p.id,
+    name: p.name,
+    image: resolveMediaUrl(p.image_url, p.image_ipfs_uri),
+    price: BigInt(Math.floor(parseFloat(p.price_eth) * 1e18)),
+    creator: p.creator_wallet || "0x0",
+    description: p.description || "",
+    stock: p.stock || 0,
+    sold: p.sold || 0,
+    category: p.category || "Other",
+    contractProductId: extractContractProductId(p.metadata),
+    metadataUri: extractProductMetadataUri(p.metadata),
+  };
+}
 
 export function ProductsPage() {
   const navigate = useNavigate();
-  const { setProducts, filteredProducts, searchProducts, sortByPrice } = useProductStore();
+  const { setProducts } = useProductStore();
   const { getTotalItems } = useCartStore();
   const { data: supabaseProducts, loading, error } = useSupabasePublishedProducts();
   
@@ -30,55 +47,37 @@ export function ProductsPage() {
   useEffect(() => {
     if (supabaseProducts && supabaseProducts.length > 0) {
       console.log("📦 Loading products from Supabase:", supabaseProducts.length);
-      // Convert Supabase products to store format
-      const storeProducts = supabaseProducts.map((p: any) => ({
-        id: p.id,
-        name: p.name,
-        image: resolveMediaUrl(p.image_url, p.image_ipfs_uri),
-        price: BigInt(Math.floor(parseFloat(p.price_eth) * 1e18)), // Convert ETH to wei
-        creator: p.creator_wallet || "0x0",
-        description: p.description || "",
-        stock: p.stock || 0,
-        sold: p.sold || 0,
-        category: p.category || "Other",
-      }));
-      setProducts(storeProducts);
+      setProducts(supabaseProducts.map(mapSupabaseProductToStoreProduct));
+      return;
     }
+
+    setProducts([]);
   }, [supabaseProducts, setProducts]);
 
-  // Handle search
-  useEffect(() => {
-    if (searchQuery) {
-      searchProducts(searchQuery);
-    }
-  }, [searchQuery, searchProducts]);
-
-  // Handle sorting
-  useEffect(() => {
-    if (sortOrder === "price-low") {
-      sortByPrice(true);
-    } else if (sortOrder === "price-high") {
-      sortByPrice(false);
-    }
-  }, [sortOrder, sortByPrice]);
-
   const totalCartItems = getTotalItems();
-  const displayProducts = filteredProducts.length > 0 ? filteredProducts : supabaseProducts.map((p: any) => ({
-    id: p.id,
-    name: p.name,
-    image: resolveMediaUrl(p.image_url, p.image_ipfs_uri),
-    price: BigInt(Math.floor(parseFloat(p.price_eth) * 1e18)),
-    creator: p.creator_wallet || "0x0",
-    description: p.description || "",
-    stock: p.stock || 0,
-    sold: p.sold || 0,
-    category: p.category || "Other",
-  })) || [];
+  const filteredByCategory = useMemo(() => {
+    let products = (supabaseProducts || []).map(mapSupabaseProductToStoreProduct);
 
-  const filteredByCategory =
-    category === "all"
-      ? displayProducts
-      : displayProducts.filter((p) => p.category === category);
+    const normalizedQuery = searchQuery.trim().toLowerCase();
+    if (normalizedQuery) {
+      products = products.filter((product) =>
+        product.name?.toLowerCase().includes(normalizedQuery) ||
+        product.description?.toLowerCase().includes(normalizedQuery)
+      );
+    }
+
+    if (category !== "all") {
+      products = products.filter((product) => product.category === category);
+    }
+
+    if (sortOrder === "price-low") {
+      products = [...products].sort((a, b) => Number(a.price - b.price));
+    } else if (sortOrder === "price-high") {
+      products = [...products].sort((a, b) => Number(b.price - a.price));
+    }
+
+    return products;
+  }, [category, searchQuery, sortOrder, supabaseProducts]);
 
   return (
     <div className="min-h-screen bg-background">

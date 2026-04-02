@@ -1,10 +1,11 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { ShoppingCart, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useAccount } from "wagmi";
 import { useCartStore } from "@/stores/cartStore";
+import { useProductStore } from "@/stores/productStore";
 import { formatEther } from "viem";
 
 interface ProductCardProps {
@@ -16,13 +17,18 @@ interface ProductCardProps {
   description: string;
   stock: number;
   sold: number;
+  category?: string;
+  contractProductId?: number | null;
+  metadataUri?: string | null;
 }
 
-export function ProductCard({ id, name, image, price, creator, description, stock, sold }: ProductCardProps) {
+export function ProductCard({ id, name, image, price, creator, description, stock, sold, contractProductId, metadataUri, category }: ProductCardProps) {
   const navigate = useNavigate();
   const { address } = useAccount();
   const [isAdding, setIsAdding] = useState(false);
-  const { addItem, setLoading } = useCartStore();
+  const { addItem } = useCartStore();
+  const { setSelectedProduct } = useProductStore();
+  const isOnchainReady = typeof contractProductId === "number" && contractProductId > 0;
 
   const handleQuickAdd = async (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -33,7 +39,12 @@ export function ProductCard({ id, name, image, price, creator, description, stoc
 
     setIsAdding(true);
     try {
-      addItem(id, 1, price, name, image);
+      if (!isOnchainReady) {
+        alert("This product is not ready for onchain checkout yet");
+        return;
+      }
+
+      addItem(id, contractProductId, 1, price, name, image);
     } finally {
       setIsAdding(false);
     }
@@ -42,9 +53,24 @@ export function ProductCard({ id, name, image, price, creator, description, stoc
   const availableStock = stock === 0 ? "∞" : `${stock - sold} left`;
 
   return (
-    <Card
+      <Card
       className="overflow-hidden cursor-pointer hover:shadow-lg transition-shadow"
-      onClick={() => navigate(`/products/${id}`)}
+      onClick={() => {
+        setSelectedProduct({
+          id,
+          name,
+          image,
+          price,
+          creator,
+          description,
+          stock,
+          sold,
+          category,
+          contractProductId,
+          metadataUri,
+        });
+        navigate(`/products/${id}`);
+      }}
     >
       <div className="relative w-full h-48 bg-muted overflow-hidden">
         <img
@@ -70,7 +96,7 @@ export function ProductCard({ id, name, image, price, creator, description, stoc
         <p className="text-sm text-muted-foreground line-clamp-2">{description}</p>
         <Button
           onClick={handleQuickAdd}
-          disabled={isAdding || (stock > 0 && sold >= stock)}
+          disabled={isAdding || (stock > 0 && sold >= stock) || !isOnchainReady}
           className="w-full gap-2"
           size="sm"
         >
@@ -82,7 +108,7 @@ export function ProductCard({ id, name, image, price, creator, description, stoc
           ) : (
             <>
               <ShoppingCart className="w-4 h-4" />
-              Add to Cart
+              {isOnchainReady ? "Add to Cart" : "Unavailable"}
             </>
           )}
         </Button>

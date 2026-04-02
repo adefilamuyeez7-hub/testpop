@@ -1,6 +1,6 @@
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { ArrowLeft, Loader2, ShoppingCart } from "lucide-react";
+import { AlertTriangle, ArrowLeft, Loader2, ShoppingCart } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -9,6 +9,9 @@ import { useProductStore } from "@/stores/productStore";
 import { useAccount } from "wagmi";
 import { formatEther } from "viem";
 import { toast } from "sonner";
+import { useSupabaseProductById } from "@/hooks/useSupabase";
+import { resolveMediaUrl } from "@/lib/pinata";
+import { extractContractProductId, extractProductMetadataUri } from "@/lib/productMetadata";
 
 export function ProductDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -16,11 +19,50 @@ export function ProductDetailPage() {
   const { address } = useAccount();
   const { selectedProduct, setSelectedProduct } = useProductStore();
   const { addItem } = useCartStore();
+  const { data: supabaseProduct, loading } = useSupabaseProductById(id);
 
-  // Product data fetched from Supabase via productStore
-  // TODO: Fetch real product from contract/Supabase if ID provided
-  const product = selectedProduct;
+  const product = useMemo(() => {
+    if (selectedProduct?.id === id) {
+      return selectedProduct;
+    }
+
+    if (!supabaseProduct) {
+      return null;
+    }
+
+    return {
+      id: supabaseProduct.id,
+      name: supabaseProduct.name,
+      image: resolveMediaUrl(supabaseProduct.image_url, supabaseProduct.image_ipfs_uri),
+      price: BigInt(Math.floor(Number(supabaseProduct.price_eth || 0) * 1e18)),
+      creator: supabaseProduct.creator_wallet || "0x0",
+      description: supabaseProduct.description || "",
+      stock: supabaseProduct.stock || 0,
+      sold: supabaseProduct.sold || 0,
+      category: supabaseProduct.category || "Other",
+      contractProductId: extractContractProductId(supabaseProduct.metadata),
+      metadataUri: extractProductMetadataUri(supabaseProduct.metadata),
+    };
+  }, [id, selectedProduct, supabaseProduct]);
+
+  useEffect(() => {
+    if (product) {
+      setSelectedProduct(product);
+    }
+  }, [product, setSelectedProduct]);
+
+  const isOnchainReady = typeof product?.contractProductId === "number" && product.contractProductId > 0;
   
+  if (loading) {
+    return (
+      <div className="container mx-auto px-4 py-8">
+        <div className="flex items-center justify-center py-12">
+          <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
+        </div>
+      </div>
+    );
+  }
+
   if (!product) {
     return (
       <div className="container mx-auto px-4 py-8">
@@ -42,7 +84,12 @@ export function ProductDetailPage() {
       return;
     }
 
-    addItem(product.id, 1, product.price, product.name, product.image);
+    if (!isOnchainReady) {
+      toast.error("This product is not ready for onchain checkout yet");
+      return;
+    }
+
+    addItem(product.id, product.contractProductId ?? null, 1, product.price, product.name, product.image);
     toast.success("Added to cart!");
   };
 
@@ -85,6 +132,13 @@ export function ProductDetailPage() {
             <CardContent className="pt-6 space-y-4">
               <p className="text-muted-foreground leading-relaxed">{product.description}</p>
 
+              {!isOnchainReady && (
+                <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 flex items-start gap-2">
+                  <AlertTriangle className="w-4 h-4 mt-0.5" />
+                  This product has not been linked to the onchain product store yet, so checkout is disabled.
+                </div>
+              )}
+
               <div className="border-t pt-4">
                 <h3 className="font-semibold mb-3">Creator</h3>
                 <p className="font-mono text-sm break-all">{product.creator}</p>
@@ -92,12 +146,12 @@ export function ProductDetailPage() {
 
               <Button
                 onClick={handleAddToCart}
-                disabled={isSoldOut}
+                disabled={isSoldOut || !isOnchainReady}
                 size="lg"
                 className="w-full gap-2"
               >
                 <ShoppingCart className="w-5 h-5" />
-                {isSoldOut ? "Sold Out" : "Add to Cart"}
+                {isSoldOut ? "Sold Out" : !isOnchainReady ? "Unavailable" : "Add to Cart"}
               </Button>
             </CardContent>
           </Card>

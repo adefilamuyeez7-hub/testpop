@@ -434,10 +434,17 @@ const Index = () => {
     }
 
     try {
+      if (
+        drop.contractDropId === null ||
+        drop.contractDropId === undefined
+      ) {
+        throw new Error("This auction is not linked to an onchain campaign yet");
+      }
+
       setBiddingDropId(drop.id);
       recordDropView(drop.id);
-      console.log(`🏷️ Bidding on campaign ${drop.id} for ${drop.priceEth} ETH on Base mainnet...`);
-      placeBid(parseInt(drop.id), drop.priceEth);
+      console.log(`🏷️ Bidding on campaign ${drop.contractDropId} for ${drop.priceEth} ETH on Base mainnet...`);
+      placeBid(drop.contractDropId, drop.priceEth);
       toast({
         title: "Bid Submitted",
         description: `Bidding ${drop.priceEth} ETH on "${drop.title}"...`,

@@ -1,5 +1,5 @@
-import MarketplacePage from "@/pages/MarketplacePage";
+import { ProductsPage } from "@/pages/ProductsPage";
 
-const WalletMarketplaceRoute = () => <MarketplacePage />;
+const WalletMarketplaceRoute = () => <ProductsPage />;
 
 export default WalletMarketplaceRoute;

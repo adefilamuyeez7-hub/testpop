@@ -73,6 +73,8 @@ export interface Product {
   nft_link?: string;
   status?: "draft" | "published" | "out_of_stock";
   metadata?: Record<string, unknown>;
+  contract_product_id?: number | null;
+  metadata_uri?: string | null;
   created_at?: string;
   updated_at?: string;
 }

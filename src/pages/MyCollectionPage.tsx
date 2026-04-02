@@ -252,6 +252,9 @@ const MyCollectionPage = () => {
 
   const collectedDrops = useMemo(() => {
     if (filter === "all") return ownedCollection;
+    if (filter === "owned") {
+      return ownedCollection.filter((item) => item.mintedTokenId != null || Boolean(item.contractAddress) || Boolean(item.isGated));
+    }
     return ownedCollection;
   }, [filter, ownedCollection]);
 

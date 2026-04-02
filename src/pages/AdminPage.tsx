@@ -13,7 +13,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { toast } from "sonner";
 import { supabase } from "@/lib/db";
 import { useWallet } from "@/hooks/useContracts";
-import { ipfsToHttp, uploadFileToPinata } from "@/lib/pinata";
+import { ipfsToHttp, uploadFileToPinata, uploadMetadataToPinata } from "@/lib/pinata";
 import {
   type ArtistWhitelistEntry as WhitelistEntry,
   getStoredArtistWhitelist,
@@ -29,6 +29,8 @@ import {
   updateProduct as dbUpdateProduct,
   updateOrder as dbUpdateOrder,
 } from "@/lib/db";
+import { createOnchainProduct } from "@/lib/productStoreChain";
+import { extractContractProductId, extractProductMetadataUri, mergeProductMetadata } from "@/lib/productMetadata";
 import { useSupabaseAllProducts, useSupabaseAllDrops } from "@/hooks/useSupabase";
 import { useAdminArtists, useApproveArtist, useRejectArtist } from "@/lib/adminApi";
 
@@ -46,6 +48,9 @@ type MarketProduct = {
   description: string;
   image?: string;
   imageUri?: string;
+  metadataUri?: string | null;
+  contractProductId?: number | null;
+  metadata?: Record<string, unknown> | null;
 };
 
 type Order = {
@@ -136,6 +141,9 @@ function normalizeStoredProduct(product: Partial<MarketProduct> & { id?: string;
     description: product.description ?? "",
     image: product.image ?? (product.imageUri ? ipfsToHttp(product.imageUri) : ""),
     imageUri: product.imageUri ?? "",
+    metadataUri: product.metadataUri ?? null,
+    contractProductId: product.contractProductId ?? null,
+    metadata: product.metadata ?? null,
   };
 }
 
@@ -154,6 +162,10 @@ async function saveProductToDBs(product: MarketProduct, creatorWallet: string = 
       image_url: product.image,
       image_ipfs_uri: product.imageUri,
       status: product.status === "active" ? "published" : product.status,
+      metadata: mergeProductMetadata(product.metadata, {
+        contract_product_id: product.contractProductId ?? null,
+        metadata_uri: product.metadataUri ?? null,
+      }),
     });
     console.log(`✅ Product saved to Supabase: ${product.name}`);
     return created;
@@ -206,6 +218,7 @@ const AddProductDialog = ({ onAdd, adminAddress }: { onAdd: (p: MarketProduct, w
       const errorMsg = Object.values(validation.errors).join(", ");
       console.error("❌ Form validation failed:", errorMsg, validation.errors);
       toast.error(errorMsg);
+      return;
     }
 
     // Validate file upload
@@ -229,6 +242,33 @@ const AddProductDialog = ({ onAdd, adminAddress }: { onAdd: (p: MarketProduct, w
       console.log("✅ Image uploaded to Pinata:", imageCid);
       
       const imageUri = `ipfs://${imageCid}`;
+      const metadataUri = await uploadMetadataToPinata({
+        name: sanitizeString(form.name),
+        description: sanitizeString(form.description),
+        image: imageUri,
+        properties: {
+          category: form.category,
+          productType: "physical",
+        },
+      });
+      console.log("✅ Product metadata uploaded:", metadataUri);
+
+      if (!adminAddress || adminAddress === "0x0") {
+        throw new Error("Connect the admin wallet before creating an onchain product");
+      }
+
+      const onchainProduct = await createOnchainProduct({
+        metadataUri,
+        priceEth: form.priceEth,
+        stock: Number(form.stock),
+        royaltyPercent: 0,
+        account: adminAddress as `0x${string}`,
+      });
+
+      if (onchainProduct.contractProductId === null) {
+        throw new Error("Product was created onchain, but no contract product ID was returned");
+      }
+
       const product: MarketProduct = {
         id: `mp${Date.now()}`,
         name: sanitizeString(form.name),
@@ -242,6 +282,12 @@ const AddProductDialog = ({ onAdd, adminAddress }: { onAdd: (p: MarketProduct, w
         description: sanitizeString(form.description),
         image: ipfsToHttp(imageUri),
         imageUri,
+        metadataUri,
+        contractProductId: onchainProduct.contractProductId,
+        metadata: {
+          contract_product_id: onchainProduct.contractProductId,
+          metadata_uri: metadataUri,
+        },
       };
       
       console.log("💾 Product object created:", product);
@@ -761,6 +807,9 @@ const AdminPage = () => {
         description: p.description || "",
         image: p.image_url || "",
         imageUri: p.image_ipfs_uri || "",
+        metadataUri: extractProductMetadataUri(p.metadata),
+        contractProductId: extractContractProductId(p.metadata),
+        metadata: p.metadata ?? null,
       }));
       setProducts(mappedProducts);
       console.log(`✅ Products loaded: ${mappedProducts.length} items from Supabase`);
@@ -979,6 +1028,10 @@ const AdminPage = () => {
   const togglePublish = useCallback((id: string) => {
     const updated = [...products].map(prod => {
       if (prod.id === id) {
+        if (prod.status !== "active" && !prod.contractProductId) {
+          toast.error("This product has no onchain product ID yet and cannot be published.");
+          return prod;
+        }
         const newStatus = prod.status === "active" ? "draft" : (prod.stock > 0 ? "active" : "out_of_stock") as "active" | "draft" | "out_of_stock";
         const updatedProduct = { ...prod, status: newStatus };
         dbUpdateProduct(id, { status: newStatus === "active" ? "published" : newStatus }).catch(err =>
@@ -997,7 +1050,24 @@ const AdminPage = () => {
   }, []);
   const saveProduct = useCallback((updated: MarketProduct) => {
     setProducts(p => p.map(prod => prod.id === updated.id ? updated : prod));
-    void saveProductToDBs(updated);
+    void dbUpdateProduct(updated.id, {
+      name: updated.name,
+      description: updated.description,
+      category: updated.category,
+      price_eth: parseFloat(updated.priceEth),
+      stock: updated.stock,
+      sold: updated.sold,
+      image_url: updated.image,
+      image_ipfs_uri: updated.imageUri,
+      status: updated.status === "active" ? "published" : updated.status,
+      metadata: mergeProductMetadata(updated.metadata, {
+        contract_product_id: updated.contractProductId ?? null,
+        metadata_uri: updated.metadataUri ?? null,
+      }),
+    }).catch((error) => {
+      console.error("Failed to update product in Supabase:", error);
+      toast.error("Product update failed");
+    });
   }, []);
 
   // Order actions
@@ -1251,6 +1321,9 @@ const AdminPage = () => {
                       description: created.description,
                       image: created.image_url,
                       imageUri: created.image_ipfs_uri,
+                      metadataUri: extractProductMetadataUri(created.metadata),
+                      contractProductId: extractContractProductId(created.metadata),
+                      metadata: created.metadata ?? null,
                     })
                   : p;
                 setProducts(prev => prev.map(prod => prod.id === p.id ? normalizedCreated : prod));

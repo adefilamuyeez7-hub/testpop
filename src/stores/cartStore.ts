@@ -3,6 +3,7 @@ import { persist, createJSONStorage } from "zustand/middleware";
 
 export interface CartItem {
   productId: string;
+  contractProductId?: number | null;
   quantity: number;
   price: string;
   name: string;
@@ -14,6 +15,7 @@ interface CartStore {
   isLoading: boolean;
   addItem: (
     productId: string,
+    contractProductId: number | null,
     quantity: number,
     price: bigint,
     name: string,
@@ -34,7 +36,7 @@ export const useCartStore = create<CartStore>()(
       items: [],
       isLoading: false,
 
-      addItem: (productId, quantity, price, name, image) => {
+      addItem: (productId, contractProductId, quantity, price, name, image) => {
         const { items } = get();
         const priceStr = price.toString();
         const existingItem = items.find((item) => item.productId === productId);
@@ -43,7 +45,7 @@ export const useCartStore = create<CartStore>()(
           set({
             items: items.map((item) =>
               item.productId === productId
-                ? { ...item, quantity: item.quantity + quantity, price: priceStr, name, image }
+                ? { ...item, quantity: item.quantity + quantity, contractProductId, price: priceStr, name, image }
                 : item
             ),
           });
@@ -53,7 +55,7 @@ export const useCartStore = create<CartStore>()(
         set({
           items: [
             ...items,
-            { productId, quantity, price: priceStr, name, image },
+            { productId, contractProductId, quantity, price: priceStr, name, image },
           ],
         });
       },

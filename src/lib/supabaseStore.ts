@@ -279,6 +279,27 @@ export async function fetchPublishedProductsFromSupabase() {
   }
 }
 
+export async function fetchProductByIdFromSupabase(productId: string) {
+  try {
+    console.log(`📦 Fetching product by ID from Supabase: ${productId}`);
+    const { data, error } = await supabase
+      .from("products")
+      .select("*")
+      .eq("id", productId)
+      .maybeSingle();
+
+    if (error) {
+      console.error("❌ Error fetching product:", error.message);
+      throw error;
+    }
+
+    return data || null;
+  } catch (error: any) {
+    console.error("❌ fetchProductByIdFromSupabase failed:", error.message);
+    throw error;
+  }
+}
+
 export async function fetchProductsByCreatorFromSupabase(creatorWallet: string) {
   try {
     console.log(`📖 Fetching products for creator: ${creatorWallet}`);
