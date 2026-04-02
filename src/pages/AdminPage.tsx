@@ -33,6 +33,7 @@ import { createOnchainProduct } from "@/lib/productStoreChain";
 import { extractContractProductId, extractProductMetadataUri, mergeProductMetadata } from "@/lib/productMetadata";
 import { useSupabaseAllProducts, useSupabaseAllDrops } from "@/hooks/useSupabase";
 import { useAdminArtists, useApproveArtist, useRejectArtist } from "@/lib/adminApi";
+import FeaturedCreatorsManager from "@/components/admin/FeaturedCreatorsManager";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type MarketProduct = {
@@ -1199,8 +1200,8 @@ const AdminPage = () => {
 
       {/* Tabs */}
       <div className="max-w-2xl mx-auto px-4 pb-12">
-        <Tabs value={activeTab} onValueChange={setActiveTab}>
-          <TabsList className="w-full bg-secondary rounded-xl h-10 grid grid-cols-4 mb-4">
+          <Tabs value={activeTab} onValueChange={setActiveTab}>
+          <TabsList className="w-full bg-secondary rounded-xl h-10 grid grid-cols-5 mb-4">
             <TabsTrigger value="whitelist" className="rounded-lg text-xs">
               Artists
               {pendingWhitelist > 0 && (
@@ -1214,6 +1215,7 @@ const AdminPage = () => {
                 <span className="ml-1.5 h-4 w-4 rounded-full bg-primary text-primary-foreground text-[9px] inline-flex items-center justify-center">{pendingOrders}</span>
               )}
             </TabsTrigger>
+            <TabsTrigger value="featured" className="rounded-lg text-xs">Featured</TabsTrigger>
             <TabsTrigger value="analytics" className="rounded-lg text-xs">Analytics</TabsTrigger>
           </TabsList>
 
@@ -1453,6 +1455,10 @@ const AdminPage = () => {
                 </div>
               </div>
             ))}
+          </TabsContent>}
+
+          {activeTab === "featured" && <TabsContent value="featured" className="space-y-4">
+            <FeaturedCreatorsManager />
           </TabsContent>}
 
           {activeTab === "analytics" && <TabsContent value="analytics" className="space-y-4">

@@ -22,6 +22,7 @@ interface CartStore {
     image: string
   ) => void;
   removeItem: (productId: string) => void;
+  removeItems: (productIds: string[]) => void;
   updateQuantity: (productId: string, quantity: number) => void;
   clearCart: () => void;
   setLoading: (loading: boolean) => void;
@@ -63,6 +64,12 @@ export const useCartStore = create<CartStore>()(
       removeItem: (productId) => {
         const { items } = get();
         set({ items: items.filter((item) => item.productId !== productId) });
+      },
+
+      removeItems: (productIds) => {
+        const blocked = new Set(productIds);
+        const { items } = get();
+        set({ items: items.filter((item) => !blocked.has(item.productId)) });
       },
 
       updateQuantity: (productId, quantity) => {

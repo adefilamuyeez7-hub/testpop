@@ -1,6 +1,6 @@
-import { lazy, Suspense, useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { Loader2, ArrowLeft, Clock, Share2, Heart, Award, Link as LinkIcon, AlertTriangle } from "lucide-react";
+import { Loader2, ArrowLeft, Clock, Award, Link as LinkIcon, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -25,7 +25,6 @@ const DropDetailPage = () => {
   const navigate = useNavigate();
   const addCollectedDrop = useCollectionStore((state) => state.addCollectedDrop);
   const { data: dropRecord, loading: dropsLoading, error: dropError, refetch: refetchDrop } = useSupabaseDropById(id);
-  const [isLiked, setIsLiked] = useState(false);
 
   const drop = useMemo(() => {
     if (!dropRecord) return null;
@@ -179,20 +178,6 @@ const DropDetailPage = () => {
         <button onClick={() => navigate(-1)} className="absolute top-3 left-3 p-2 rounded-full bg-background/60 backdrop-blur-sm">
           <ArrowLeft className="h-4 w-4 text-foreground" />
         </button>
-        <div className="absolute top-3 right-3 flex gap-2">
-          <button onClick={() => setIsLiked((value) => !value)} className={`p-2 rounded-full bg-background/60 backdrop-blur-sm ${isLiked ? "text-red-500" : "text-foreground"}`}>
-            <Heart className="h-4 w-4" />
-          </button>
-          <button
-            onClick={() => {
-              navigator.clipboard.writeText(window.location.href);
-              toast.success("Link copied");
-            }}
-            className="p-2 rounded-full bg-background/60 backdrop-blur-sm"
-          >
-            <Share2 className="h-4 w-4 text-foreground" />
-          </button>
-        </div>
       </div>
 
       <div className="px-4 pt-4 space-y-4">

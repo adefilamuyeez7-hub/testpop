@@ -15,6 +15,12 @@ import { parseEther } from "viem";
 import { useCollectionStore } from "@/stores/collectionStore";
 import { resolveMediaUrl } from "@/lib/pinata";
 import { resolvePortfolioImage } from "@/lib/portfolio";
+import { ACTIVE_CHAIN } from "@/lib/wagmi";
+import {
+  loadFeaturedCreatorSlides,
+  getFeaturedCreatorsUpdateEventName,
+  type FeaturedCreatorSlide,
+} from "@/lib/featuredCreators";
 
 const SubscribeButtonWrapper = ({ artist, isConnected, connectWallet, address, toast }: any) => {
   const effectiveContractAddress = useResolvedArtistContract(artist?.wallet, artist?.contractAddress);
@@ -114,7 +120,7 @@ const SubscribeButtonWrapper = ({ artist, isConnected, connectWallet, address, t
 
 const Index = () => {
   const navigate = useNavigate();
-  const { isConnected, connectWallet, address } = useWallet();
+  const { isConnected, connectWallet, address, chain, switchToActiveChain } = useWallet();
   const { data: supabaseArtists, loading, error } = useSupabaseArtists();
   const { data: supabaseLiveDrops, loading: dropsLoading, error: dropsError, refetch: refetchDrops } = useSupabaseLiveDrops();
   const { placeBid, isPending: isBidding, error: bidError } = usePlaceBid();
@@ -122,8 +128,10 @@ const Index = () => {
   const addCollectedDrop = useCollectionStore((state) => state.addCollectedDrop);
   
   const [featuredArtists, setFeaturedArtists] = useState([]);
+  const [adminFeaturedSlides, setAdminFeaturedSlides] = useState<FeaturedCreatorSlide[]>([]);
   const [liveDrops, setLiveDrops] = useState([]);
   const [currentCard, setCurrentCard] = useState(0);
+  const [featuredCarouselIndex, setFeaturedCarouselIndex] = useState(0);
   const [currentDropCard, setCurrentDropCard] = useState(0);
   const [swipeOffset, setSwipeOffset] = useState(0);
   const [dropSwipeOffset, setDropSwipeOffset] = useState(0);
@@ -147,6 +155,21 @@ const Index = () => {
 
   useEffect(() => {
     recordPageVisit();
+  }, []);
+
+  useEffect(() => {
+    const syncFeaturedSlides = () => {
+      setAdminFeaturedSlides(loadFeaturedCreatorSlides());
+      setFeaturedCarouselIndex(0);
+    };
+
+    syncFeaturedSlides();
+    const eventName = getFeaturedCreatorsUpdateEventName();
+    window.addEventListener(eventName, syncFeaturedSlides);
+
+    return () => {
+      window.removeEventListener(eventName, syncFeaturedSlides);
+    };
   }, []);
 
   // Update featured artists from Supabase when data loads
@@ -313,6 +336,19 @@ const Index = () => {
       return;
     }
 
+    if (chain?.id !== ACTIVE_CHAIN.id) {
+      try {
+        await switchToActiveChain();
+      } catch (error) {
+        toast({
+          title: "Wrong network",
+          description: error instanceof Error ? error.message : `Switch to ${ACTIVE_CHAIN.name} and try again.`,
+          variant: "destructive",
+        });
+      }
+      return;
+    }
+
     try {
       // Validate drop has required contract fields
       if (
@@ -365,6 +401,8 @@ const Index = () => {
       let displayMsg = errMsg;
       if (errMsg.includes("insufficient funds")) {
         displayMsg = "Insufficient balance for mint + gas fees";
+      } else if (errMsg.toLowerCase().includes("requested resource is unavailable")) {
+        displayMsg = `Your wallet could not reach ${ACTIVE_CHAIN.name}. Switch networks, reconnect, and try again.`;
       } else if (errMsg.includes("network fee") || errMsg.includes("gas")) {
         displayMsg = "Network congested. Try refreshing and trying again.";
       } else if (errMsg.includes("denied")) {
@@ -443,6 +481,19 @@ const Index = () => {
   const handleBidOnDrop = async (drop: any) => {
     if (!isConnected) {
       await connectWallet();
+      return;
+    }
+
+    if (chain?.id !== ACTIVE_CHAIN.id) {
+      try {
+        await switchToActiveChain();
+      } catch (error) {
+        toast({
+          title: "Wrong network",
+          description: error instanceof Error ? error.message : `Switch to ${ACTIVE_CHAIN.name} and try again.`,
+          variant: "destructive",
+        });
+      }
       return;
     }
 
@@ -558,6 +609,20 @@ const Index = () => {
   };
 
   const desktopDeckCards = getDesktopDeckCards();
+  const activeFeaturedSlide =
+    adminFeaturedSlides.length > 0
+      ? adminFeaturedSlides[featuredCarouselIndex % adminFeaturedSlides.length]
+      : null;
+
+  const nextFeaturedSlide = () => {
+    if (!adminFeaturedSlides.length) return;
+    setFeaturedCarouselIndex((prev) => (prev + 1) % adminFeaturedSlides.length);
+  };
+
+  const prevFeaturedSlide = () => {
+    if (!adminFeaturedSlides.length) return;
+    setFeaturedCarouselIndex((prev) => (prev - 1 + adminFeaturedSlides.length) % adminFeaturedSlides.length);
+  };
 
   return (
     <div className="flex flex-col min-h-[calc(100vh-88px)] px-4 overflow-y-auto md:px-0">
@@ -576,201 +641,286 @@ const Index = () => {
               </p>
             </div>
 
-            {loading && (
-              <div className="flex h-[420px] items-center justify-center">
-                <Loader2 className="h-8 w-8 animate-spin text-primary" />
-              </div>
-            )}
-
-            {error && (
-              <div className="flex h-[420px] items-center justify-center">
-                <p className="text-sm text-red-500">{error.message}</p>
-              </div>
-            )}
-
-            {!loading && !error && featuredArtists.length === 0 && (
-              <div className="flex h-[420px] items-center justify-center rounded-[2rem] border border-dashed border-[#bfd5ff] bg-white/75">
-                <div className="text-center">
-                  <Sparkles className="mx-auto h-10 w-10 text-primary" />
-                  <p className="mt-3 text-lg font-semibold text-foreground">No featured artists yet</p>
-                  <p className="mt-2 text-sm text-muted-foreground">
-                    Whitelisted artist profiles will appear here once creators publish work.
-                  </p>
-                </div>
-              </div>
-            )}
-
-            {!loading && !error && featuredArtists.length > 0 && (
-              <>
-                <div className="relative mt-10 h-[430px] overflow-hidden">
-                  {desktopDeckCards.map((artist: any) => {
-                    const featuredPiece = getArtistFeaturedPiece(artist);
-                    const offset = artist.deckOffset;
-                    const isActive = offset === 0;
-                    const translateXMap: Record<string, string> = {
-                      "-1": "14%",
-                      "0": "50%",
-                      "1": "74%",
-                      "2": "90%",
-                    };
-                    const rotateMap: Record<string, string> = {
-                      "-1": "-8deg",
-                      "0": "0deg",
-                      "1": "7deg",
-                      "2": "9deg",
-                    };
-                    const scaleMap: Record<string, string> = {
-                      "-1": "0.9",
-                      "0": "1",
-                      "1": "0.92",
-                      "2": "0.86",
-                    };
-                    const opacityMap: Record<string, string> = {
-                      "-1": "0.86",
-                      "0": "1",
-                      "1": "0.9",
-                      "2": "0.72",
-                    };
-
-                    return (
-                      <button
-                        key={`${artist.id}-${artist.deckOffset}`}
-                        type="button"
-                        onClick={() => {
-                          if (isActive) {
-                            setSelectedDesktopArtist(artist);
-                            return;
-                          }
-                          setCurrentCard(artist.deckIndex);
-                        }}
-                        className="group absolute top-10 h-[320px] w-[240px] rounded-[2rem] text-left transition-all duration-500 ease-out"
-                        style={{
-                          left: translateXMap[String(offset)],
-                          zIndex: isActive ? 20 : 10 - offset,
-                          opacity: Number(opacityMap[String(offset)]),
-                          transform: `translateX(-50%) translateY(${isActive ? "0" : offset < 0 ? "36px" : "26px"}) scale(${scaleMap[String(offset)]}) rotate(${rotateMap[String(offset)]})`,
-                        }}
-                      >
-                        <div className="relative h-full overflow-hidden rounded-[2rem] bg-white shadow-[0_30px_60px_rgba(15,23,42,0.18)] ring-1 ring-black/5">
-                          <div
-                            className={`absolute inset-0 ${
-                              isActive
-                                ? "bg-[linear-gradient(180deg,#60a5fa_0%,#1d4ed8_100%)]"
-                                : offset < 0
-                                ? "bg-[linear-gradient(180deg,#93c5fd_0%,#3b82f6_100%)]"
-                                : "bg-[linear-gradient(180deg,#bfdbfe_0%,#2563eb_100%)]"
-                            }`}
-                          />
-                          <img
-                            src={getArtistAvatarImage(artist)}
-                            alt={artist.name}
-                            className={`absolute left-1/2 top-[-48px] z-10 object-cover drop-shadow-[0_18px_24px_rgba(15,23,42,0.25)] ${
-                              isActive ? "h-44 w-44" : "h-36 w-36"
-                            } -translate-x-1/2 rounded-[2rem]`}
-                          />
-                          <div className="absolute inset-x-0 bottom-0 p-5 text-white">
-                            <div className="overflow-hidden rounded-[1.4rem] bg-white/14 p-2 backdrop-blur-[2px]">
-                              <img
-                                src={featuredPiece.image}
-                                alt={featuredPiece.title}
-                                className="mb-4 h-28 w-full rounded-[1rem] object-cover"
-                              />
-                              <p className="text-2xl font-semibold leading-none">{artist.name}</p>
-                              <p className="mt-2 text-xs uppercase tracking-[0.24em] text-white/78">{featuredPiece.medium}</p>
-                            </div>
-                          </div>
-                        </div>
-                      </button>
-                    );
-                  })}
-                </div>
-
-                <div className="mt-8 flex items-center justify-between">
-                  <div className="flex gap-2">
-                    {featuredArtists.map((_: any, i: number) => (
-                      <button
-                        type="button"
-                        key={i}
-                        onClick={() => setCurrentCard(i)}
-                        className={`h-2 rounded-full transition-all duration-300 ${
-                          i === currentCard ? "w-10 bg-[#1d4ed8]" : "w-2 bg-[#bfd5ff]"
-                        }`}
-                      />
-                    ))}
-                  </div>
-
-                  <div className="flex items-center gap-3 text-sm font-medium text-foreground">
-                    <button type="button" onClick={prevCard} className="rounded-full px-3 py-2 transition-colors hover:bg-[#eaf3ff]">
-                      Prev
-                    </button>
-                    <button type="button" onClick={nextCard} className="rounded-full px-3 py-2 transition-colors hover:bg-[#eaf3ff]">
-                      Next
-                    </button>
+            {adminFeaturedSlides.length > 0 && activeFeaturedSlide ? (
+              <div className="mt-10 grid gap-6 lg:grid-cols-[1.15fr_0.85fr]">
+                <div className="relative overflow-hidden rounded-[2rem] border border-[#cfe0ff] bg-white shadow-[0_30px_70px_rgba(37,99,235,0.12)]">
+                  <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(255,255,255,0)_0%,rgba(15,23,42,0.18)_100%)]" />
+                  <img
+                    src={activeFeaturedSlide.primaryImage}
+                    alt={activeFeaturedSlide.artistName}
+                    className="h-[460px] w-full object-cover"
+                  />
+                  <div className="absolute inset-x-0 bottom-0 p-8 text-white">
+                    <p className="text-xs uppercase tracking-[0.3em] text-white/70">
+                      {activeFeaturedSlide.artistTag || "Featured Creator"}
+                    </p>
+                    <h2 className="mt-3 max-w-xl text-4xl font-semibold tracking-tight">
+                      {activeFeaturedSlide.title}
+                    </h2>
+                    <p className="mt-3 text-lg text-white/88">{activeFeaturedSlide.artistName}</p>
                   </div>
                 </div>
-              </>
-            )}
 
-            {selectedDesktopArtist && (
-              <div className="absolute inset-0 z-30 flex items-center justify-center bg-[#edf5ff]/95 p-6 backdrop-blur-sm">
-                <div className="relative grid min-h-[440px] w-full max-w-6xl grid-cols-[0.95fr_1.05fr] overflow-hidden rounded-[2.2rem] border border-[#dbe7ff] bg-white shadow-[0_40px_100px_rgba(37,99,235,0.16)]">
-                  <div className="relative overflow-hidden bg-[linear-gradient(180deg,#3b82f6_0%,#1e3a8a_100%)] p-8 text-white">
-                    <img
-                      src={getArtistAvatarImage(selectedDesktopArtist)}
-                      alt={selectedDesktopArtist.name}
-                      className="absolute left-10 top-10 h-[340px] w-[340px] rounded-[2.8rem] object-cover drop-shadow-[0_25px_40px_rgba(15,23,42,0.35)]"
-                    />
-                    <div className="absolute bottom-8 left-8">
-                      <p className="text-xs uppercase tracking-[0.3em] text-white/70">POPUP Preview</p>
-                    </div>
-                  </div>
+                <div className="flex flex-col justify-between rounded-[2rem] border border-[#dbe7ff] bg-white/90 p-6 shadow-[0_20px_60px_rgba(37,99,235,0.08)]">
+                  <div>
+                    <p className="text-xs uppercase tracking-[0.3em] text-muted-foreground">Curated Spotlight</p>
+                    <h3 className="mt-3 text-3xl font-semibold tracking-tight text-foreground">
+                      {activeFeaturedSlide.artistName}
+                    </h3>
+                    <p className="mt-4 text-sm leading-7 text-muted-foreground">
+                      {activeFeaturedSlide.subtitle || "A hand-picked feature from the POPUP admin team."}
+                    </p>
 
-                  <div className="relative p-8">
-                    <button
-                      type="button"
-                      onClick={() => setSelectedDesktopArtist(null)}
-                      className="absolute right-6 top-6 inline-flex items-center gap-2 text-sm text-foreground/80 transition-colors hover:text-foreground"
-                    >
-                      <X className="h-4 w-4" /> Close
-                    </button>
-
-                    <div className="max-w-xl pt-8">
-                      <p className="text-xs uppercase tracking-[0.3em] text-muted-foreground">Artist Profile</p>
-                      <h2 className="mt-3 text-4xl font-semibold tracking-tight text-foreground">{selectedDesktopArtist.name}</h2>
-                      <p className="mt-2 text-sm uppercase tracking-[0.24em] text-primary">{selectedDesktopArtist.tag}</p>
-                      <p className="mt-5 text-sm leading-7 text-muted-foreground">
-                        {selectedDesktopArtist.bio}
-                      </p>
-
-                      <div className="mt-8">
-                        <p className="text-sm font-semibold text-foreground">Clips</p>
-                        <div className="mt-3 grid grid-cols-3 gap-3">
-                          {getArtistPreviewPieces(selectedDesktopArtist).map((piece: any) => (
-                            <div key={piece.id} className="overflow-hidden rounded-[1.1rem] bg-[#eaf3ff]">
-                              <img src={piece.image} alt={piece.title} className="h-24 w-full object-cover" />
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-
-                      <div className="mt-8 flex items-center gap-3">
-                        <SubscribeButtonWrapper
-                          artist={selectedDesktopArtist}
-                          isConnected={isConnected}
-                          connectWallet={connectWallet}
-                          address={address}
-                          toast={toast}
+                    {activeFeaturedSlide.secondaryImage && (
+                      <div className="mt-6 overflow-hidden rounded-[1.6rem] border border-[#dbe7ff] bg-[#eff6ff]">
+                        <img
+                          src={activeFeaturedSlide.secondaryImage}
+                          alt={`${activeFeaturedSlide.artistName} detail`}
+                          className="h-52 w-full object-cover"
                         />
-                        <Button variant="outline" className="h-11 rounded-full px-5 font-semibold" asChild>
-                          <Link to={`/artists/${selectedDesktopArtist.id}`}>
-                            <User className="mr-2 h-4 w-4" /> Open profile
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="mt-8 flex items-end justify-between gap-4">
+                    <div className="flex gap-2">
+                      {adminFeaturedSlides.map((slide, i) => (
+                        <button
+                          type="button"
+                          key={slide.id}
+                          onClick={() => setFeaturedCarouselIndex(i)}
+                          className={`h-2 rounded-full transition-all duration-300 ${
+                            i === featuredCarouselIndex ? "w-10 bg-[#1d4ed8]" : "w-2 bg-[#bfd5ff]"
+                          }`}
+                        />
+                      ))}
+                    </div>
+
+                    <div className="flex items-center gap-3">
+                      <button
+                        type="button"
+                        onClick={prevFeaturedSlide}
+                        className="rounded-full px-3 py-2 text-sm font-medium text-foreground transition-colors hover:bg-[#eaf3ff]"
+                      >
+                        Prev
+                      </button>
+                      <button
+                        type="button"
+                        onClick={nextFeaturedSlide}
+                        className="rounded-full px-3 py-2 text-sm font-medium text-foreground transition-colors hover:bg-[#eaf3ff]"
+                      >
+                        Next
+                      </button>
+                      {activeFeaturedSlide.profilePath && (
+                        <Button className="rounded-full gradient-primary text-primary-foreground font-semibold" asChild>
+                          <Link to={activeFeaturedSlide.profilePath}>
+                            Open feature <ArrowRight className="ml-2 h-4 w-4" />
                           </Link>
                         </Button>
-                      </div>
+                      )}
                     </div>
                   </div>
                 </div>
               </div>
+            ) : (
+              <>
+                {loading && (
+                  <div className="flex h-[420px] items-center justify-center">
+                    <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                  </div>
+                )}
+
+                {error && (
+                  <div className="flex h-[420px] items-center justify-center">
+                    <p className="text-sm text-red-500">{error.message}</p>
+                  </div>
+                )}
+
+                {!loading && !error && featuredArtists.length === 0 && (
+                  <div className="flex h-[420px] items-center justify-center rounded-[2rem] border border-dashed border-[#bfd5ff] bg-white/75">
+                    <div className="text-center">
+                      <Sparkles className="mx-auto h-10 w-10 text-primary" />
+                      <p className="mt-3 text-lg font-semibold text-foreground">No featured artists yet</p>
+                      <p className="mt-2 text-sm text-muted-foreground">
+                        Whitelisted artist profiles will appear here once creators publish work.
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                {!loading && !error && featuredArtists.length > 0 && (
+                  <>
+                    <div className="relative mt-10 h-[430px] overflow-hidden">
+                      {desktopDeckCards.map((artist: any) => {
+                        const featuredPiece = getArtistFeaturedPiece(artist);
+                        const offset = artist.deckOffset;
+                        const isActive = offset === 0;
+                        const translateXMap: Record<string, string> = {
+                          "-1": "14%",
+                          "0": "50%",
+                          "1": "74%",
+                          "2": "90%",
+                        };
+                        const rotateMap: Record<string, string> = {
+                          "-1": "-8deg",
+                          "0": "0deg",
+                          "1": "7deg",
+                          "2": "9deg",
+                        };
+                        const scaleMap: Record<string, string> = {
+                          "-1": "0.9",
+                          "0": "1",
+                          "1": "0.92",
+                          "2": "0.86",
+                        };
+                        const opacityMap: Record<string, string> = {
+                          "-1": "0.86",
+                          "0": "1",
+                          "1": "0.9",
+                          "2": "0.72",
+                        };
+
+                        return (
+                          <button
+                            key={`${artist.id}-${artist.deckOffset}`}
+                            type="button"
+                            onClick={() => {
+                              if (isActive) {
+                                setSelectedDesktopArtist(artist);
+                                return;
+                              }
+                              setCurrentCard(artist.deckIndex);
+                            }}
+                            className="group absolute top-10 h-[320px] w-[240px] rounded-[2rem] text-left transition-all duration-500 ease-out"
+                            style={{
+                              left: translateXMap[String(offset)],
+                              zIndex: isActive ? 20 : 10 - offset,
+                              opacity: Number(opacityMap[String(offset)]),
+                              transform: `translateX(-50%) translateY(${isActive ? "0" : offset < 0 ? "36px" : "26px"}) scale(${scaleMap[String(offset)]}) rotate(${rotateMap[String(offset)]})`,
+                            }}
+                          >
+                            <div className="relative h-full overflow-hidden rounded-[2rem] bg-white shadow-[0_30px_60px_rgba(15,23,42,0.18)] ring-1 ring-black/5">
+                              <div
+                                className={`absolute inset-0 ${
+                                  isActive
+                                    ? "bg-[linear-gradient(180deg,#60a5fa_0%,#1d4ed8_100%)]"
+                                    : offset < 0
+                                    ? "bg-[linear-gradient(180deg,#93c5fd_0%,#3b82f6_100%)]"
+                                    : "bg-[linear-gradient(180deg,#bfdbfe_0%,#2563eb_100%)]"
+                                }`}
+                              />
+                              <img
+                                src={getArtistAvatarImage(artist)}
+                                alt={artist.name}
+                                className={`absolute left-1/2 top-[-48px] z-10 object-cover drop-shadow-[0_18px_24px_rgba(15,23,42,0.25)] ${
+                                  isActive ? "h-44 w-44" : "h-36 w-36"
+                                } -translate-x-1/2 rounded-[2rem]`}
+                              />
+                              <div className="absolute inset-x-0 bottom-0 p-5 text-white">
+                                <div className="overflow-hidden rounded-[1.4rem] bg-white/14 p-2 backdrop-blur-[2px]">
+                                  <img
+                                    src={featuredPiece.image}
+                                    alt={featuredPiece.title}
+                                    className="mb-4 h-28 w-full rounded-[1rem] object-cover"
+                                  />
+                                  <p className="text-2xl font-semibold leading-none">{artist.name}</p>
+                                  <p className="mt-2 text-xs uppercase tracking-[0.24em] text-white/78">{featuredPiece.medium}</p>
+                                </div>
+                              </div>
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    <div className="mt-8 flex items-center justify-between">
+                      <div className="flex gap-2">
+                        {featuredArtists.map((_: any, i: number) => (
+                          <button
+                            type="button"
+                            key={i}
+                            onClick={() => setCurrentCard(i)}
+                            className={`h-2 rounded-full transition-all duration-300 ${
+                              i === currentCard ? "w-10 bg-[#1d4ed8]" : "w-2 bg-[#bfd5ff]"
+                            }`}
+                          />
+                        ))}
+                      </div>
+
+                      <div className="flex items-center gap-3 text-sm font-medium text-foreground">
+                        <button type="button" onClick={prevCard} className="rounded-full px-3 py-2 transition-colors hover:bg-[#eaf3ff]">
+                          Prev
+                        </button>
+                        <button type="button" onClick={nextCard} className="rounded-full px-3 py-2 transition-colors hover:bg-[#eaf3ff]">
+                          Next
+                        </button>
+                      </div>
+                    </div>
+                  </>
+                )}
+
+                {selectedDesktopArtist && (
+                  <div className="absolute inset-0 z-30 flex items-center justify-center bg-[#edf5ff]/95 p-6 backdrop-blur-sm">
+                    <div className="relative grid min-h-[440px] w-full max-w-6xl grid-cols-[0.95fr_1.05fr] overflow-hidden rounded-[2.2rem] border border-[#dbe7ff] bg-white shadow-[0_40px_100px_rgba(37,99,235,0.16)]">
+                      <div className="relative overflow-hidden bg-[linear-gradient(180deg,#3b82f6_0%,#1e3a8a_100%)] p-8 text-white">
+                        <img
+                          src={getArtistAvatarImage(selectedDesktopArtist)}
+                          alt={selectedDesktopArtist.name}
+                          className="absolute left-10 top-10 h-[340px] w-[340px] rounded-[2.8rem] object-cover drop-shadow-[0_25px_40px_rgba(15,23,42,0.35)]"
+                        />
+                        <div className="absolute bottom-8 left-8">
+                          <p className="text-xs uppercase tracking-[0.3em] text-white/70">POPUP Preview</p>
+                        </div>
+                      </div>
+
+                      <div className="relative p-8">
+                        <button
+                          type="button"
+                          onClick={() => setSelectedDesktopArtist(null)}
+                          className="absolute right-6 top-6 inline-flex items-center gap-2 text-sm text-foreground/80 transition-colors hover:text-foreground"
+                        >
+                          <X className="h-4 w-4" /> Close
+                        </button>
+
+                        <div className="max-w-xl pt-8">
+                          <p className="text-xs uppercase tracking-[0.3em] text-muted-foreground">Artist Profile</p>
+                          <h2 className="mt-3 text-4xl font-semibold tracking-tight text-foreground">{selectedDesktopArtist.name}</h2>
+                          <p className="mt-2 text-sm uppercase tracking-[0.24em] text-primary">{selectedDesktopArtist.tag}</p>
+                          <p className="mt-5 text-sm leading-7 text-muted-foreground">
+                            {selectedDesktopArtist.bio}
+                          </p>
+
+                          <div className="mt-8">
+                            <p className="text-sm font-semibold text-foreground">Clips</p>
+                            <div className="mt-3 grid grid-cols-3 gap-3">
+                              {getArtistPreviewPieces(selectedDesktopArtist).map((piece: any) => (
+                                <div key={piece.id} className="overflow-hidden rounded-[1.1rem] bg-[#eaf3ff]">
+                                  <img src={piece.image} alt={piece.title} className="h-24 w-full object-cover" />
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+
+                          <div className="mt-8 flex items-center gap-3">
+                            <SubscribeButtonWrapper
+                              artist={selectedDesktopArtist}
+                              isConnected={isConnected}
+                              connectWallet={connectWallet}
+                              address={address}
+                              toast={toast}
+                            />
+                            <Button variant="outline" className="h-11 rounded-full px-5 font-semibold" asChild>
+                              <Link to={`/artists/${selectedDesktopArtist.id}`}>
+                                <User className="mr-2 h-4 w-4" /> Open profile
+                              </Link>
+                            </Button>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </>
             )}
           </div>
         </section>
@@ -1016,6 +1166,79 @@ const Index = () => {
           <Link to="/artists" className="text-xs text-primary font-medium">See all</Link>
         </div>
 
+        {adminFeaturedSlides.length > 0 && activeFeaturedSlide ? (
+          <div className="overflow-hidden rounded-[2rem] border border-[#dbe7ff] bg-white shadow-[0_20px_50px_rgba(37,99,235,0.08)]">
+            <div className="relative aspect-[1.05] overflow-hidden bg-[#eff6ff]">
+              <img
+                src={activeFeaturedSlide.primaryImage}
+                alt={activeFeaturedSlide.artistName}
+                className="h-full w-full object-cover"
+              />
+              <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-slate-950/80 to-transparent p-5 text-white">
+                <p className="text-[10px] uppercase tracking-[0.26em] text-white/70">
+                  {activeFeaturedSlide.artistTag || "Featured Creator"}
+                </p>
+                <h3 className="mt-2 text-2xl font-semibold">{activeFeaturedSlide.title}</h3>
+                <p className="mt-1 text-sm text-white/85">{activeFeaturedSlide.artistName}</p>
+              </div>
+            </div>
+
+            <div className="space-y-4 p-4">
+              <p className="text-sm leading-6 text-muted-foreground">
+                {activeFeaturedSlide.subtitle || "A hand-picked feature from the POPUP admin team."}
+              </p>
+
+              {activeFeaturedSlide.secondaryImage && (
+                <div className="overflow-hidden rounded-[1.25rem] border border-border bg-secondary/30">
+                  <img
+                    src={activeFeaturedSlide.secondaryImage}
+                    alt={`${activeFeaturedSlide.artistName} detail`}
+                    className="h-40 w-full object-cover"
+                  />
+                </div>
+              )}
+
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex gap-1.5">
+                  {adminFeaturedSlides.map((slide, i) => (
+                    <button
+                      type="button"
+                      key={slide.id}
+                      onClick={() => setFeaturedCarouselIndex(i)}
+                      className={`h-2 rounded-full transition-all duration-300 ${
+                        i === featuredCarouselIndex ? "w-7 bg-primary" : "w-2 bg-border"
+                      }`}
+                    />
+                  ))}
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={prevFeaturedSlide}
+                    className="h-10 w-10 rounded-full bg-secondary flex items-center justify-center hover:bg-secondary/80 transition-colors"
+                  >
+                    <ArrowRight className="h-4 w-4 text-secondary-foreground rotate-180" />
+                  </button>
+                  <button
+                    onClick={nextFeaturedSlide}
+                    className="h-10 w-10 rounded-full bg-secondary flex items-center justify-center hover:bg-secondary/80 transition-colors"
+                  >
+                    <ArrowRight className="h-4 w-4 text-secondary-foreground" />
+                  </button>
+                </div>
+              </div>
+
+              {activeFeaturedSlide.profilePath && (
+                <Button className="h-11 w-full rounded-full gradient-primary text-primary-foreground font-semibold" asChild>
+                  <Link to={activeFeaturedSlide.profilePath}>
+                    Open feature <ArrowRight className="ml-2 h-4 w-4" />
+                  </Link>
+                </Button>
+              )}
+            </div>
+          </div>
+        ) : (
+          <>
+
         {loading && (
           <div className="flex items-center justify-center h-40">
             <Loader2 className="h-8 w-8 animate-spin text-primary" />
@@ -1147,6 +1370,8 @@ const Index = () => {
                 <ArrowRight className="h-4 w-4 text-secondary-foreground" />
               </button>
             </div>
+          </>
+        )}
           </>
         )}
       </section>

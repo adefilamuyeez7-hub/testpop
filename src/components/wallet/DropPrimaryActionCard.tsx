@@ -9,6 +9,7 @@ import { CampaignActionPanel } from "@/components/campaign/CampaignActionPanel";
 import { useWallet, usePlaceBid } from "@/hooks/useContracts";
 import { useMintArtist } from "@/hooks/useContractsArtist";
 import type { Web3Error } from "@/lib/types";
+import { ACTIVE_CHAIN } from "@/lib/wagmi";
 
 type DropActionData = {
   id: string;
@@ -38,7 +39,7 @@ type DropPrimaryActionCardProps = {
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 
 function DropPrimaryActionCardInner({ drop, onCollectSuccess }: DropPrimaryActionCardProps) {
-  const { address, isConnected, connectWallet } = useWallet();
+  const { address, isConnected, connectWallet, chain, switchToActiveChain, isSwitchingNetwork } = useWallet();
   const { placeBid, isPending: isBidPending, isConfirming: isBidConfirming, isSuccess: isBidSuccess, error: bidError } = usePlaceBid();
   const { mint: mintArtist, mintedTokenId, isConfirming: isMintConfirming, isSuccess: isMintSuccess, error: mintError } = useMintArtist();
   const [bidAmount, setBidAmount] = useState("");
@@ -77,6 +78,10 @@ function DropPrimaryActionCardInner({ drop, onCollectSuccess }: DropPrimaryActio
       toast.error(`Wallet or RPC connection failed. Switch to Base Sepolia and try again.`);
       return;
     }
+    if (errMsg.toLowerCase().includes("requested resource is unavailable")) {
+      toast.error(`Your wallet could not reach ${ACTIVE_CHAIN.name}. Switch networks in the wallet, reconnect, and try again.`);
+      return;
+    }
     if (errMsg.includes("insufficient funds")) {
       toast.error("Insufficient balance for mint plus gas fees.");
       return;
@@ -88,9 +93,17 @@ function DropPrimaryActionCardInner({ drop, onCollectSuccess }: DropPrimaryActio
     toast.error(`Mint failed: ${errMsg}`);
   }, [mintError]);
 
-  const handleCollectDrop = () => {
+  const handleCollectDrop = async () => {
     if (!isConnected) {
-      connectWallet();
+      await connectWallet();
+      return;
+    }
+    if (chain?.id !== ACTIVE_CHAIN.id) {
+      try {
+        await switchToActiveChain();
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : `Switch to ${ACTIVE_CHAIN.name} and try again.`);
+      }
       return;
     }
     if (!isBuyDrop) {
@@ -113,9 +126,17 @@ function DropPrimaryActionCardInner({ drop, onCollectSuccess }: DropPrimaryActio
     mintArtist(drop.contractDropId, parseEther(drop.priceEth), drop.contractAddress);
   };
 
-  const handlePlaceBid = () => {
+  const handlePlaceBid = async () => {
     if (!isConnected) {
-      connectWallet();
+      await connectWallet();
+      return;
+    }
+    if (chain?.id !== ACTIVE_CHAIN.id) {
+      try {
+        await switchToActiveChain();
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : `Switch to ${ACTIVE_CHAIN.name} and try again.`);
+      }
       return;
     }
     if (!isAuctionDrop) {
@@ -161,7 +182,7 @@ function DropPrimaryActionCardInner({ drop, onCollectSuccess }: DropPrimaryActio
           </div>
           <Button
             onClick={handleCollectDrop}
-            disabled={!hasContractListing || remaining <= 0 || isMintConfirming || isMintSuccess}
+            disabled={!hasContractListing || remaining <= 0 || isMintConfirming || isMintSuccess || isSwitchingNetwork}
             className="w-full rounded-full gradient-primary text-primary-foreground font-semibold h-11"
           >
             {isMintConfirming ? "Collecting..." : isMintSuccess ? "Collected" : `Collect · ${drop.priceEth} ETH`}
@@ -185,7 +206,7 @@ function DropPrimaryActionCardInner({ drop, onCollectSuccess }: DropPrimaryActio
           <p className="text-xs text-muted-foreground">Auction bidding is live on-chain for this listing.</p>
           <Button
             onClick={handlePlaceBid}
-            disabled={isBidPending || isBidConfirming}
+            disabled={isBidPending || isBidConfirming || isSwitchingNetwork}
             className="w-full rounded-full gradient-primary text-primary-foreground font-semibold h-11"
           >
             {isBidPending || isBidConfirming ? "Confirming..." : "Place Bid"}

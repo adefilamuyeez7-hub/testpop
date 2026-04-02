@@ -10,6 +10,8 @@ import { useCollectionStore, type CollectedDropItem } from "@/stores/collectionS
 import { getOrdersByBuyer, type OrderWithItems } from "@/lib/db";
 import { detectAssetTypeFromUri, type AssetType } from "@/lib/assetTypes";
 
+const ACCESSIBLE_ORDER_STATUSES = new Set(["paid", "processing", "shipped", "delivered"]);
+
 const EpubReader = lazy(() =>
   import("@/components/collection/EpubReader").then((module) => ({ default: module.EpubReader }))
 );
@@ -127,6 +129,7 @@ function toOrderCollectionItems(order: OrderWithItems, ownerWallet: string): Col
       deliveryUri,
       assetType,
       isGated: Boolean(product?.is_gated),
+      orderStatus: typedOrder.status || undefined,
       collectedAt: typedOrder.created_at || new Date().toISOString(),
     } satisfies CollectedDropItem;
   });
@@ -200,7 +203,7 @@ const MyCollectionPage = () => {
       setPurchasedCollectionLoading(true);
 
       try {
-        const orders = await getOrdersByBuyer(address.toLowerCase());
+        const orders = await getOrdersByBuyer(address.toLowerCase(), { accessibleOnly: true });
         if (!active) return;
 
         const mappedItems = (orders || []).flatMap((order) => toOrderCollectionItems(order as OrderWithItems, address));
@@ -336,6 +339,14 @@ const MyCollectionPage = () => {
           <div className="relative w-full max-w-2xl my-8">
             <div className="bg-black/90 rounded-xl overflow-hidden">
               <div className="max-h-96 overflow-hidden">{renderViewer()}</div>
+              {(() => {
+                const isOwned =
+                  (selectedItem.orderStatus ? ACCESSIBLE_ORDER_STATUSES.has(selectedItem.orderStatus) : false) ||
+                  selectedItem.mintedTokenId != null ||
+                  Boolean(selectedItem.contractAddress) ||
+                  !selectedItem.isGated;
+
+                return (
               <div className="p-6 border-t border-gray-700 space-y-4">
                 <div>
                   <h3 className="text-lg font-semibold text-white">{selectedItem.title}</h3>
@@ -346,7 +357,7 @@ const MyCollectionPage = () => {
                   fileName={selectedItem.title}
                   fileType={selectedItem.assetType}
                   isGated={selectedItem.isGated || false}
-                  isOwned={true}
+                  isOwned={isOwned}
                   downloadUrl={
                     selectedItem.assetType === "pdf" || selectedItem.assetType === "epub"
                       ? undefined
@@ -373,6 +384,8 @@ const MyCollectionPage = () => {
                   }}
                 />
               </div>
+                );
+              })()}
             </div>
 
             <button

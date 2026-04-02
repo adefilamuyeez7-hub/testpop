@@ -54,19 +54,19 @@ export function useMobileWebAppGate() {
 
     window.addEventListener("beforeinstallprompt", handleBeforeInstallPrompt);
     window.addEventListener("appinstalled", handleInstalled);
-    window.addEventListener("visibilitychange", refreshStandaloneState);
+    document.addEventListener("visibilitychange", refreshStandaloneState);
     window.addEventListener("focus", refreshStandaloneState);
 
     return () => {
       window.removeEventListener("beforeinstallprompt", handleBeforeInstallPrompt);
       window.removeEventListener("appinstalled", handleInstalled);
-      window.removeEventListener("visibilitychange", refreshStandaloneState);
+      document.removeEventListener("visibilitychange", refreshStandaloneState);
       window.removeEventListener("focus", refreshStandaloneState);
     };
   }, []);
 
   const isAppleMobile = useMemo(() => getAppleMobileState(), []);
-  const shouldGateMobileApp = isMobile && !isStandalone;
+  const shouldGateMobileApp = false;
 
   const promptInstall = async () => {
     if (!deferredPrompt) {

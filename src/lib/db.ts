@@ -694,29 +694,59 @@ function normalizeOrderRecord(order: OrderWithItems): OrderWithItems {
   };
 }
 
-export async function getOrdersByBuyer(buyerWallet: string): Promise<OrderWithItems[]> {
+export async function getOrdersByBuyer(
+  buyerWallet: string,
+  options?: {
+    accessibleOnly?: boolean;
+    statuses?: Array<NonNullable<Order["status"]>>;
+  }
+): Promise<OrderWithItems[]> {
   try {
     const normalizedWallet = buyerWallet.toLowerCase();
+    const requestedStatuses = (options?.statuses || []).filter(Boolean);
+    const accessibleOnly = Boolean(options?.accessibleOnly);
+    const accessibleStatuses: Array<NonNullable<Order["status"]>> = ["paid", "processing", "shipped", "delivered"];
+    const statusFilter = requestedStatuses.length > 0 ? requestedStatuses : accessibleOnly ? accessibleStatuses : [];
 
     if (secureApiBaseUrl && getApiAuthToken()) {
-      return secureApiRequest<OrderWithItems[]>(`/orders?buyer_wallet=${encodeURIComponent(normalizedWallet)}`);
+      const params = new URLSearchParams();
+      params.set("buyer_wallet", normalizedWallet);
+      if (accessibleOnly) {
+        params.set("accessible_only", "true");
+      }
+      if (statusFilter.length > 0) {
+        params.set("statuses", statusFilter.join(","));
+      }
+      return secureApiRequest<OrderWithItems[]>(`/orders?${params.toString()}`);
     }
 
     if (!supabaseUrl || !supabaseAnonKey) return [];
 
     console.log(`📖 Fetching orders for buyer: ${buyerWallet}`);
-    let { data, error } = await supabase
+    let query = supabase
       .from("orders")
       .select(ORDER_SELECT)
       .eq("buyer_wallet", normalizedWallet)
       .order("created_at", { ascending: false });
 
+    if (statusFilter.length > 0) {
+      query = query.in("status", statusFilter);
+    }
+
+    let { data, error } = await query;
+
     if (error && isMissingOrderSchemaCompatError(error)) {
-      ({ data, error } = await supabase
+      let legacyQuery = supabase
         .from("orders")
         .select(LEGACY_ORDER_SELECT)
         .eq("buyer_wallet", normalizedWallet)
-        .order("created_at", { ascending: false }));
+        .order("created_at", { ascending: false });
+
+      if (statusFilter.length > 0) {
+        legacyQuery = legacyQuery.in("status", statusFilter);
+      }
+
+      ({ data, error } = await legacyQuery);
     }
 
     if (error) {

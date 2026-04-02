@@ -137,6 +137,13 @@ const ProfilePage = () => {
   const { data: artistProfile } = useSupabaseArtistByWallet(address?.toLowerCase());
   const { data: artistStudioDrops } = useSupabaseDropsByArtist(artistProfile?.id);
   const collection = useCollectionStore((state) => state.items);
+  const accessibleOrders = useMemo(
+    () =>
+      (orders || []).filter((order) =>
+        ["paid", "processing", "shipped", "delivered"].includes(String((order as OrderWithItems).status || "").toLowerCase())
+      ),
+    [orders]
+  );
 
   useEffect(() => {
     if (!isConnected || !address || !artists.length) {
@@ -200,7 +207,7 @@ const ProfilePage = () => {
 
     const normalizedAddress = address.toLowerCase();
     const localCount = collection.filter((item) => item.ownerWallet.toLowerCase() === normalizedAddress).length;
-    const orderCount = (orders || []).reduce((total, order) => {
+    const orderCount = accessibleOrders.reduce((total, order) => {
       const typedOrder = order as OrderWithItems;
       if (typedOrder.order_items?.length) {
         return total + typedOrder.order_items.reduce((sum, item) => sum + Math.max(1, Number(item.quantity) || 1), 0);
@@ -209,7 +216,7 @@ const ProfilePage = () => {
     }, 0);
 
     return Math.max(localCount, orderCount);
-  }, [address, collection, orders]);
+  }, [accessibleOrders, address, collection]);
 
   const collectorItems = useMemo(() => {
     const localItems = collection
@@ -223,7 +230,7 @@ const ProfilePage = () => {
         timestamp: new Date(item.collectedAt || Date.now()).getTime(),
       }));
 
-    const purchasedItems = (orders || []).flatMap((order) => {
+    const purchasedItems = accessibleOrders.flatMap((order) => {
       const typedOrder = order as OrderWithItems;
       const orderItems = typedOrder.order_items?.length
         ? typedOrder.order_items
@@ -248,7 +255,7 @@ const ProfilePage = () => {
       .sort((a, b) => b.timestamp - a.timestamp)
       .filter((item, index, array) => array.findIndex((entry) => entry.id === item.id) === index)
       .slice(0, 8);
-  }, [address, collection, orders]);
+  }, [accessibleOrders, address, collection]);
 
   const campaignDrops = useMemo(
     () =>
@@ -296,27 +303,6 @@ const ProfilePage = () => {
         };
     }
   }, [activeWorkspace]);
-
-  const liveStats = useMemo(
-    () => [
-      {
-        label: "Collection",
-        value: String(ownedCollectionCount),
-        tone: "bg-[#e9f3ff] text-[#0f4fa8]",
-      },
-      {
-        label: "Subscriptions",
-        value: subscriptionsLoading ? "..." : String(activeSubscriptionCount),
-        tone: "bg-[#dcecff] text-[#11418d]",
-      },
-      {
-        label: "Orders",
-        value: String(orders?.length || 0),
-        tone: "bg-[#f1f7ff] text-[#2a5fa8]",
-      },
-    ],
-    [activeSubscriptionCount, orders?.length, ownedCollectionCount, subscriptionsLoading]
-  );
 
   const menuItems = useMemo(
     () => [
@@ -427,19 +413,8 @@ const ProfilePage = () => {
           </aside>
 
           <section className="rounded-[1.8rem] bg-[linear-gradient(180deg,#ffffff_0%,#f3f8ff_100%)] p-4 md:p-6">
-            <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-              <div className="max-w-xl flex-1 rounded-[1.4rem] border border-[#dbe7ff] bg-white px-4 py-3 shadow-sm">
-                <p className="text-xs uppercase tracking-[0.22em] text-muted-foreground">Live Summary</p>
-                <div className="mt-3 flex flex-wrap gap-2">
-                  {liveStats.map((stat) => (
-                    <span key={stat.label} className={`rounded-full px-3 py-1 text-xs font-semibold ${stat.tone}`}>
-                      {stat.label}: {stat.value}
-                    </span>
-                  ))}
-                </div>
-              </div>
-
-              <div className="flex items-center gap-3 self-start rounded-full border border-[#dbe7ff] bg-white px-3 py-2 shadow-sm md:self-end">
+            <div className="flex justify-end">
+              <div className="flex items-center gap-3 rounded-full border border-[#dbe7ff] bg-white px-3 py-2 shadow-sm">
                 <div
                   className="flex h-11 w-11 items-center justify-center rounded-full text-sm font-bold text-white"
                   style={{ backgroundColor: getAvatarColor(address) }}

@@ -23,7 +23,7 @@ import {
 export function CheckoutPage() {
   const navigate = useNavigate();
   const { address } = useAccount();
-  const { items, getTotalPrice, clearCart } = useCartStore();
+  const { items, getTotalPrice, clearCart, removeItems } = useCartStore();
 
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
@@ -70,7 +70,7 @@ export function CheckoutPage() {
       return;
     }
 
-    const completedPurchases: Array<{ productId: string; txHash: `0x${string}` }> = [];
+    const completedPurchases: Array<{ productId: string; name: string; txHash: `0x${string}` }> = [];
 
     try {
       checkoutInFlightRef.current = true;
@@ -104,7 +104,7 @@ export function CheckoutPage() {
           orderMetadata,
           account: address as `0x${string}`,
         });
-        completedPurchases.push({ productId: item.productId, txHash: purchase.hash });
+        completedPurchases.push({ productId: item.productId, name: item.name, txHash: purchase.hash });
 
         setCheckoutProgress(`Recording ${item.name} order...`);
         try {
@@ -145,8 +145,18 @@ export function CheckoutPage() {
         console.error("Checkout error:", error);
       }
       const errorMessage = error instanceof Error ? error.message : "Checkout failed";
+      if (completedPurchases.length > 0) {
+        removeItems(completedPurchases.map((purchase) => purchase.productId));
+        const remainingCount = items.length - completedPurchases.length;
+        toast.error(
+          remainingCount > 0
+            ? `${completedPurchases.length} item(s) were purchased successfully. The remaining ${remainingCount} item(s) are still in your cart. ${errorMessage}`
+            : errorMessage
+        );
+      } else {
+        toast.error(errorMessage);
+      }
       setCheckoutProgress("");
-      toast.error(errorMessage);
     } finally {
       checkoutInFlightRef.current = false;
       setIsCheckingOut(false);

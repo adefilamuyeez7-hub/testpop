@@ -112,6 +112,7 @@ const {
   BASE_SEPOLIA_RPC_URL: rawBaseSepoliaRpcUrl = "https://sepolia-preconf.base.org",
   ART_DROP_FACTORY_ADDRESS: rawArtDropFactoryAddress = "0x2d044a0AFAbE0C07Ee12b8f4c18691b82fb6cF01",
   POAP_CAMPAIGN_V2_ADDRESS: rawPoapCampaignV2Address = "0x532dd9e3232B59eDc62B82e4822482696e49A627",
+  PRODUCT_STORE_ADDRESS: rawProductStoreAddress = "0x58BB50b4370898dED4d5d724E4A521825a4B0cE6",
   DEPLOYER_PRIVATE_KEY: rawDeployerPrivateKey,
   NODE_ENV = "development",
 } = process.env;
@@ -119,6 +120,7 @@ const {
 const BASE_SEPOLIA_RPC_URL = rawBaseSepoliaRpcUrl.trim();
 const ART_DROP_FACTORY_ADDRESS = rawArtDropFactoryAddress.trim();
 const POAP_CAMPAIGN_V2_ADDRESS = rawPoapCampaignV2Address.trim();
+const PRODUCT_STORE_ADDRESS = rawProductStoreAddress.trim();
 const DEPLOYER_PRIVATE_KEY = rawDeployerPrivateKey?.trim();
 
 const appJwtSecret = APP_JWT_SECRET || JWT_SECRET;
@@ -249,12 +251,16 @@ let artistContractColumnsReady = null;
 let campaignSubmissionsTableReady = null;
 let campaignSigner = null;
 let campaignProvider = null;
+let productStoreProvider = null;
 
 const POAP_CAMPAIGN_V2_ABI = [
   "function grantContentCredits(uint256 campaignId, address wallet, uint256 quantity)",
   "function revokeContentCredits(uint256 campaignId, address wallet, uint256 quantity)",
   "function campaigns(uint256 campaignId) view returns (address artist, string metadataURI, uint8 entryMode, uint8 status, uint256 maxSupply, uint256 minted, uint256 ticketPriceWei, uint64 startTime, uint64 endTime, uint64 redeemStartTime)",
 ];
+const PRODUCT_STORE_INTERFACE = new ethers.Interface([
+  "event PurchaseCompleted(uint256 indexed orderId, address indexed buyer, uint256 indexed productId, uint256 quantity, uint256 totalPrice)",
+]);
 
 async function ensureArtistContractColumnsReady() {
   if (artistContractColumnsReady !== null) {
@@ -334,6 +340,140 @@ function getCampaignProvider() {
   if (campaignProvider) return campaignProvider;
   campaignProvider = new ethers.JsonRpcProvider(BASE_SEPOLIA_RPC_URL);
   return campaignProvider;
+}
+
+function getProductStoreProvider() {
+  if (productStoreProvider) return productStoreProvider;
+  productStoreProvider = new ethers.JsonRpcProvider(BASE_SEPOLIA_RPC_URL);
+  return productStoreProvider;
+}
+
+function normalizeTxHash(txHash) {
+  const value = typeof txHash === "string" ? txHash.trim() : "";
+  return /^0x[a-fA-F0-9]{64}$/.test(value) ? value : null;
+}
+
+function extractContractProductId(metadata) {
+  const rawValue =
+    metadata && typeof metadata === "object" ? metadata.contract_product_id : null;
+  const parsed =
+    typeof rawValue === "number"
+      ? rawValue
+      : typeof rawValue === "string" && rawValue.trim()
+      ? Number(rawValue)
+      : null;
+
+  if (!Number.isFinite(parsed)) {
+    return null;
+  }
+
+  const normalized = Math.floor(parsed);
+  return normalized >= 1 ? normalized : null;
+}
+
+async function loadCheckoutProducts(productIds) {
+  const uniqueIds = Array.from(new Set(productIds.filter(Boolean)));
+  if (uniqueIds.length === 0) {
+    return new Map();
+  }
+
+  const { data, error } = await supabase
+    .from("products")
+    .select("id, name, price_eth, stock, sold, status, product_type, asset_type, preview_uri, delivery_uri, image_url, image_ipfs_uri, is_gated, creator_wallet, metadata")
+    .in("id", uniqueIds);
+
+  if (error) {
+    throw new Error(error.message || "Failed to load products for checkout");
+  }
+
+  return new Map((data || []).map((product) => [product.id, product]));
+}
+
+async function verifyProductPurchaseTx({ txHash, buyerWallet, normalizedItems, productsById }) {
+  const normalizedTxHash = normalizeTxHash(txHash);
+  if (!normalizedTxHash) {
+    throw new Error("A valid tx_hash is required");
+  }
+
+  const provider = getProductStoreProvider();
+  const [transaction, receipt] = await Promise.all([
+    provider.getTransaction(normalizedTxHash),
+    provider.getTransactionReceipt(normalizedTxHash),
+  ]);
+
+  if (!transaction || !receipt) {
+    throw new Error("Purchase transaction could not be found onchain");
+  }
+
+  if (receipt.status !== 1) {
+    throw new Error("Purchase transaction did not succeed onchain");
+  }
+
+  const expectedTo = normalizeWallet(PRODUCT_STORE_ADDRESS);
+  const actualTo = normalizeWallet(receipt.to || transaction.to || "");
+  if (!expectedTo || actualTo !== expectedTo) {
+    throw new Error("Purchase transaction was not sent to the product store contract");
+  }
+
+  if (normalizeWallet(transaction.from || "") !== normalizeWallet(buyerWallet)) {
+    throw new Error("Purchase transaction does not belong to the connected buyer wallet");
+  }
+
+  const expectedItems = new Map();
+  for (const item of normalizedItems) {
+    const product = productsById.get(item.product_id);
+    if (!product) {
+      throw new Error("One or more checkout products could not be found");
+    }
+
+    const contractProductId = extractContractProductId(product.metadata);
+    if (contractProductId === null) {
+      throw new Error(`${product.name || "A product"} is missing its contract product ID`);
+    }
+
+    expectedItems.set(String(contractProductId), Number(item.quantity) || 1);
+  }
+
+  const purchasedItems = new Map();
+  for (const log of receipt.logs || []) {
+    if (normalizeWallet(log.address || "") !== expectedTo) {
+      continue;
+    }
+
+    try {
+      const decoded = PRODUCT_STORE_INTERFACE.parseLog(log);
+      if (!decoded || decoded.name !== "PurchaseCompleted") {
+        continue;
+      }
+
+      const eventBuyer = normalizeWallet(decoded.args.buyer);
+      if (eventBuyer !== normalizeWallet(buyerWallet)) {
+        continue;
+      }
+
+      const eventProductId = String(Number(decoded.args.productId));
+      const eventQuantity = Number(decoded.args.quantity);
+      purchasedItems.set(eventProductId, (purchasedItems.get(eventProductId) || 0) + eventQuantity);
+    } catch {
+      // Ignore unrelated logs.
+    }
+  }
+
+  if (purchasedItems.size === 0) {
+    throw new Error("Purchase transaction did not emit a matching ProductStore purchase event");
+  }
+
+  if (purchasedItems.size !== expectedItems.size) {
+    throw new Error("Purchase transaction does not match the requested checkout items");
+  }
+
+  for (const [productId, quantity] of expectedItems.entries()) {
+    if ((purchasedItems.get(productId) || 0) !== quantity) {
+      throw new Error("Purchase transaction quantities do not match the requested checkout items");
+    }
+  }
+
+  return normalizedTxHash;
 }
 
 async function findCampaignDropById(dropId) {
@@ -1755,38 +1895,32 @@ async function getOrderById(orderId) {
 async function createLegacyCheckoutOrders({
   buyerWallet,
   normalizedItems,
+  productsById,
   shippingAddressJsonb,
   shippingEth,
   taxEth,
   currency,
   trackingCode,
   txHash,
+  skipAvailabilityValidation = false,
 }) {
-  const productIds = normalizedItems.map((item) => item.product_id);
-  const { data: products, error: productsError } = await supabase
-    .from("products")
-    .select("id, name, price_eth, stock, sold, status, product_type, asset_type, preview_uri, delivery_uri, image_url, image_ipfs_uri, is_gated, creator_wallet")
-    .in("id", productIds);
-
-  if (productsError) {
-    throw new Error(productsError.message || "Failed to load products for checkout");
-  }
-
-  const productsById = new Map((products || []).map((product) => [product.id, product]));
   const createdOrderIds = [];
+  const resolvedProductsById =
+    productsById instanceof Map ? productsById : await loadCheckoutProducts(normalizedItems.map((item) => item.product_id));
+  const paidAt = txHash ? new Date().toISOString() : null;
 
   for (const item of normalizedItems) {
-    const product = productsById.get(item.product_id);
+    const product = resolvedProductsById.get(item.product_id);
     if (!product) {
       throw new Error("One or more items are no longer available.");
     }
 
-    if (product.status && product.status !== "published") {
+    if (!skipAvailabilityValidation && product.status && product.status !== "published") {
       throw new Error(`${product.name || "Item"} is no longer available.`);
     }
 
     const currentStock = product.stock == null ? null : Number(product.stock);
-    if (currentStock !== null && currentStock < item.quantity) {
+    if (!skipAvailabilityValidation && currentStock !== null && currentStock < item.quantity) {
       throw new Error(`${product.name || "Item"} only has ${Math.max(currentStock, 0)} left in stock.`);
     }
 
@@ -1808,12 +1942,12 @@ async function createLegacyCheckoutOrders({
         shipping_eth: shippingEth,
         tax_eth: taxEth,
         total_price_eth: totalPrice,
-        status: "paid",
+        status: txHash ? "paid" : "pending",
         shipping_address: shippingAddress,
         shipping_address_jsonb: shippingAddressJsonb,
         tracking_code: trackingCode,
         tx_hash: txHash,
-        paid_at: new Date().toISOString(),
+        paid_at: paidAt,
       })
       .select("id")
       .single();
@@ -1824,25 +1958,27 @@ async function createLegacyCheckoutOrders({
 
     createdOrderIds.push(insertedOrder.id);
 
-    const nextStock = currentStock === null ? null : Math.max(currentStock - quantity, 0);
-    const nextSold = Math.max(Number(product.sold) || 0, 0) + quantity;
-    const productUpdates = {
-      sold: nextSold,
-      ...(nextStock === null
-        ? {}
-        : {
-            stock: nextStock,
-            status: nextStock > 0 ? product.status || "published" : "out_of_stock",
-          }),
-    };
+    if (txHash) {
+      const nextStock = currentStock === null ? null : Math.max(currentStock - quantity, 0);
+      const nextSold = Math.max(Number(product.sold) || 0, 0) + quantity;
+      const productUpdates = {
+        sold: nextSold,
+        ...(nextStock === null
+          ? {}
+          : {
+              stock: nextStock,
+              status: nextStock > 0 ? product.status || "published" : "out_of_stock",
+            }),
+      };
 
-    const { error: updateProductError } = await supabase
-      .from("products")
-      .update(productUpdates)
-      .eq("id", product.id);
+      const { error: updateProductError } = await supabase
+        .from("products")
+        .update(productUpdates)
+        .eq("id", product.id);
 
-    if (updateProductError) {
-      throw new Error(updateProductError.message || "Failed to update product inventory");
+      if (updateProductError) {
+        throw new Error(updateProductError.message || "Failed to update product inventory");
+      }
     }
   }
 
@@ -1851,6 +1987,18 @@ async function createLegacyCheckoutOrders({
 
 app.get("/orders", authRequired, async (req, res) => {
   const requestedWallet = normalizeWallet(typeof req.query.buyer_wallet === "string" ? req.query.buyer_wallet : req.auth.wallet);
+  const accessibleOnly =
+    String(req.query.accessible_only || "").toLowerCase() === "true" ||
+    String(req.query.owned_only || "").toLowerCase() === "true";
+  const statusesFilter =
+    typeof req.query.statuses === "string" && req.query.statuses.trim()
+      ? new Set(
+          req.query.statuses
+            .split(",")
+            .map((value) => value.trim().toLowerCase())
+            .filter(Boolean)
+        )
+      : null;
 
   if (!sameWalletOrAdmin(requestedWallet, req.auth)) {
     return res.status(403).json({ error: "Cannot view another wallet's orders" });
@@ -1858,7 +2006,18 @@ app.get("/orders", authRequired, async (req, res) => {
 
   try {
     const data = await listOrdersForBuyer(requestedWallet);
-    return res.json(data);
+    const accessibleStatuses = new Set(["paid", "processing", "shipped", "delivered"]);
+    const filtered = data.filter((order) => {
+      const normalizedStatus = String(order?.status || "").toLowerCase();
+      if (accessibleOnly && !accessibleStatuses.has(normalizedStatus)) {
+        return false;
+      }
+      if (statusesFilter && statusesFilter.size > 0 && !statusesFilter.has(normalizedStatus)) {
+        return false;
+      }
+      return true;
+    });
+    return res.json(filtered);
   } catch (error) {
     return res.status(400).json({ error: error.message });
   }
@@ -1905,42 +2064,86 @@ app.post("/orders", authRequired, async (req, res) => {
   const trackingCode = typeof order.tracking_code === "string" && order.tracking_code.trim()
     ? order.tracking_code.trim()
     : `TRK-${Date.now().toString(36).toUpperCase()}`;
-  const txHash = typeof order.tx_hash === "string" && order.tx_hash.trim()
+  const rawTxHash = typeof order.tx_hash === "string" && order.tx_hash.trim()
     ? order.tx_hash.trim()
     : null;
+  let productsById;
+  try {
+    productsById = await loadCheckoutProducts(normalizedItems.map((item) => item.product_id));
+  } catch (productsError) {
+    return res.status(400).json({
+      error: productsError?.message || "Failed to load checkout products",
+    });
+  }
+  let txHash = null;
   let createdOrderIds = [];
   let orderError = null;
 
-  const { data: createdOrderId, error: rpcOrderError } = await supabase.rpc("create_checkout_order", {
-    p_buyer_wallet: buyerWallet,
-    p_items: normalizedItems,
-    p_shipping_address_jsonb: shippingAddressJsonb,
-    p_shipping_eth: shippingEth,
-    p_tax_eth: taxEth,
-    p_currency: currency,
-    p_tracking_code: trackingCode,
-    p_tx_hash: txHash,
-  });
+  try {
+    if (rawTxHash) {
+      txHash = await verifyProductPurchaseTx({
+        txHash: rawTxHash,
+        buyerWallet,
+        normalizedItems,
+        productsById,
+      });
+    }
+  } catch (verificationError) {
+    return res.status(400).json({
+      error: verificationError?.message || "Purchase transaction could not be verified",
+    });
+  }
 
-  if (rpcOrderError && isMissingOrderSchemaCompatError(rpcOrderError)) {
+  if (txHash) {
     try {
       createdOrderIds = await createLegacyCheckoutOrders({
         buyerWallet,
         normalizedItems,
+        productsById,
         shippingAddressJsonb,
         shippingEth,
         taxEth,
         currency,
         trackingCode,
         txHash,
+        skipAvailabilityValidation: true,
       });
     } catch (legacyError) {
       orderError = legacyError;
     }
-  } else if (rpcOrderError || !createdOrderId) {
-    orderError = rpcOrderError || new Error("Failed to create order");
   } else {
-    createdOrderIds = [createdOrderId];
+    const { data: createdOrderId, error: rpcOrderError } = await supabase.rpc("create_checkout_order", {
+      p_buyer_wallet: buyerWallet,
+      p_items: normalizedItems,
+      p_shipping_address_jsonb: shippingAddressJsonb,
+      p_shipping_eth: shippingEth,
+      p_tax_eth: taxEth,
+      p_currency: currency,
+      p_tracking_code: trackingCode,
+      p_tx_hash: txHash,
+    });
+
+    if (rpcOrderError && isMissingOrderSchemaCompatError(rpcOrderError)) {
+      try {
+        createdOrderIds = await createLegacyCheckoutOrders({
+          buyerWallet,
+          normalizedItems,
+          productsById,
+          shippingAddressJsonb,
+          shippingEth,
+          taxEth,
+          currency,
+          trackingCode,
+          txHash,
+        });
+      } catch (legacyError) {
+        orderError = legacyError;
+      }
+    } else if (rpcOrderError || !createdOrderId) {
+      orderError = rpcOrderError || new Error("Failed to create order");
+    } else {
+      createdOrderIds = [createdOrderId];
+    }
   }
 
   if (orderError || createdOrderIds.length === 0) {

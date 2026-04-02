@@ -14,6 +14,7 @@ export interface CollectedDropItem {
   mintedTokenId?: number | null;
   contractAddress?: string | null;
   contractDropId?: number | null;
+  orderStatus?: "pending" | "paid" | "processing" | "shipped" | "delivered" | "cancelled" | "refunded";
   collectedAt: string;
 }
 
