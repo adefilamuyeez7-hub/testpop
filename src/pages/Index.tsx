@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef, useCallback } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { ArrowRight, Clock, Gavel, Heart, Loader2, MoreHorizontal, Search, ShoppingCart, Sparkles, User, X } from "lucide-react";
+import { ArrowRight, Clock, Gavel, Heart, Loader2, ShoppingCart, Sparkles, User, X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useWallet, useSubscribeToArtistContract, useIsSubscribedToArtistContract } from "@/hooks/useContracts";
@@ -486,7 +486,6 @@ const Index = () => {
 
   const visibleCards = getVisibleCards();
   const visibleDropCards = getVisibleDropCards();
-  const desktopHeroArtist = visibleCards[0] ?? null;
   const desktopLiveDrops = liveDrops.slice(0, 3);
   const getPortfolioImage = (piece: any) =>
     resolveMediaUrl(piece?.image, piece?.image, piece?.imageUri) || "";
@@ -545,58 +544,15 @@ const Index = () => {
         <section className="relative overflow-hidden rounded-[2.2rem] border border-border/70 bg-[linear-gradient(180deg,#fefefe_0%,#f7f3ea_100%)] p-8 shadow-[0_35px_100px_rgba(15,23,42,0.1)]">
           <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(255,207,84,0.2),transparent_26%),radial-gradient(circle_at_bottom_right,rgba(59,130,246,0.16),transparent_24%)]" />
 
-          <div className="relative flex items-center justify-between gap-6 border-b border-black/6 pb-5">
-            <div className="flex items-center gap-3">
-              <span className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-foreground text-background">
-                <Sparkles className="h-5 w-5" />
-              </span>
-              <div>
-                <p className="text-lg font-semibold text-foreground">POPUP Artists</p>
-                <p className="text-xs uppercase tracking-[0.28em] text-muted-foreground">Desktop Deck</p>
-              </div>
-            </div>
-
-            <div className="flex h-11 w-full max-w-xs items-center gap-2 rounded-full border border-black/8 bg-white/80 px-4 text-sm text-muted-foreground shadow-sm">
-              <Search className="h-4 w-4" />
-              <span>Search artists...</span>
-            </div>
-
-            <button
-              type="button"
-              className="inline-flex items-center gap-2 rounded-full border border-black/8 bg-white/80 px-4 py-2 text-sm font-medium text-foreground shadow-sm"
-            >
-              Menu <MoreHorizontal className="h-4 w-4" />
-            </button>
-          </div>
-
-          <div className="relative pt-8">
-            <div className="flex items-start justify-between gap-6">
-              <div>
-                <p className="text-xs uppercase tracking-[0.32em] text-muted-foreground">Featured Deck</p>
-                <h1 className="mt-3 max-w-2xl text-5xl font-bold tracking-tight text-foreground">
-                  Collect your favorite digital creative products
-                </h1>
-                <p className="mt-4 max-w-xl text-base leading-7 text-muted-foreground">
-                  Slide through artist decks, preview a featured portfolio piece, and open a POPUP artist panel without leaving the desktop flow.
-                </p>
-              </div>
-
-              {desktopHeroArtist && (
-                <div className="min-w-[220px] rounded-[1.6rem] border border-black/6 bg-white/80 p-4 shadow-sm">
-                  <p className="text-xs uppercase tracking-[0.28em] text-muted-foreground">Now Centered</p>
-                  <div className="mt-4 flex items-center gap-3">
-                    <img
-                      src={desktopHeroArtist.avatar}
-                      alt={desktopHeroArtist.name}
-                      className="h-14 w-14 rounded-2xl object-cover ring-2 ring-white"
-                    />
-                    <div className="min-w-0">
-                      <p className="truncate text-lg font-semibold text-foreground">{desktopHeroArtist.name}</p>
-                      <p className="truncate text-xs uppercase tracking-[0.24em] text-muted-foreground">{desktopHeroArtist.tag}</p>
-                    </div>
-                  </div>
-                </div>
-              )}
+          <div className="relative pt-2">
+            <div>
+              <p className="text-xs uppercase tracking-[0.32em] text-muted-foreground">Featured Deck</p>
+              <h1 className="mt-3 max-w-2xl text-5xl font-bold tracking-tight text-foreground">
+                Discover your favorite creative
+              </h1>
+              <p className="mt-4 max-w-xl text-base leading-7 text-muted-foreground">
+                Slide through artist decks, preview a featured portfolio piece, and open a POPUP artist panel without leaving the desktop flow.
+              </p>
             </div>
 
             {loading && (
