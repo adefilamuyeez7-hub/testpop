@@ -3,6 +3,7 @@ import { Search, X, Loader2 } from "lucide-react";
 import { useLocation, useNavigate } from "react-router-dom";
 import logo from "@/assets/logo.png";
 import { supabase } from "@/lib/db";
+import { resolveMediaUrl } from "@/lib/pinata";
 import { appShellNavItems, isAppShellNavActive } from "./appShellNav";
 import { NavLink } from "./NavLink";
 
@@ -10,7 +11,7 @@ const TopBarWalletControls = lazy(() => import("./wallet/TopBarWalletControls"))
 
 type SearchResults = {
   artists: Array<{ id: string; name?: string | null; tag?: string | null; avatar_url?: string | null }>;
-  drops: Array<{ id: string; title?: string | null; price_eth?: string | number | null; image_url?: string | null }>;
+  drops: Array<{ id: string; title?: string | null; price_eth?: string | number | null; image_url?: string | null; image_ipfs_uri?: string | null; preview_uri?: string | null; status?: string | null }>;
   products: Array<{ id: string; name?: string | null; price_eth?: string | number | null; image_url?: string | null; image_ipfs_uri?: string | null }>;
 };
 
@@ -42,8 +43,9 @@ function SearchPanel({ onClose }: { onClose: () => void }) {
             .limit(4),
           supabase
             .from("drops")
-            .select("id, title, price_eth, image_url")
+            .select("id, title, price_eth, image_url, image_ipfs_uri, preview_uri, status")
             .ilike("title", `%${query}%`)
+            .eq("status", "live")
             .limit(4),
           supabase
             .from("products")
@@ -143,8 +145,8 @@ function SearchPanel({ onClose }: { onClose: () => void }) {
                   className="w-full flex items-center gap-3 p-3 rounded-xl hover:bg-secondary transition-colors text-left"
                 >
                   <div className="h-10 w-10 rounded-lg bg-secondary overflow-hidden flex-shrink-0">
-                    {drop.image_url && (
-                      <img src={drop.image_url} alt={drop.title} className="h-full w-full object-cover" />
+                    {resolveMediaUrl(drop.preview_uri, drop.image_url, drop.image_ipfs_uri) && (
+                      <img src={resolveMediaUrl(drop.preview_uri, drop.image_url, drop.image_ipfs_uri)} alt={drop.title} className="h-full w-full object-cover" />
                     )}
                   </div>
                   <div>
@@ -171,8 +173,8 @@ function SearchPanel({ onClose }: { onClose: () => void }) {
                   className="w-full flex items-center gap-3 p-3 rounded-xl hover:bg-secondary transition-colors text-left"
                 >
                   <div className="h-10 w-10 rounded-lg bg-secondary overflow-hidden flex-shrink-0">
-                    {product.image_url && (
-                      <img src={product.image_url} alt={product.name || "Product"} className="h-full w-full object-cover" />
+                    {resolveMediaUrl(product.image_url, product.image_ipfs_uri) && (
+                      <img src={resolveMediaUrl(product.image_url, product.image_ipfs_uri)} alt={product.name || "Product"} className="h-full w-full object-cover" />
                     )}
                   </div>
                   <div>
@@ -197,7 +199,7 @@ const TopBar = () => {
     <>
       <header className="sticky top-0 z-40 border-b border-border bg-background/80 backdrop-blur-xl">
         <div className="mx-auto flex h-12 max-w-lg items-center justify-between px-3 md:hidden">
-          <img src={logo} alt="PopUp" className="h-6" />
+          <img src={logo} alt="POPUP" className="h-7 w-7 rounded-sm object-contain" />
           <div className="flex items-center gap-1">
             <button
               onClick={() => {
@@ -216,7 +218,7 @@ const TopBar = () => {
 
         <div className="mx-auto hidden max-w-6xl items-center gap-6 px-4 py-4 md:flex lg:px-6">
           <div className="flex min-w-0 items-center gap-4">
-            <img src={logo} alt="PopUp" className="h-8" />
+            <img src={logo} alt="POPUP" className="h-10 w-10 rounded-lg object-contain" />
             <div className="min-w-0">
               <p className="text-sm font-semibold tracking-[0.18em] text-foreground/70 uppercase">Popup</p>
               <p className="text-xs text-muted-foreground">Collect, discover, and shop digital culture.</p>

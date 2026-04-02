@@ -11,6 +11,10 @@ export const appShellNavItems = [
 export function isAppShellNavActive(itemPath: string, pathname: string) {
   return (
     pathname === itemPath ||
+    (itemPath === "/artists" && pathname.startsWith("/artists/")) ||
+    (itemPath === "/drops" && pathname.startsWith("/drops/")) ||
+    (itemPath === "/profile" &&
+      (pathname.startsWith("/profile") || pathname.startsWith("/wallet"))) ||
     (itemPath === "/products" &&
       (pathname.startsWith("/invest") ||
         pathname.startsWith("/products") ||

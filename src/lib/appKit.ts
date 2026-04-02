@@ -12,7 +12,7 @@ function createPopupAppKit() {
       name: "POPUP",
       description: "Drop it. Own it. Get paid.",
       url: "https://testpop-one.vercel.app",
-      icons: ["https://testpop-one.vercel.app/favicon.ico"],
+      icons: ["https://testpop-one.vercel.app/favicon.png"],
     },
     features: {
       analytics: false,

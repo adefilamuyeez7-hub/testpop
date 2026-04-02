@@ -1,16 +1,16 @@
 {
-  "name": "The popup - Art on Baseapp",
-  "short_name": "The popup",
-  "description": "collect everything Art on Baseapp",
+  "name": "POPUP",
+  "short_name": "POPUP",
+  "description": "Discover, collect, and shop digital culture on POPUP.",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#ffffff",
-  "theme_color": "#000000",
+  "theme_color": "#1d4ed8",
   "orientation": "portrait-primary",
   "icons": [
     {
-      "src": "/src/assets/logo.png",
-      "sizes": "64x64 32x32 24x24 16x16",
+      "src": "/favicon.png",
+      "sizes": "512x512 256x256 192x192 64x64 32x32 24x24 16x16",
       "type": "image/png"
     }
   ],
