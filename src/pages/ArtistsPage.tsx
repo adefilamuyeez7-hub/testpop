@@ -200,7 +200,7 @@ const ArtistsPage = () => {
   }
 
   return (
-    <div className="flex flex-col h-[calc(100vh-88px)] px-4">
+    <div className="flex flex-col h-[calc(100vh-88px)] bg-[radial-gradient(circle_at_top,rgba(96,165,250,0.16),transparent_30%),linear-gradient(180deg,#f7fbff_0%,#edf5ff_100%)] px-4">
       <div className="py-3">
         <h1 className="text-xl font-bold">Artists</h1>
         <p className="text-sm text-muted-foreground font-body">Whitelisted creators building on Base</p>
@@ -243,7 +243,7 @@ const ArtistsPage = () => {
                 transition: isSwiping ? "none" : "all 0.5s ease",
               }}
             >
-              <div className="rounded-3xl bg-card shadow-elevated overflow-hidden border border-border">
+              <div className="rounded-3xl bg-white shadow-elevated overflow-hidden border border-[#dbe7ff]">
                 {/* Bigger hero image — was h-48, now h-64 */}
                 <div className="relative h-64 overflow-hidden">
                   <img src={artist.avatar} alt={artist.name} className="w-full h-full object-cover" />
@@ -270,11 +270,11 @@ const ArtistsPage = () => {
                   <p className="text-sm text-muted-foreground line-clamp-2 leading-relaxed">{artist.bio}</p>
 
                   <div className="flex items-center gap-3 mt-3 mb-4">
-                    <div className="flex-1 text-center p-2 rounded-xl bg-secondary">
+                    <div className="flex-1 text-center p-2 rounded-xl bg-[#eef5ff]">
                       <p className="text-base font-bold text-foreground">{artist.drops}</p>
                       <p className="text-[10px] text-muted-foreground">Drops</p>
                     </div>
-                    <div className="flex-1 text-center p-2 rounded-xl bg-secondary">
+                    <div className="flex-1 text-center p-2 rounded-xl bg-[#eef5ff]">
                       <p className="text-base font-bold text-foreground">Base</p>
                       <p className="text-[10px] text-muted-foreground">Chain</p>
                     </div>
@@ -303,7 +303,7 @@ const ArtistsPage = () => {
 
         {/* Nav controls */}
         {artists.length > 0 && <div className="absolute left-0 right-0 bottom-0 pb-2 flex items-center justify-center gap-4 bg-background/80 backdrop-blur-sm">
-          <button onClick={prevCard} className="h-10 w-10 rounded-full bg-secondary flex items-center justify-center">
+          <button onClick={prevCard} className="h-10 w-10 rounded-full bg-[#dbeafe] flex items-center justify-center">
             <ArrowRight className="h-4 w-4 rotate-180" />
           </button>
           <div className="flex gap-1.5">
@@ -311,11 +311,11 @@ const ArtistsPage = () => {
               <button
                 key={index}
                 onClick={() => setCurrentCard(index)}
-                className={`h-2 rounded-full transition-all duration-300 ${index === currentCard ? "w-7 bg-primary" : "w-2 bg-border"}`}
+                className={`h-2 rounded-full transition-all duration-300 ${index === currentCard ? "w-7 bg-[#1d4ed8]" : "w-2 bg-[#bfd5ff]"}`}
               />
             ))}
           </div>
-          <button onClick={nextCard} className="h-10 w-10 rounded-full bg-secondary flex items-center justify-center">
+          <button onClick={nextCard} className="h-10 w-10 rounded-full bg-[#dbeafe] flex items-center justify-center">
             <ArrowRight className="h-4 w-4" />
           </button>
         </div>}

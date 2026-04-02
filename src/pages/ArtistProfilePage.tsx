@@ -262,6 +262,35 @@ const ArtistProfilePage = () => {
               </div>
             </div>
 
+            <div className="mt-6 space-y-3">
+              <Button
+                onClick={handleSubscribe}
+                disabled={isSubscribing || isSubscribePending || isSubscribeConfirming || isSubscribed || isSubscribedLoading}
+                className="w-full rounded-full bg-white text-[#1d4ed8] hover:bg-white/90"
+              >
+                {isConnected
+                  ? isSubscribed
+                    ? "Subscribed"
+                    : isSubscribedLoading
+                      ? "Checking..."
+                      : isSubscribing || isSubscribePending
+                        ? "Processing..."
+                        : isSubscribeConfirming
+                          ? "Confirming..."
+                          : `Subscribe - ${transformedArtist.subscriptionPrice} ETH/mo`
+                  : "Connect Wallet to Subscribe"}
+              </Button>
+              <Button
+                onClick={() => setBuySharesOpen(true)}
+                disabled={onchainSubscribers < 100}
+                variant="outline"
+                className="w-full rounded-full border-white/40 bg-white/10 text-white hover:bg-white/20"
+                title={onchainSubscribers < 100 ? "Artist needs 100+ subscribers to sell shares" : ""}
+              >
+                {onchainSubscribers < 100 ? `Buy Shares (${onchainSubscribers}/100)` : "Buy Shares"}
+              </Button>
+            </div>
+
             <div className="mt-6 flex flex-wrap gap-2">
               {publicLinks.map((link) => (
                 <a
@@ -278,7 +307,7 @@ const ArtistProfilePage = () => {
             </div>
           </aside>
 
-          <section className="space-y-5">
+          <Tabs defaultValue="portfolio" className="space-y-5">
             <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_180px]">
               <div>
                 <div className="flex flex-wrap items-center gap-2">
@@ -306,6 +335,14 @@ const ArtistProfilePage = () => {
               </div>
 
               <div className="grid gap-3">
+                <TabsList className="grid w-full grid-cols-2 rounded-[1.2rem] bg-[#eaf3ff] p-1">
+                  <TabsTrigger value="portfolio" className="rounded-[0.9rem] text-xs font-semibold">
+                    Portfolio
+                  </TabsTrigger>
+                  <TabsTrigger value="drops" className="rounded-[0.9rem] text-xs font-semibold">
+                    Drops
+                  </TabsTrigger>
+                </TabsList>
                 <div className="rounded-[1.5rem] bg-[#eff6ff] p-4">
                   <p className="text-4xl font-black text-foreground">{portfolioPieces.length}</p>
                   <p className="mt-1 text-foreground/80">Portfolio Pieces</p>
@@ -352,7 +389,7 @@ const ArtistProfilePage = () => {
             </div>
 
             <div className="rounded-[1.75rem] bg-[linear-gradient(180deg,#ffffff_0%,#f4f8ff_100%)] p-4 shadow-[inset_0_0_0_1px_rgba(37,99,235,0.08)]">
-              <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+              <div className="hidden">
                 <Button
                   onClick={handleSubscribe}
                   disabled={isSubscribing || isSubscribePending || isSubscribeConfirming || isSubscribed || isSubscribedLoading}
@@ -384,17 +421,7 @@ const ArtistProfilePage = () => {
                 </Button>
               </div>
 
-              <div className="mt-5">
-                <Tabs defaultValue="portfolio">
-                  <TabsList className="w-full rounded-xl bg-[#eaf3ff] md:w-auto">
-                    <TabsTrigger value="portfolio" className="flex-1 rounded-lg text-xs md:min-w-28">
-                      Portfolio
-                    </TabsTrigger>
-                    <TabsTrigger value="drops" className="flex-1 rounded-lg text-xs md:min-w-28">
-                      Drops
-                    </TabsTrigger>
-                  </TabsList>
-
+              <div className="mt-1">
                   <TabsContent value="portfolio" className="mt-4">
                     {portfolioPieces.length === 0 ? (
                       <p className="py-8 text-center text-xs text-muted-foreground">No portfolio pieces yet.</p>
@@ -449,10 +476,9 @@ const ArtistProfilePage = () => {
                       </div>
                     )}
                   </TabsContent>
-                </Tabs>
               </div>
             </div>
-          </section>
+          </Tabs>
         </div>
       </div>
 

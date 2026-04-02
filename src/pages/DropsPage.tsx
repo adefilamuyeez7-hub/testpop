@@ -81,7 +81,7 @@ const DropsPage = () => {
   return (
     <div>
       <div className="hidden md:block px-6 py-8">
-        <div className="mx-auto max-w-7xl rounded-[2rem] border border-[#f1dff2] bg-[linear-gradient(135deg,#fce8e6_0%,#f8d8f6_100%)] p-5 shadow-[0_30px_90px_rgba(236,72,153,0.12)]">
+        <div className="mx-auto max-w-7xl rounded-[2rem] border border-[#dbe7ff] bg-[linear-gradient(135deg,#f7fbff_0%,#e9f3ff_100%)] p-5 shadow-[0_30px_90px_rgba(37,99,235,0.10)]">
           <div className="rounded-[1.8rem] bg-white/92 p-6">
             <div className="grid gap-6 lg:grid-cols-[220px_minmax(0,1fr)]">
               <aside className="space-y-3">
@@ -91,7 +91,7 @@ const DropsPage = () => {
                     type="button"
                     onClick={() => setActive(filter.value)}
                     className={`flex w-full items-center justify-between rounded-2xl px-4 py-4 text-left text-sm font-medium transition-colors ${
-                      active === filter.value ? "bg-[#ece6ff] text-foreground" : "bg-secondary/60 text-foreground"
+                      active === filter.value ? "bg-[#dbeafe] text-foreground" : "bg-secondary/60 text-foreground"
                     }`}
                   >
                     <span>{filter.label}</span>
@@ -101,7 +101,7 @@ const DropsPage = () => {
               </aside>
 
               <div className="space-y-6">
-                <div className="relative overflow-hidden rounded-[2rem] bg-[linear-gradient(135deg,#ffd7d0_0%,#f6c6fb_100%)] p-8">
+                <div className="relative overflow-hidden rounded-[2rem] bg-[linear-gradient(135deg,#dbeafe_0%,#bfdbfe_100%)] p-8">
                   <div className="relative grid gap-6 lg:grid-cols-[1.1fr_0.9fr] lg:items-center">
                     <div className="space-y-4">
                       <p className="text-xs uppercase tracking-[0.28em] text-foreground/60">Desktop Drops</p>
@@ -118,7 +118,7 @@ const DropsPage = () => {
                             navigate(`/drops/${firstDrop.id}`);
                           }
                         }}
-                        className="h-11 rounded-full bg-black px-6 text-white hover:bg-black/90"
+                        className="h-11 rounded-full bg-[#1d4ed8] px-6 text-white hover:bg-[#1e40af]"
                       >
                         Explore drops
                       </Button>
@@ -167,7 +167,7 @@ const DropsPage = () => {
                         type="button"
                         onClick={() => setActive(filter.value)}
                         className={`h-11 rounded-full px-4 text-sm font-medium transition-colors ${
-                          active === filter.value ? "bg-black text-white" : "bg-secondary/60 text-foreground"
+                          active === filter.value ? "bg-[#1d4ed8] text-white" : "bg-secondary/60 text-foreground"
                         }`}
                       >
                         {filter.label}
@@ -190,7 +190,7 @@ const DropsPage = () => {
                       <Link
                         key={drop.id}
                         to={`/drops/${drop.id}`}
-                        className="overflow-hidden rounded-[1.7rem] bg-white shadow-[0_18px_45px_rgba(15,23,42,0.08)] ring-1 ring-black/5 transition-transform hover:-translate-y-1"
+                        className="overflow-hidden rounded-[1.7rem] bg-white shadow-[0_18px_45px_rgba(37,99,235,0.08)] ring-1 ring-[#dbe7ff] transition-transform hover:-translate-y-1"
                       >
                         <div className="relative aspect-[1.05] overflow-hidden bg-secondary">
                           {drop.assetType === "image" && drop.image ? (
