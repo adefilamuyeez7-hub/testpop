@@ -150,18 +150,28 @@ const Index = () => {
   // Update featured artists from Supabase when data loads
   useEffect(() => {
     if (supabaseArtists && supabaseArtists.length > 0) {
-      setFeaturedArtists(supabaseArtists.map((artist: any) => ({
-        id: artist.id,
-        wallet: artist.wallet,
-        contractAddress: artist.contract_address || null,
-        subscriptionPrice: artist.subscription_price,
-        name: artist.name || "Untitled Artist",
-        avatar: artist.avatar_url || artist.banner_url || "",
-        tag: artist.tag || "artist",
-        bio: artist.bio || "This artist has not published a public bio yet.",
-        cover: artist.banner_url || artist.avatar_url || "",
-        portfolio: Array.isArray(artist.portfolio) ? artist.portfolio : [],
-      })));
+      setFeaturedArtists(
+        supabaseArtists
+          .map((artist: any) => {
+            const portfolio = Array.isArray(artist.portfolio) ? artist.portfolio : [];
+            const featuredPortfolioImage =
+              resolveMediaUrl(portfolio[0]?.image, portfolio[0]?.image, portfolio[0]?.imageUri) || "";
+
+            return {
+              id: artist.id,
+              wallet: artist.wallet,
+              contractAddress: artist.contract_address || null,
+              subscriptionPrice: artist.subscription_price,
+              name: artist.name || "Untitled Artist",
+              avatar: artist.avatar_url || artist.banner_url || featuredPortfolioImage || "",
+              tag: artist.tag || "artist",
+              bio: artist.bio || "This artist has not published a public bio yet.",
+              cover: artist.banner_url || artist.avatar_url || featuredPortfolioImage || "",
+              portfolio,
+            };
+          })
+          .filter((artist: any) => Boolean(artist.id) && Boolean(artist.avatar || artist.cover || artist.portfolio?.length))
+      );
     }
   }, [supabaseArtists]);
 
@@ -523,10 +533,21 @@ const Index = () => {
       year: "Now",
     }));
   };
+  const getArtistAvatarImage = (artist: any) =>
+    artist?.avatar || getArtistFeaturedPiece(artist).image || artist?.cover || "";
   const getDesktopDeckCards = () => {
     if (!featuredArtists.length) return [];
 
-    return [-1, 0, 1, 2].map((offset) => {
+    const offsets =
+      featuredArtists.length === 1
+        ? [0]
+        : featuredArtists.length === 2
+        ? [0, 1]
+        : featuredArtists.length === 3
+        ? [-1, 0, 1]
+        : [-1, 0, 1, 2];
+
+    return offsets.map((offset) => {
       const index = (currentCard + offset + featuredArtists.length) % featuredArtists.length;
       return {
         ...featuredArtists[index],
@@ -587,10 +608,10 @@ const Index = () => {
                     const offset = artist.deckOffset;
                     const isActive = offset === 0;
                     const translateXMap: Record<string, string> = {
-                      "-1": "8%",
+                      "-1": "14%",
                       "0": "50%",
-                      "1": "72%",
-                      "2": "92%",
+                      "1": "74%",
+                      "2": "90%",
                     };
                     const rotateMap: Record<string, string> = {
                       "-1": "-8deg",
@@ -641,7 +662,7 @@ const Index = () => {
                             }`}
                           />
                           <img
-                            src={artist.avatar}
+                            src={getArtistAvatarImage(artist)}
                             alt={artist.name}
                             className={`absolute left-1/2 top-[-48px] z-10 object-cover drop-shadow-[0_18px_24px_rgba(15,23,42,0.25)] ${
                               isActive ? "h-44 w-44" : "h-36 w-36"
@@ -695,7 +716,7 @@ const Index = () => {
                 <div className="relative grid min-h-[440px] w-full max-w-6xl grid-cols-[0.95fr_1.05fr] overflow-hidden rounded-[2.2rem] border border-black/6 bg-white shadow-[0_40px_100px_rgba(15,23,42,0.18)]">
                   <div className="relative overflow-hidden bg-[linear-gradient(180deg,#3b82f6_0%,#1e3a8a_100%)] p-8 text-white">
                     <img
-                      src={selectedDesktopArtist.avatar}
+                      src={getArtistAvatarImage(selectedDesktopArtist)}
                       alt={selectedDesktopArtist.name}
                       className="absolute left-10 top-10 h-[340px] w-[340px] rounded-[2.8rem] object-cover drop-shadow-[0_25px_40px_rgba(15,23,42,0.35)]"
                     />
