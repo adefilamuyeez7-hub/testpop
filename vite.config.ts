@@ -1,5 +1,5 @@
 import { defineConfig } from "vite";
-import react from "@vitejs/plugin-react-swc";
+import react from "@vitejs/plugin-react";
 import path from "path";
 import { loadEnv } from "vite";
 
@@ -59,13 +59,8 @@ export default defineConfig(({ command, mode }) => {
 
             const packageName = getPackageChunkName(id);
 
-            if (
-              id.includes("@reown/") ||
-              id.includes("/wagmi/") ||
-              id.includes("/viem/") ||
-              id.includes("@walletconnect/")
-            ) {
-              return "web3";
+            if (id.includes("/wagmi/") || id.includes("/viem/")) {
+              return "web3-core";
             }
 
             if (id.includes("@supabase/")) {
@@ -74,6 +69,10 @@ export default defineConfig(({ command, mode }) => {
 
             if (id.includes("@tanstack/react-query")) {
               return "query";
+            }
+
+            if (id.includes("/epubjs/")) {
+              return "ebook-reader";
             }
 
             if (id.includes("@radix-ui/")) {

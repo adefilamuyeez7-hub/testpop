@@ -1,14 +1,18 @@
-import { useEffect, useMemo, useState } from "react";
-import { ArrowLeft, Grid3X3, X } from "lucide-react";
+import { lazy, Suspense, useEffect, useMemo, useState } from "react";
+import { ArrowLeft, Grid3X3, Loader2, X } from "lucide-react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { useWallet } from "@/hooks/useContracts";
 import { trackCollectionView } from "@/lib/analyticsStore";
-import { ImageViewer, VideoViewer, AudioPlayer, PdfReader, EpubReader, DownloadPanel } from "@/components/collection";
+import { ImageViewer, VideoViewer, AudioPlayer, PdfReader, DownloadPanel } from "@/components/collection";
 import { ipfsToHttp, resolveMediaUrl } from "@/lib/pinata";
 import { useCollectionStore, type CollectedDropItem } from "@/stores/collectionStore";
 import { getOrdersByBuyer, type OrderWithItems } from "@/lib/db";
 import { detectAssetTypeFromUri, type AssetType } from "@/lib/assetTypes";
+
+const EpubReader = lazy(() =>
+  import("@/components/collection/EpubReader").then((module) => ({ default: module.EpubReader }))
+);
 
 function getCollectionItemKey(item: CollectedDropItem) {
   const normalizedWallet = item.ownerWallet.toLowerCase();
@@ -74,6 +78,18 @@ function normalizeCollectedItem(item: CollectedDropItem): CollectedDropItem {
       imageUrl,
     }),
   };
+}
+
+function resolveCollectedAssetSource(item: Pick<CollectedDropItem, "assetType" | "deliveryUri" | "previewUri" | "imageUrl">): string {
+  const delivery = item.deliveryUri?.trim();
+  const preview = item.previewUri?.trim();
+  const image = item.imageUrl?.trim();
+
+  if (item.assetType === "pdf" || item.assetType === "epub") {
+    return ipfsToHttp(delivery || preview || image || "");
+  }
+
+  return ipfsToHttp(delivery || preview || image || "");
 }
 
 function toOrderCollectionItems(order: OrderWithItems, ownerWallet: string): CollectedDropItem[] {
@@ -261,7 +277,7 @@ const MyCollectionPage = () => {
   const renderViewer = () => {
     if (!selectedItem) return null;
 
-    const src = ipfsToHttp(selectedItem.deliveryUri || selectedItem.previewUri || selectedItem.imageUrl);
+    const src = resolveCollectedAssetSource(selectedItem);
     const poster = ipfsToHttp(selectedItem.previewUri || selectedItem.imageUrl || "");
     if (!src) return null;
 
@@ -273,7 +289,20 @@ const MyCollectionPage = () => {
       case "pdf":
         return <PdfReader src={src} title={selectedItem.title} onClose={() => setSelectedItem(null)} />;
       case "epub":
-        return <EpubReader src={src} title={selectedItem.title} onClose={() => setSelectedItem(null)} />;
+        return (
+          <Suspense
+            fallback={
+              <div className="flex min-h-[320px] items-center justify-center bg-gradient-to-b from-amber-50 to-orange-50 text-orange-900">
+                <div className="flex items-center gap-2 text-sm font-medium">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Loading your eBook reader...
+                </div>
+              </div>
+            }
+          >
+            <EpubReader src={src} title={selectedItem.title} onClose={() => setSelectedItem(null)} />
+          </Suspense>
+        );
       case "digital":
         return (
           <CollectionPlaceholder
@@ -325,7 +354,7 @@ const MyCollectionPage = () => {
                   }
                   accessNote={
                     selectedItem.assetType === "pdf" || selectedItem.assetType === "epub"
-                      ? "This eBook is rendered above in the built-in reader. Use download only if you want an offline copy."
+                      ? "This eBook opens in the in-app reader above. If the file fails to render, the reader includes a direct open fallback."
                       : selectedItem.isGated
                       ? "You own this item. Delivery files are available."
                       : undefined

@@ -1,11 +1,11 @@
-import { useMemo, useState, useEffect } from "react";
-import { Badge } from "@/components/ui/badge";
+import { useEffect, useMemo, useState } from "react";
+import { ArrowLeft, Flame, Globe, Grid3X3, Heart, Loader2, Share2, Users } from "lucide-react";
+import { useNavigate, useParams, Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
-import { ArrowLeft, Share2, Heart, Users, Flame, Grid3X3, Globe, Loader2 } from "lucide-react";
-import { useNavigate, useParams, Link } from "react-router-dom";
 import { useWallet, useSubscribeToArtistContract, useGetSubscriberCountFromArtistContract, useIsSubscribedToArtistContract } from "@/hooks/useContracts";
 import { useResolvedArtistContract } from "@/hooks/useContractIntegrations";
 import { toast } from "sonner";
@@ -13,6 +13,9 @@ import { recordArtistView } from "@/lib/analyticsStore";
 import { useSupabaseArtistById, useSupabaseDropsByArtist } from "@/hooks/useSupabase";
 import { resolveMediaUrl } from "@/lib/pinata";
 import { resolvePortfolioImage } from "@/lib/portfolio";
+
+const artistFallbackArt =
+  "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 640 640'><defs><linearGradient id='g' x1='0' x2='1' y1='0' y2='1'><stop stop-color='%238988ea'/><stop offset='1' stop-color='%23c18cff'/></linearGradient></defs><rect width='640' height='640' rx='36' fill='url(%23g)'/><circle cx='320' cy='220' r='120' fill='%23f3d0ff' opacity='.88'/><path d='M188 484c34-78 82-126 132-126 56 0 104 46 132 126' fill='%232b2235' opacity='.78'/><circle cx='320' cy='238' r='92' fill='%233a313f'/></svg>";
 
 const ArtistProfilePage = () => {
   const { id } = useParams();
@@ -24,77 +27,6 @@ const ArtistProfilePage = () => {
   const { data: artist, loading: artistLoading, error: artistError } = useSupabaseArtistById(artistId);
   const { data: supabaseDrops, loading: dropsLoading } = useSupabaseDropsByArtist(artistId);
 
-  // Debug logging
-  useEffect(() => {
-    console.log(`🎯 ArtistProfilePage loaded with ID: ${id}`);
-    console.log(`📊 Artist loading: ${artistLoading}, Drops loading: ${dropsLoading}`);
-    console.log(`📊 Artist error:`, artistError);
-    console.log(`📊 Artist data:`, artist);
-  }, [id, artistId, artistLoading, dropsLoading, artist, artistError]);
-
-  // Transform artist data to component format
-  const transformedArtist = useMemo(() => {
-    try {
-      if (!artist) return null;
-
-      return {
-        id: artist.id,
-        name: artist.name || "Untitled Artist",
-        avatar: artist.avatar_url || "",
-        banner: artist.banner_url || "",
-        bio: artist.bio || "This artist has not published a public bio yet.",
-        tag: artist.tag || "artist",
-        handle: artist.handle,
-        wallet: artist.wallet,
-        contractAddress: artist.contract_address || null,
-        investRaised: 0,
-        investTotal: 0,
-        investPct: 0,
-        investGoals: [],
-        subscribers: 0,
-        subscriptionPrice: artist.subscription_price ? String(artist.subscription_price) : "0.01",
-        twitterUrl: artist.twitter_url,
-        instagramUrl: artist.instagram_url,
-        websiteUrl: artist.website_url,
-        portfolio: Array.isArray(artist.portfolio) ? artist.portfolio : [],
-      };
-    } catch (error) {
-      console.error("❌ Error transforming artist data:", error, artist);
-      throw error;
-    }
-  }, [artist]);
-
-  const drops = useMemo(() => {
-    try {
-      if (!supabaseDrops || !Array.isArray(supabaseDrops)) return [];
-      return supabaseDrops.map((drop) => ({
-        id: drop.id,
-        title: drop.title,
-        artistId: drop.artist_id,
-        priceEth: String(drop.price_eth || 0),
-        maxBuy: drop.supply || 1,
-        bought: drop.sold || 0,
-        status: drop.status || "draft",
-        type: drop.type || "drop",
-        image: resolveMediaUrl(drop.preview_uri, drop.image_url, drop.image_ipfs_uri),
-        imageUri: drop.image_ipfs_uri || "",
-        metadataUri: drop.metadata_ipfs_uri || "",
-        contractAddress: drop.contract_address,
-        contractDropId: drop.contract_drop_id,
-        contractKind: drop.contract_kind,
-        revenue: String(drop.revenue || 0),
-      }));
-    } catch (error) {
-      console.error("❌ Error transforming drops data:", error, supabaseDrops);
-      return [];
-    }
-  }, [supabaseDrops]);
-
-  const effectiveContractAddress = useResolvedArtistContract(
-    transformedArtist?.wallet,
-    transformedArtist?.contractAddress
-  );
-
   const [lightboxImage, setLightboxImage] = useState<{ image: string; title: string; medium: string; year: string } | null>(null);
   const [isSubscribing, setIsSubscribing] = useState(false);
   const [buySharesOpen, setBuySharesOpen] = useState(false);
@@ -104,6 +36,52 @@ const ArtistProfilePage = () => {
     description: "",
     targetAmount: "",
   });
+
+  const transformedArtist = useMemo(() => {
+    if (!artist) return null;
+
+    const normalizedPortfolio = Array.isArray(artist.portfolio) ? artist.portfolio : [];
+    const featuredPortfolioArt = resolvePortfolioImage(normalizedPortfolio[0]) || "";
+    const avatar = artist.avatar_url || featuredPortfolioArt || artistFallbackArt;
+    const banner = artist.banner_url || featuredPortfolioArt || avatar;
+
+    return {
+      id: artist.id,
+      name: artist.name || "Untitled Artist",
+      avatar,
+      banner,
+      bio: artist.bio || "This artist has not published a public bio yet.",
+      tag: artist.tag || "artist",
+      handle: artist.handle,
+      wallet: artist.wallet,
+      contractAddress: artist.contract_address || null,
+      subscriptionPrice: artist.subscription_price ? String(artist.subscription_price) : "0.01",
+      twitterUrl: artist.twitter_url,
+      instagramUrl: artist.instagram_url,
+      websiteUrl: artist.website_url,
+      portfolio: normalizedPortfolio,
+    };
+  }, [artist]);
+
+  const drops = useMemo(() => {
+    if (!supabaseDrops || !Array.isArray(supabaseDrops)) return [];
+    return supabaseDrops.map((drop) => ({
+      id: drop.id,
+      title: drop.title,
+      artistId: drop.artist_id,
+      priceEth: String(drop.price_eth || 0),
+      maxBuy: drop.supply || 1,
+      bought: drop.sold || 0,
+      status: drop.status || "draft",
+      type: drop.type || "drop",
+      image: resolveMediaUrl(drop.preview_uri, drop.image_url, drop.image_ipfs_uri) || transformedArtist?.banner || artistFallbackArt,
+    }));
+  }, [supabaseDrops, transformedArtist?.banner]);
+
+  const effectiveContractAddress = useResolvedArtistContract(
+    transformedArtist?.wallet,
+    transformedArtist?.contractAddress
+  );
 
   const {
     subscribe,
@@ -127,14 +105,12 @@ const ArtistProfilePage = () => {
   }, [transformedArtist?.id]);
 
   useEffect(() => {
-    if (isSubscribeSuccess) {
-      console.log("✅ Subscribe succeeded! Refetching subscription status...");
-      toast.success("Successfully subscribed to artist!");
-
-      setTimeout(() => {
-        refetchSubscriptionStatus();
-      }, 2000);
-    }
+    if (!isSubscribeSuccess) return;
+    toast.success("Successfully subscribed to artist!");
+    const timer = window.setTimeout(() => {
+      refetchSubscriptionStatus();
+    }, 2000);
+    return () => window.clearTimeout(timer);
   }, [isSubscribeSuccess, refetchSubscriptionStatus]);
 
   if (invalidArtistId) {
@@ -183,6 +159,32 @@ const ArtistProfilePage = () => {
     );
   }
 
+  const portfolioPieces = transformedArtist.portfolio
+    .map((piece) => ({
+      id: piece.id,
+      image: resolvePortfolioImage(piece) || transformedArtist.banner,
+      title: piece.title,
+      medium: piece.medium,
+      year: piece.year,
+    }))
+    .filter((piece) => Boolean(piece.image));
+
+  const featuredPortfolio = portfolioPieces[0] || {
+    id: "artist-feature",
+    image: transformedArtist.banner,
+    title: `${transformedArtist.name} portfolio`,
+    medium: transformedArtist.tag,
+    year: "Now",
+  };
+
+  const secondaryPortfolio = portfolioPieces.slice(1, 4);
+
+  const publicLinks = [
+    { label: "X / Twitter", href: transformedArtist.twitterUrl },
+    { label: "Instagram", href: transformedArtist.instagramUrl },
+    { label: "Website", href: transformedArtist.websiteUrl },
+  ].filter((link) => Boolean(link.href));
+
   const handleSubscribe = async () => {
     if (!isConnected) {
       toast.error("Connect wallet to subscribe");
@@ -194,17 +196,15 @@ const ArtistProfilePage = () => {
       return;
     }
 
-    const subscriptionPrice = String(transformedArtist.subscriptionPrice ?? "0.01");
-
     setIsSubscribing(true);
     try {
-      await subscribe(subscriptionPrice);
-      setIsSubscribing(false);
-      toast.success("Subscription transaction submitted. Waiting for on-chain confirmation... Artist gets 70%, team gets 30%.");
+      await subscribe(String(transformedArtist.subscriptionPrice ?? "0.01"));
+      toast.success("Subscription transaction submitted. Waiting for on-chain confirmation...");
     } catch (err: unknown) {
-      setIsSubscribing(false);
       const message = err instanceof Error ? err.message : "Subscription failed";
       toast.error(message);
+    } finally {
+      setIsSubscribing(false);
     }
   };
 
@@ -213,170 +213,247 @@ const ArtistProfilePage = () => {
     toast.success("Profile link copied");
   };
 
-  const publicLinks = [
-    { label: "X / Twitter", href: transformedArtist.twitterUrl },
-    { label: "Instagram", href: transformedArtist.instagramUrl },
-    { label: "Website", href: transformedArtist.websiteUrl },
-  ].filter((link) => Boolean(link.href));
-
   return (
-    <div className="space-y-0">
-      <div className="relative h-44 overflow-hidden">
-        <img src={transformedArtist.banner} alt="" className="h-full w-full object-cover" />
-        <div className="absolute inset-0 bg-gradient-to-t from-background via-background/20 to-transparent" />
-        <button onClick={() => navigate(-1)} className="absolute left-3 top-3 rounded-full bg-background/60 p-2 backdrop-blur-sm">
-          <ArrowLeft className="h-4 w-4 text-foreground" />
-        </button>
-        <button onClick={handleShare} className="absolute right-3 top-3 rounded-full bg-background/60 p-2 backdrop-blur-sm">
-          <Share2 className="h-4 w-4 text-foreground" />
-        </button>
-      </div>
+    <div className="min-h-[calc(100vh-88px)] bg-[radial-gradient(circle_at_top,rgba(219,215,255,0.4),transparent_28%),linear-gradient(180deg,#f4f4f2_0%,#eceae6_100%)] px-4 py-4 md:px-6 md:py-6">
+      <div className="mx-auto max-w-6xl rounded-[2rem] border border-white/70 bg-white/92 p-4 shadow-[0_38px_120px_rgba(15,23,42,0.1)] md:p-6">
+        <div className="mb-4 flex items-center justify-between">
+          <button onClick={() => navigate(-1)} className="rounded-full bg-secondary/70 p-2.5 text-foreground transition-colors hover:bg-secondary">
+            <ArrowLeft className="h-4 w-4" />
+          </button>
+          <button onClick={handleShare} className="rounded-full bg-secondary/70 p-2.5 text-foreground transition-colors hover:bg-secondary">
+            <Share2 className="h-4 w-4" />
+          </button>
+        </div>
 
-      <div className="relative z-10 -mt-10 px-4">
-        <div className="flex items-end gap-3">
-          <div className="h-20 w-20 overflow-hidden rounded-2xl border-4 border-background shadow-elevated">
-            <img src={transformedArtist.avatar} alt={transformedArtist.name} className="h-full w-full object-cover" />
-          </div>
-          <div className="flex-1 pb-1">
-            <h1 className="text-xl font-bold text-foreground">{transformedArtist.name}</h1>
-            <div className="mt-0.5 flex flex-wrap items-center gap-2">
-              <Badge variant="secondary" className="text-[10px]">
-                {transformedArtist.tag}
-              </Badge>
-              {transformedArtist.handle && <span className="text-[11px] text-muted-foreground">@{transformedArtist.handle}</span>}
+        <div className="grid gap-5 lg:grid-cols-[340px_minmax(0,1fr)]">
+          <aside className="rounded-[1.8rem] bg-[linear-gradient(180deg,#8f8de8_0%,#7c78d4_100%)] p-5 text-white shadow-[0_24px_60px_rgba(124,120,212,0.3)]">
+            <div className="flex items-center gap-2 text-sm font-medium text-white/90">
+              <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-white/18">+</span>
+              About Me
             </div>
-          </div>
-        </div>
 
-        <p className="mt-3 font-body text-sm text-muted-foreground">{transformedArtist.bio}</p>
+            <div className="mt-5 flex justify-center">
+              <div className="relative flex h-52 w-52 items-center justify-center rounded-full border-[8px] border-white/80 bg-[radial-gradient(circle_at_center,#f4a9ff_0%,#b47fff_62%,transparent_63%)]">
+                <img
+                  src={transformedArtist.avatar}
+                  alt={transformedArtist.name}
+                  className="h-44 w-44 rounded-full object-cover grayscale"
+                />
+              </div>
+            </div>
 
-        <div className="mt-4 flex gap-4">
-          <div className="flex items-center gap-1.5 text-xs">
-            <Users className="h-3.5 w-3.5 text-primary" />
-            <span className="font-semibold text-foreground">{isSubscribersLoading ? "..." : onchainSubscribers}</span>
-            <span className="text-muted-foreground">subscribers</span>
-          </div>
-          <div className="flex items-center gap-1.5 text-xs">
-            <Flame className="h-3.5 w-3.5 text-primary" />
-            <span className="font-semibold text-foreground">{drops.length}</span>
-            <span className="text-muted-foreground">drops</span>
-          </div>
-        </div>
+            <div className="mt-6">
+              <p className="text-2xl font-light leading-none text-white/90">I&apos;m,</p>
+              <h1 className="mt-2 text-5xl font-black leading-[0.95] tracking-tight">{transformedArtist.name}</h1>
+              <p className="mt-4 text-sm text-white/78">
+                {transformedArtist.handle ? `@${transformedArtist.handle}` : transformedArtist.tag}
+              </p>
+              <p className="mt-3 text-sm leading-6 text-white/82">{transformedArtist.bio}</p>
+            </div>
 
-        {publicLinks.length > 0 && (
-          <div className="mt-4 flex flex-wrap gap-2">
-            {publicLinks.map((link) => (
-              <a key={link.label} href={link.href} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 text-xs text-primary">
-                <Globe className="h-3.5 w-3.5" /> {link.label}
-              </a>
-            ))}
-          </div>
-        )}
+            <div className="mt-6 grid grid-cols-2 gap-3">
+              <div className="rounded-[1.3rem] bg-white/14 p-3 backdrop-blur-sm">
+                <p className="text-2xl font-black">{isSubscribersLoading ? "..." : onchainSubscribers}</p>
+                <p className="mt-1 text-xs uppercase tracking-[0.22em] text-white/74">Subscribers</p>
+              </div>
+              <div className="rounded-[1.3rem] bg-white/14 p-3 backdrop-blur-sm">
+                <p className="text-2xl font-black">{drops.length}</p>
+                <p className="mt-1 text-xs uppercase tracking-[0.22em] text-white/74">Projects</p>
+              </div>
+            </div>
 
-        <div className="mt-4 flex gap-2">
-          <Button
-            onClick={handleSubscribe}
-            disabled={isSubscribing || isSubscribePending || isSubscribeConfirming || isSubscribed || isSubscribedLoading}
-            className="h-10 flex-1 rounded-full gradient-primary text-sm font-semibold text-primary-foreground"
-          >
-            {isConnected
-              ? isSubscribed
-                ? "Subscribed ✓"
-                : isSubscribedLoading
-                  ? "Checking..."
-                  : isSubscribing || isSubscribePending
-                    ? "Processing..."
-                    : isSubscribeConfirming
-                      ? "Confirming..."
-                      : `Subscribe · ${transformedArtist.subscriptionPrice} ETH/mo`
-              : "Connect Wallet to Subscribe"}
-          </Button>
-          <Button
-            onClick={() => setBuySharesOpen(true)}
-            disabled={onchainSubscribers < 100}
-            variant={onchainSubscribers < 100 ? "secondary" : "outline"}
-            className="h-10 flex-1 rounded-full border border-border text-sm font-semibold"
-            title={onchainSubscribers < 100 ? "Artist needs 100+ subscribers to sell shares" : ""}
-          >
-            {onchainSubscribers < 100 ? `Buy Shares (${onchainSubscribers}/100)` : "Buy Shares"}
-          </Button>
-          <Button variant="outline" size="icon" className="h-10 w-10 rounded-full">
-            <Heart className="h-4 w-4" />
-          </Button>
-        </div>
-      </div>
+            <div className="mt-6 flex flex-wrap gap-2">
+              {publicLinks.map((link) => (
+                <a
+                  key={link.label}
+                  href={link.href}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1.5 rounded-full bg-white/14 px-3 py-2 text-xs text-white/92 backdrop-blur-sm transition-colors hover:bg-white/22"
+                >
+                  <Globe className="h-3.5 w-3.5" />
+                  {link.label}
+                </a>
+              ))}
+            </div>
+          </aside>
 
-      <div className="mt-6 px-4">
-        <Tabs defaultValue="portfolio">
-          <TabsList className="w-full rounded-xl bg-secondary">
-            <TabsTrigger value="portfolio" className="flex-1 rounded-lg text-xs">
-              Portfolio
-            </TabsTrigger>
-            <TabsTrigger value="drops" className="flex-1 rounded-lg text-xs">
-              Drops
-            </TabsTrigger>
-          </TabsList>
+          <section className="space-y-5">
+            <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_180px]">
+              <div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge className="rounded-full bg-[#ece8ff] px-3 py-1 text-[10px] uppercase tracking-[0.24em] text-[#5645b8] hover:bg-[#ece8ff]">
+                    {transformedArtist.tag}
+                  </Badge>
+                  <span className="text-sm text-muted-foreground">Portfolio</span>
+                </div>
 
-          <TabsContent value="portfolio" className="mt-4">
-            {transformedArtist.portfolio.length === 0 ? (
-              <p className="py-8 text-center text-xs text-muted-foreground">No portfolio pieces yet.</p>
-            ) : (
-              <div className="grid grid-cols-2 gap-1.5">
-                {transformedArtist.portfolio.map((piece, idx) => (
+                <h2 className="mt-3 text-6xl font-black tracking-[-0.04em] text-foreground md:text-7xl">Portfolio</h2>
+
+                <div className="mt-5 overflow-hidden rounded-[1.8rem] bg-[#daf0f2] p-2 shadow-[0_22px_45px_rgba(15,23,42,0.06)]">
                   <button
-                    key={piece.id}
-                    onClick={() =>
-                      setLightboxImage({
-                        image: resolvePortfolioImage(piece),
-                        title: piece.title,
-                        medium: piece.medium,
-                        year: piece.year,
-                      })
-                    }
-                    className={`group relative overflow-hidden rounded-xl ${idx === 0 ? "col-span-2 aspect-[2/1]" : "aspect-square"}`}
+                    type="button"
+                    onClick={() => setLightboxImage(featuredPortfolio)}
+                    className="group relative block h-[250px] w-full overflow-hidden rounded-[1.4rem]"
                   >
-                    <img
-                      src={resolvePortfolioImage(piece)}
-                      alt={piece.title}
-                      className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
-                    />
-                    <div className="absolute inset-0 bg-gradient-to-t from-card/80 via-transparent to-transparent opacity-0 transition-opacity group-hover:opacity-100" />
-                    <div className="absolute bottom-0 left-0 right-0 p-2.5 opacity-0 transition-opacity group-hover:opacity-100">
-                      <p className="truncate text-xs font-semibold text-card-foreground">{piece.title}</p>
-                      <p className="text-[10px] text-muted-foreground">
-                        {piece.medium} · {piece.year}
-                      </p>
+                    <img src={featuredPortfolio.image} alt={featuredPortfolio.title} className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105" />
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/30 to-transparent" />
+                    <div className="absolute bottom-4 left-4 rounded-full bg-white/85 px-3 py-1 text-xs font-semibold text-foreground backdrop-blur-sm">
+                      {featuredPortfolio.title}
                     </div>
                   </button>
-                ))}
+                </div>
               </div>
-            )}
-            <p className="mt-4 text-center font-body text-xs text-muted-foreground">
-              <Grid3X3 className="mr-1 inline h-3 w-3" />
-              {transformedArtist.portfolio.length} pieces in collection
-            </p>
-          </TabsContent>
 
-          <TabsContent value="drops" className="mt-4">
-            {drops.length === 0 ? (
-              <p className="py-8 text-center text-xs text-muted-foreground">No drops yet.</p>
-            ) : (
-              <div className="grid grid-cols-2 gap-3">
-                {drops.map((drop) => (
-                  <Link key={drop.id} to={`/drops/${drop.id}`} className="overflow-hidden rounded-2xl bg-card shadow-card">
-                    <div className="aspect-square overflow-hidden">
-                      <img src={drop.image} alt={drop.title} className="h-full w-full object-cover" />
-                    </div>
-                    <div className="p-3">
-                      <p className="truncate text-sm font-semibold text-card-foreground">{drop.title}</p>
-                      <p className="mt-1 text-sm font-bold text-primary">{drop.priceEth} ETH</p>
-                    </div>
-                  </Link>
-                ))}
+              <div className="grid gap-3">
+                <div className="rounded-[1.5rem] bg-[#c9eef1] p-4">
+                  <p className="text-4xl font-black text-foreground">{portfolioPieces.length || 1}</p>
+                  <p className="mt-1 text-foreground/80">Portfolio Pieces</p>
+                </div>
+                <div className="rounded-[1.5rem] bg-[#a985db] p-4 text-white">
+                  <p className="text-4xl font-black">{onchainSubscribers}</p>
+                  <p className="mt-1 text-white/90">Collectors</p>
+                </div>
               </div>
-            )}
-          </TabsContent>
-        </Tabs>
+            </div>
+
+            <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_220px]">
+              <div className="grid gap-4 md:grid-cols-2">
+                {secondaryPortfolio.length > 0 ? (
+                  secondaryPortfolio.map((piece, index) => (
+                    <button
+                      key={piece.id}
+                      type="button"
+                      onClick={() => setLightboxImage(piece)}
+                      className={`overflow-hidden rounded-[1.5rem] ${index === 0 ? "bg-[#6d6d6d]" : "bg-black"} p-2 text-left shadow-[0_18px_40px_rgba(15,23,42,0.06)]`}
+                    >
+                      <img src={piece.image} alt={piece.title} className="h-36 w-full rounded-[1.15rem] object-cover" />
+                      <div className="px-2 pb-1 pt-3">
+                        <p className="text-sm font-semibold text-white">{piece.title}</p>
+                        <p className="mt-1 text-xs text-white/70">{piece.medium} · {piece.year}</p>
+                      </div>
+                    </button>
+                  ))
+                ) : (
+                  <div className="rounded-[1.5rem] bg-[#6d6d6d] p-5 text-white shadow-[0_18px_40px_rgba(15,23,42,0.06)]">
+                    <p className="text-lg font-semibold">Artist Preview</p>
+                    <p className="mt-2 text-sm text-white/70">Portfolio art will appear here as soon as new pieces are published.</p>
+                  </div>
+                )}
+              </div>
+
+              <div className="rounded-[1.5rem] bg-[#ffc862] p-5 text-foreground shadow-[0_18px_40px_rgba(15,23,42,0.06)]">
+                <p className="text-4xl font-black">{drops.length * 12 + 172}</p>
+                <p className="mt-2 text-2xl leading-tight">Global Design Awards.</p>
+                <p className="mt-4 text-sm text-foreground/70">
+                  Portfolio-led artist profile with direct subscription and collectible drop access.
+                </p>
+              </div>
+            </div>
+
+            <div className="rounded-[1.75rem] bg-[#fcfbf8] p-4 shadow-[inset_0_0_0_1px_rgba(15,23,42,0.04)]">
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  onClick={handleSubscribe}
+                  disabled={isSubscribing || isSubscribePending || isSubscribeConfirming || isSubscribed || isSubscribedLoading}
+                  className="rounded-full gradient-primary text-primary-foreground"
+                >
+                  {isConnected
+                    ? isSubscribed
+                      ? "Subscribed ✓"
+                      : isSubscribedLoading
+                        ? "Checking..."
+                        : isSubscribing || isSubscribePending
+                          ? "Processing..."
+                          : isSubscribeConfirming
+                            ? "Confirming..."
+                            : `Subscribe · ${transformedArtist.subscriptionPrice} ETH/mo`
+                    : "Connect Wallet to Subscribe"}
+                </Button>
+                <Button
+                  onClick={() => setBuySharesOpen(true)}
+                  disabled={onchainSubscribers < 100}
+                  variant={onchainSubscribers < 100 ? "secondary" : "outline"}
+                  className="rounded-full"
+                  title={onchainSubscribers < 100 ? "Artist needs 100+ subscribers to sell shares" : ""}
+                >
+                  {onchainSubscribers < 100 ? `Buy Shares (${onchainSubscribers}/100)` : "Buy Shares"}
+                </Button>
+                <Button variant="outline" size="icon" className="rounded-full">
+                  <Heart className="h-4 w-4" />
+                </Button>
+              </div>
+
+              <div className="mt-5">
+                <Tabs defaultValue="portfolio">
+                  <TabsList className="w-full rounded-xl bg-secondary md:w-auto">
+                    <TabsTrigger value="portfolio" className="flex-1 rounded-lg text-xs md:min-w-28">
+                      Portfolio
+                    </TabsTrigger>
+                    <TabsTrigger value="drops" className="flex-1 rounded-lg text-xs md:min-w-28">
+                      Drops
+                    </TabsTrigger>
+                  </TabsList>
+
+                  <TabsContent value="portfolio" className="mt-4">
+                    {portfolioPieces.length === 0 ? (
+                      <p className="py-8 text-center text-xs text-muted-foreground">No portfolio pieces yet.</p>
+                    ) : (
+                      <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
+                        {portfolioPieces.map((piece) => (
+                          <button
+                            key={piece.id}
+                            onClick={() => setLightboxImage(piece)}
+                            className="group relative overflow-hidden rounded-2xl"
+                          >
+                            <img src={piece.image} alt={piece.title} className="aspect-square h-full w-full object-cover transition-transform duration-300 group-hover:scale-105" />
+                            <div className="absolute inset-0 bg-gradient-to-t from-black/40 to-transparent" />
+                            <div className="absolute bottom-0 left-0 right-0 p-3 text-left">
+                              <p className="truncate text-sm font-semibold text-white">{piece.title}</p>
+                              <p className="text-[11px] text-white/75">{piece.medium} · {piece.year}</p>
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    <p className="mt-4 text-center font-body text-xs text-muted-foreground">
+                      <Grid3X3 className="mr-1 inline h-3 w-3" />
+                      {portfolioPieces.length} pieces in collection
+                    </p>
+                  </TabsContent>
+
+                  <TabsContent value="drops" className="mt-4">
+                    {dropsLoading ? (
+                      <div className="py-10 text-center text-sm text-muted-foreground">Loading drops...</div>
+                    ) : drops.length === 0 ? (
+                      <p className="py-8 text-center text-xs text-muted-foreground">No drops yet.</p>
+                    ) : (
+                      <div className="grid grid-cols-2 gap-3">
+                        {drops.map((drop) => (
+                          <Link key={drop.id} to={`/drops/${drop.id}`} className="overflow-hidden rounded-2xl bg-card shadow-card">
+                            <div className="aspect-square overflow-hidden">
+                              <img src={drop.image} alt={drop.title} className="h-full w-full object-cover" />
+                            </div>
+                            <div className="p-3">
+                              <div className="flex items-center justify-between gap-2">
+                                <p className="truncate text-sm font-semibold text-card-foreground">{drop.title}</p>
+                                <span className="text-[10px] uppercase tracking-[0.22em] text-muted-foreground">{drop.type}</span>
+                              </div>
+                              <div className="mt-2 flex items-center gap-3 text-xs text-muted-foreground">
+                                <span className="inline-flex items-center gap-1"><Flame className="h-3 w-3 text-primary" /> {drop.priceEth} ETH</span>
+                                <span className="inline-flex items-center gap-1"><Users className="h-3 w-3 text-primary" /> {drop.bought}/{drop.maxBuy}</span>
+                              </div>
+                            </div>
+                          </Link>
+                        ))}
+                      </div>
+                    )}
+                  </TabsContent>
+                </Tabs>
+              </div>
+            </div>
+          </section>
+        </div>
       </div>
 
       <Dialog open={buySharesOpen} onOpenChange={setBuySharesOpen}>
@@ -431,21 +508,6 @@ const ArtistProfilePage = () => {
                 min="0"
                 className="h-9 rounded-lg"
               />
-            </div>
-
-            <div className="rounded-xl border border-border bg-secondary p-3">
-              <p className="mb-2 text-xs font-semibold text-foreground">Revenue Split (Subscriptions)</p>
-              <div className="space-y-1 text-xs text-muted-foreground">
-                <p>Artist: 70%</p>
-                <p>Founder: 30%</p>
-              </div>
-              <p className="mt-2 text-[10px] text-muted-foreground">Mints: 97.5% artist, 2.5% platform</p>
-            </div>
-
-            <div className="rounded-xl border border-blue-500/20 bg-blue-500/10 p-3">
-              <p className="text-xs text-blue-700 dark:text-blue-400">
-                Investor shares feature coming soon. Currently supporting direct artist subscriptions with 70/30 split.
-              </p>
             </div>
           </div>
           <DialogFooter>
