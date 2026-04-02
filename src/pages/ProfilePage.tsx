@@ -361,7 +361,7 @@ const ProfilePage = () => {
     <div className="min-h-[calc(100vh-88px)] bg-[radial-gradient(circle_at_top,rgba(96,165,250,0.18),transparent_30%),linear-gradient(180deg,#f7fbff_0%,#ecf4ff_100%)] px-4 py-4 md:px-6 md:py-6">
       <div className="mx-auto max-w-7xl rounded-[2rem] border border-white/80 bg-white/92 p-3 shadow-[0_35px_120px_rgba(37,99,235,0.10)] backdrop-blur md:p-5">
         <div className="grid gap-4 lg:grid-cols-[260px_minmax(0,1fr)]">
-          <aside className="rounded-[1.8rem] border border-[#cfe0ff] bg-[linear-gradient(180deg,#f9fcff_0%,#eef5ff_100%)] p-5 shadow-[inset_-1px_0_0_rgba(37,99,235,0.06)]">
+          <aside className="hidden lg:block rounded-[1.8rem] border border-[#cfe0ff] bg-[linear-gradient(180deg,#f9fcff_0%,#eef5ff_100%)] p-5 shadow-[inset_-1px_0_0_rgba(37,99,235,0.06)]">
             <div className="flex items-center gap-3 md:block">
               <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-[linear-gradient(135deg,#60a5fa_0%,#1d4ed8_100%)] text-white shadow-lg">
                 <Sparkles className="h-6 w-6" />
