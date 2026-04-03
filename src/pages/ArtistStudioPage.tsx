@@ -22,6 +22,8 @@ import { useCreateDropArtist } from "@/hooks/useContractsArtist";
 import { useCreateCampaignV2 } from "@/hooks/useCampaignV2";
 import { useGetArtistContract, useResolvedArtistContract } from "@/hooks/useContractIntegrations";
 import { ipfsToHttp, resolveMediaUrl, uploadFileToPinata, uploadMetadataToPinata } from "@/lib/pinata";
+import { establishSecureSession } from "@/lib/secureAuth";
+import { getRuntimeApiToken } from "@/lib/runtimeSession";
 import { formatEther } from "viem";
 import { toast } from "sonner";
 import { CampaignManagementPanel } from "@/components/campaign/CampaignManagementPanel";
@@ -473,34 +475,44 @@ const CreateDropSheet = ({
     }
     setIsUploading(true); setUploadErr(null);
     try {
-      toast.info(requiresSeparateDelivery ? "Uploading cover artwork to IPFS..." : "Uploading artwork to IPFS...");
-      const assetFile = deliveryFile || coverFile;
-      const assetType = detectAssetTypeFromFile(assetFile);
-      const imageCid = await uploadFileToPinata(coverFile);
-      const imageUri = `ipfs://${imageCid}`;
-      let deliveryUri = imageUri;
+      const { uri, imageUri, deliveryUri, previewUri, assetType } = await withArtistUploadSession(async () => {
+        toast.info(requiresSeparateDelivery ? "Uploading cover artwork to IPFS..." : "Uploading artwork to IPFS...");
+        const assetFile = deliveryFile || coverFile;
+        const nextAssetType = detectAssetTypeFromFile(assetFile);
+        const imageCid = await uploadFileToPinata(coverFile);
+        const nextImageUri = `ipfs://${imageCid}`;
+        let nextDeliveryUri = nextImageUri;
 
-      if (requiresSeparateDelivery && deliveryFile) {
-        toast.info(contentKind === "ebook" ? "Uploading ebook file..." : "Uploading delivery file...");
-        const deliveryCid = await uploadFileToPinata(deliveryFile);
-        deliveryUri = `ipfs://${deliveryCid}`;
-      }
+        if (requiresSeparateDelivery && deliveryFile) {
+          toast.info(contentKind === "ebook" ? "Uploading ebook file..." : "Uploading delivery file...");
+          const deliveryCid = await uploadFileToPinata(deliveryFile);
+          nextDeliveryUri = `ipfs://${deliveryCid}`;
+        }
 
-      const previewUri = imageUri;
-      toast.info("Pinning metadataâ€¦");
-      const uri = await uploadMetadataToPinata({
-        name: form.title,
-        description: form.description,
-        image: previewUri || imageUri,
-        animation_url: !requiresSeparateDelivery && assetType !== "image" ? deliveryUri : undefined,
-        properties: {
-          contentKind,
-          assetType,
-          coverImageUri: imageUri,
-          deliveryUri,
-          previewUri: previewUri || null,
-          isDownloadable: requiresSeparateDelivery || assetType === "digital",
-        },
+        const nextPreviewUri = nextImageUri;
+        toast.info("Pinning metadata...");
+        const nextUri = await uploadMetadataToPinata({
+          name: form.title,
+          description: form.description,
+          image: nextPreviewUri || nextImageUri,
+          animation_url: !requiresSeparateDelivery && nextAssetType !== "image" ? nextDeliveryUri : undefined,
+          properties: {
+            contentKind,
+            assetType: nextAssetType,
+            coverImageUri: nextImageUri,
+            deliveryUri: nextDeliveryUri,
+            previewUri: nextPreviewUri || null,
+            isDownloadable: requiresSeparateDelivery || nextAssetType === "digital",
+          },
+        });
+
+        return {
+          uri: nextUri,
+          imageUri: nextImageUri,
+          deliveryUri: nextDeliveryUri,
+          previewUri: nextPreviewUri,
+          assetType: nextAssetType,
+        };
       });
       setPendingResult({
         metadataUri: uri,
@@ -1068,6 +1080,47 @@ const ArtistStudioPage = ({ embedded = false }: ArtistStudioPageProps) => {
   const refreshPublicDropQueries = useCallback(async () => {
     await queryClient.invalidateQueries({ queryKey: ["drops"] });
   }, [queryClient]);
+  const ensureArtistUploadSession = useCallback(async () => {
+    if (!address) {
+      throw new Error("Connect wallet to upload files");
+    }
+
+    if (getRuntimeApiToken()) {
+      return;
+    }
+
+    const session = await establishSecureSession(address);
+    if (!session.apiToken) {
+      throw new Error("Failed to establish a secure upload session");
+    }
+  }, [address]);
+  const withArtistUploadSession = useCallback(
+    async <T,>(task: () => Promise<T>): Promise<T> => {
+      await ensureArtistUploadSession();
+
+      try {
+        return await task();
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        const shouldRefreshSession =
+          message.includes("401") ||
+          message.includes("Missing bearer token") ||
+          message.includes("Invalid or expired token");
+
+        if (!shouldRefreshSession || !address) {
+          throw error;
+        }
+
+        const session = await establishSecureSession(address);
+        if (!session.apiToken) {
+          throw error;
+        }
+
+        return await task();
+      }
+    },
+    [address, ensureArtistUploadSession]
+  );
 
   const fallbackArtist = useMemo(() => resolveArtistForWallet(address), [address]);
   const storedArtistContractAddress = artistProfileRecord?.contract_address || fallbackArtist.contractAddress || null;
@@ -1206,14 +1259,16 @@ const ArtistStudioPage = ({ embedded = false }: ArtistStudioPageProps) => {
 
   // â”€â”€â”€ Handle Contract Deployment Success â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   useEffect(() => {
-    console.log("ðŸ“Š Deployment status:", { 
-      deploymentSuccess, 
-      deployedContractAddress, 
-      hashExists: !!deploymentHash,
-      receiptExists: !!deploymentReceipt,
-      deploymentPending,
-      deploymentError,
-    });
+    if (import.meta.env.DEV && (deploymentPending || deploymentSuccess || deploymentError)) {
+      console.log("Deployment status:", {
+        deploymentSuccess,
+        deployedContractAddress,
+        hashExists: !!deploymentHash,
+        receiptExists: !!deploymentReceipt,
+        deploymentPending,
+        deploymentError,
+      });
+    }
 
     if (!deploymentSuccess) return;
     if (!deployedContractAddress) return;
@@ -1286,11 +1341,11 @@ const ArtistStudioPage = ({ embedded = false }: ArtistStudioPageProps) => {
       let bannerPreview = profile.bannerPreview;
 
       if (pendingImages.avatar) {
-        const avatarCid = await uploadFileToPinata(pendingImages.avatar);
+        const avatarCid = await withArtistUploadSession(() => uploadFileToPinata(pendingImages.avatar!));
         avatarPreview = toGatewayUrl(avatarCid);
       }
       if (pendingImages.banner) {
-        const bannerCid = await uploadFileToPinata(pendingImages.banner);
+        const bannerCid = await withArtistUploadSession(() => uploadFileToPinata(pendingImages.banner!));
         bannerPreview = toGatewayUrl(bannerCid);
       }
 
@@ -1356,15 +1411,15 @@ const ArtistStudioPage = ({ embedded = false }: ArtistStudioPageProps) => {
       const uploadedPieces: ArtistPortfolioItem[] = [];
 
       for (const file of portfolioFiles) {
-        const imageCid = await uploadFileToPinata(file);
+        const imageCid = await withArtistUploadSession(() => uploadFileToPinata(file));
         const imageUri = `ipfs://${imageCid}`;
         const inferredTitle = file.name.replace(/\.[^/.]+$/, "").replace(/[-_]+/g, " ").trim() || `Portfolio ${uploadedPieces.length + 1}`;
-        const metadataUri = await uploadMetadataToPinata({
+        const metadataUri = await withArtistUploadSession(() => uploadMetadataToPinata({
           name: inferredTitle,
           image: imageUri,
           medium: portfolioMedium,
           year: portfolioYear,
-        });
+        }));
 
         uploadedPieces.push({
           id: `portfolio-${Date.now()}-${uploadedPieces.length}`,
