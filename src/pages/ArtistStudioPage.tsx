@@ -1307,7 +1307,8 @@ const ArtistStudioPage = ({ embedded = false }: ArtistStudioPageProps) => {
 
       const nextPortfolio = [...uploadedPieces.reverse(), ...profile.portfolio];
       setProfile((prev) => ({ ...prev, portfolio: nextPortfolio }));
-      saveArtistPortfolio(address, nextPortfolio);
+      await saveArtistPortfolio(address, nextPortfolio);
+      await refetchArtistProfile();
       setPortfolioMedium("Digital");
       setPortfolioYear(String(new Date().getFullYear()));
       setPortfolioFiles([]);
@@ -2334,7 +2335,7 @@ const ArtistStudioPage = ({ embedded = false }: ArtistStudioPageProps) => {
           setDrops(prev => [d, ...prev]);
           syncArtistDropCache({
             id: d.id,
-            artistId: publicArtistId,
+            artistId: artistProfileRecord?.id || publicArtistId,
             title: d.title,
             artist: profile.name || "Studio Artist",
             artistAvatar: profile.avatarPreview || "",
@@ -2361,7 +2362,7 @@ const ArtistStudioPage = ({ embedded = false }: ArtistStudioPageProps) => {
             bought: d.sold,
             status: d.status === "draft" ? "upcoming" : d.status,
           });
-          void refreshPublicDropQueries();
+          void Promise.all([refetchArtistDrops(), refreshPublicDropQueries()]);
         }}
       />
     </div>

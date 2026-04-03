@@ -636,9 +636,8 @@ export async function fetchDropsByArtistFromSupabase(artistId: string) {
     console.log(`📖 Fetching drops for artist: ${artistId}`);
     let { data, error } = await supabase
       .from("drops")
-      .select(getLiveDropsSelectClause())
+      .select(getDropDetailSelectClause())
       .eq("artist_id", artistId)
-      .in("status", [...LIVE_DROP_STATUSES])
       .order("created_at", { ascending: false });
 
     updateDropSchemaModes(error);
@@ -651,9 +650,8 @@ export async function fetchDropsByArtistFromSupabase(artistId: string) {
     if (needsFallback) {
       ({ data, error } = await supabase
         .from("drops")
-        .select(getLiveDropsSelectClause())
+        .select(getDropDetailSelectClause())
         .eq("artist_id", artistId)
-        .in("status", [...LIVE_DROP_STATUSES])
         .order("created_at", { ascending: false }));
 
       if (!error && dropsArtistRelationMode === "detached") {
@@ -670,7 +668,7 @@ export async function fetchDropsByArtistFromSupabase(artistId: string) {
     }
 
     console.log(`✅ Fetched ${data?.length || 0} drops for artist`);
-    return data || [];
+    return (data || []).map((drop) => withDropDefaults(drop));
   } catch (error: any) {
     console.error("❌ fetchDropsByArtistFromSupabase failed:", error.message);
     throw error;
