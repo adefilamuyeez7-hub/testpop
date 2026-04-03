@@ -44,24 +44,17 @@ const FULL_PUBLIC_PRODUCT_SELECT = [
 
 const LEGACY_PUBLIC_PRODUCT_SELECT = [
   "id",
-  "artist_id",
   "creator_wallet",
   "name",
   "description",
   "category",
-  "product_type",
-  "asset_type",
   "price_eth",
   "stock",
   "sold",
   "image_url",
   "image_ipfs_uri",
-  "preview_uri",
-  "is_gated",
-  "nft_link",
   "status",
   "metadata",
-  "metadata_uri",
   "created_at",
   "updated_at",
 ].join(", ");
@@ -71,7 +64,18 @@ function getPublicProductSelectClause() {
 }
 
 function updateProductSchemaMode(error: { message?: string } | null | undefined) {
-  if (isMissingColumnError(error, "products", "contract_product_id")) {
+  const legacyOnlyColumns = [
+    "artist_id",
+    "product_type",
+    "asset_type",
+    "preview_uri",
+    "is_gated",
+    "nft_link",
+    "contract_product_id",
+    "metadata_uri",
+  ];
+
+  if (legacyOnlyColumns.some((column) => isMissingColumnError(error, "products", column))) {
     productColumnsMode = "legacy";
   }
 }
@@ -202,48 +206,80 @@ function updateArtistSchemaMode(error: { message?: string } | null | undefined) 
 }
 
 async function fetchPublicArtistsFromSupabase(artistId?: string) {
-  let query = supabase
-    .from("artists")
-    .select("*")
-    .order("created_at", { ascending: false });
+  const approvedWallets = await fetchApprovedArtistWalletsFromSupabase();
+  const approvedWalletSet = new Set(approvedWallets);
 
-  if (artistId) {
-    query = query.eq("id", artistId);
-  }
+  let statusData: Record<string, any>[] | null = null;
+  let statusError: { message?: string } | null = null;
 
   if (shouldUseNativeArtistStatusFilter()) {
-    query = query.in("status", ["approved", "active"]);
-  }
+    let statusQuery = supabase
+      .from("artists")
+      .select("*")
+      .in("status", ["approved", "active"])
+      .order("created_at", { ascending: false });
 
-  let { data, error } = await query;
-  updateArtistSchemaMode(error);
-
-  if (error && artistsStatusMode === "legacy") {
-    const approvedWallets = await fetchApprovedArtistWalletsFromSupabase();
-    if (approvedWallets.length === 0) {
-      return artistId ? null : [];
+    if (artistId) {
+      statusQuery = statusQuery.eq("id", artistId);
     }
 
-    let legacyQuery = supabase
+    const result = await statusQuery;
+    statusData = result.data;
+    statusError = result.error;
+    updateArtistSchemaMode(statusError);
+
+    if (!statusError) {
+      artistsStatusMode = "native";
+    }
+  }
+
+  let whitelistData: Record<string, any>[] = [];
+  if (approvedWallets.length > 0) {
+    let whitelistQuery = supabase
       .from("artists")
       .select("*")
       .in("wallet", approvedWallets)
       .order("created_at", { ascending: false });
 
     if (artistId) {
-      legacyQuery = legacyQuery.eq("id", artistId);
+      whitelistQuery = whitelistQuery.eq("id", artistId);
     }
 
-    ({ data, error } = await legacyQuery);
-  } else if (!error && shouldUseNativeArtistStatusFilter()) {
-    artistsStatusMode = "native";
+    const { data, error } = await whitelistQuery;
+    if (error) {
+      if (statusError) {
+        throw statusError;
+      }
+      throw error;
+    }
+
+    whitelistData = data || [];
   }
 
-  if (error) {
-    throw error;
+  if (statusError && artistsStatusMode !== "legacy") {
+    throw statusError;
   }
 
-  return artistId ? (data?.[0] ?? null) : (data || []);
+  const merged = [...(statusData || []), ...whitelistData]
+    .filter((artist) => {
+      const normalizedWallet = artist.wallet?.toLowerCase?.();
+      return (
+        artist?.status === "approved" ||
+        artist?.status === "active" ||
+        (normalizedWallet ? approvedWalletSet.has(normalizedWallet) : false)
+      );
+    })
+    .reduce<Record<string, any>[]>((acc, artist) => {
+      const key = artist.id || artist.wallet;
+      if (!key) return acc;
+      if (acc.some((existing) => (existing.id || existing.wallet) === key)) {
+        return acc;
+      }
+      acc.push(artist);
+      return acc;
+    }, []);
+
+  return artistId ? (merged[0] ?? null) : merged;
 }
 
 function shouldUseFullDropColumns() {

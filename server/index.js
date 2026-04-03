@@ -1514,6 +1514,22 @@ app.post("/artists/profile", authRequired, async (req, res) => {
   }
 
   const profile = req.body?.profile || {};
+  const { data: whitelistEntry } = await supabase
+    .from("whitelist")
+    .select("status")
+    .eq("wallet", wallet)
+    .maybeSingle();
+
+  const inferredStatus =
+    profile.status ??
+    (whitelistEntry?.status === "approved"
+      ? "approved"
+      : whitelistEntry?.status === "rejected"
+        ? "rejected"
+        : whitelistEntry?.status === "pending"
+          ? "pending"
+          : undefined);
+
   const payload = {
     wallet,
     name: profile.name ?? null,
@@ -1521,14 +1537,16 @@ app.post("/artists/profile", authRequired, async (req, res) => {
     bio: profile.bio ?? null,
     tag: profile.tag ?? null,
     role: profile.role ?? null,
-    subscription_price: profile.subscription_price ?? null,
-    avatar_url: profile.avatar_url ?? null,
-    banner_url: profile.banner_url ?? null,
-    twitter_url: profile.twitter_url ?? null,
-    instagram_url: profile.instagram_url ?? null,
-    website_url: profile.website_url ?? null,
-    poap_allocation: profile.poap_allocation ?? undefined,
+    status: inferredStatus,
+    subscription_price: profile.subscription_price ?? profile.subscriptionPrice ?? null,
+    avatar_url: profile.avatar_url ?? profile.avatar ?? null,
+    banner_url: profile.banner_url ?? profile.banner ?? null,
+    twitter_url: profile.twitter_url ?? profile.twitterUrl ?? null,
+    instagram_url: profile.instagram_url ?? profile.instagramUrl ?? null,
+    website_url: profile.website_url ?? profile.websiteUrl ?? null,
+    poap_allocation: profile.poap_allocation ?? profile.defaultPoapAllocation ?? undefined,
     portfolio: profile.portfolio ?? undefined,
+    contract_address: profile.contract_address ?? profile.contractAddress ?? undefined,
     updated_at: new Date().toISOString(),
   };
 
@@ -3221,6 +3239,7 @@ const approveArtistImpl = async (req, res) => {
         {
           wallet: normalized,
           name: artistName,
+          status: approve ? (contractAddress ? "active" : "approved") : "rejected",
           bio: artistData.bio || latestApplication?.bio || null,
           tag: artistData.tag || null,
           twitter_url: artistData.twitter_url || latestApplication?.twitter_url || null,

@@ -215,6 +215,7 @@ const CreateDropSheet = ({
   onCreated,
   artistContractAddress,
   defaultPoapAllocation,
+  withArtistUploadSession,
 }: {
   open: boolean;
   onClose: () => void;
@@ -225,6 +226,7 @@ const CreateDropSheet = ({
     bidders: number;
     creators: number;
   };
+  withArtistUploadSession: <T>(task: () => Promise<T>) => Promise<T>;
 }) => {
   const [step, setStep] = useState(0);
   const [contentKind, setContentKind] = useState<DropContentKind>("artwork");
@@ -2458,6 +2460,7 @@ const ArtistStudioPage = ({ embedded = false }: ArtistStudioPageProps) => {
         onClose={() => setShowDropSheet(false)}
         artistContractAddress={artistContractAddress}
         defaultPoapAllocation={profile.defaultPoapAllocation}
+        withArtistUploadSession={withArtistUploadSession}
         onCreated={d => {
           setDrops(prev => [d, ...prev]);
           syncArtistDropCache({
