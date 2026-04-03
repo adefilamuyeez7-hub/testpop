@@ -9,10 +9,11 @@
 CREATE INDEX IF NOT EXISTS idx_subscriptions_artist_subscriber 
 ON subscriptions(artist_id, subscriber_wallet);
 
--- Index for expiry checks (used in renewal and active status queries)
+-- Index for expiry scans used by renewal/cleanup jobs.
+-- Avoid NOW() in index predicates because Postgres requires IMMUTABLE expressions.
 CREATE INDEX IF NOT EXISTS idx_subscriptions_expiry 
-ON subscriptions(artist_id, expiry_time DESC)
-WHERE expiry_time > EXTRACT(EPOCH FROM NOW());
+ON subscriptions(expiry_time DESC)
+WHERE expiry_time IS NOT NULL;
 
 -- Index for subscriber analytics
 CREATE INDEX IF NOT EXISTS idx_subscriptions_artist_expiry
@@ -89,9 +90,21 @@ ON analytics(page, timestamp DESC);
 -- ═══════════════════════════════════════════════════════════════════════════════
 
 -- Already has idx_audit_logs_table_record and idx_audit_logs_changed_at
--- Add index for user tracking
-CREATE INDEX IF NOT EXISTS idx_audit_logs_user_timestamp
-ON audit_logs(changed_by, changed_at DESC);
+-- Add index for user tracking when the newer audit_logs table exists.
+DO $$
+BEGIN
+  IF to_regclass('public.audit_logs') IS NOT NULL THEN
+    EXECUTE 'CREATE INDEX IF NOT EXISTS idx_audit_logs_user_timestamp ON audit_logs(changed_by, changed_at DESC)';
+  END IF;
+END $$;
+
+-- Legacy admin audit table compatibility.
+DO $$
+BEGIN
+  IF to_regclass('public.admin_audit_log') IS NOT NULL THEN
+    EXECUTE 'CREATE INDEX IF NOT EXISTS idx_audit_log_admin_wallet_created_at ON admin_audit_log(admin_wallet, created_at DESC)';
+  END IF;
+END $$;
 
 -- ═══════════════════════════════════════════════════════════════════════════════
 -- FOREIGN KEY INDICES
@@ -116,7 +129,7 @@ ON orders(product_id, status);
 -- Get active subscriptions:
 -- SELECT * FROM subscriptions 
 -- WHERE artist_wallet = ? AND expiry_time > NOW()
--- Index: idx_subscriptions_expiry ✓
+-- Index: idx_subscriptions_artist_expiry ✓
 
 -- Get user's purchases:
 -- SELECT o.* FROM orders o
