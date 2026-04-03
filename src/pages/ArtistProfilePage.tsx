@@ -1,5 +1,5 @@
 ﻿import { useEffect, useMemo, useState } from "react";
-import { ArrowLeft, Flame, Globe, Grid3X3, Loader2, Share2, Users } from "lucide-react";
+import { ArrowLeft, Flame, Globe, Grid3X3, Heart, Loader2, Share2, Users } from "lucide-react";
 import { useNavigate, useParams, Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -15,6 +15,7 @@ import { recordArtistView } from "@/lib/analyticsStore";
 import { useSupabaseArtistById, useSupabaseDropsByArtist } from "@/hooks/useSupabase";
 import { resolveMediaUrl } from "@/lib/pinata";
 import { resolvePortfolioImage } from "@/lib/portfolio";
+import { getRuntimeApiToken } from "@/lib/runtimeSession";
 import {
   createIPInvestment,
   getIPCampaigns,
@@ -101,6 +102,7 @@ const ArtistProfilePage = () => {
     transformedArtist?.wallet,
     transformedArtist?.contractAddress
   );
+  const hasApiSession = Boolean(getRuntimeApiToken());
 
   const {
     subscribe,
@@ -164,7 +166,7 @@ const ArtistProfilePage = () => {
   }, [artistId]);
 
   useEffect(() => {
-    if (!address) {
+    if (!address || !hasApiSession) {
       setInvestorPositions({});
       return;
     }
@@ -188,12 +190,68 @@ const ArtistProfilePage = () => {
     return () => {
       cancelled = true;
     };
-  }, [address]);
+  }, [address, hasApiSession]);
 
   const visibleRaiseCampaigns = useMemo(
     () => raiseCampaigns.filter((campaign) => campaign.status === "active" || campaign.status === "funded"),
     [raiseCampaigns],
   );
+
+  const portfolioPieces = useMemo(
+    () =>
+      transformedArtist
+        ? transformedArtist.portfolio
+            .map((piece) => ({
+              id: piece.id,
+              image: resolvePortfolioImage(piece) || transformedArtist.banner,
+              title: piece.title,
+              medium: piece.medium,
+              year: piece.year,
+            }))
+            .filter((piece) => Boolean(piece.image))
+        : [],
+    [transformedArtist]
+  );
+
+  const featuredPortfolio = useMemo(
+    () => ({
+      id: portfolioPieces[0]?.id || "artist-feature",
+      image: portfolioPieces[0]?.image || transformedArtist?.banner || artistFallbackArt,
+      title: portfolioPieces[0]?.title || `${transformedArtist?.name || "Artist"} portfolio`,
+      medium: portfolioPieces[0]?.medium || transformedArtist?.tag || "artist",
+      year: portfolioPieces[0]?.year || "Now",
+    }),
+    [portfolioPieces, transformedArtist]
+  );
+
+  const portfolioSlides = useMemo(
+    () => (portfolioPieces.length > 0 ? portfolioPieces : [featuredPortfolio]),
+    [featuredPortfolio, portfolioPieces]
+  );
+
+  const publicLinks = useMemo(
+    () =>
+      transformedArtist
+        ? [
+            { label: "X / Twitter", href: transformedArtist.twitterUrl },
+            { label: "Instagram", href: transformedArtist.instagramUrl },
+            { label: "Website", href: transformedArtist.websiteUrl },
+          ].filter((link) => Boolean(link.href))
+        : [],
+    [transformedArtist]
+  );
+  const isArtistOwner = !!address && !!transformedArtist?.wallet && address.toLowerCase() === transformedArtist.wallet.toLowerCase();
+  const featuredDrop = drops[0] ?? null;
+
+  useEffect(() => {
+    setActiveContentTab((current) => {
+      if (current === "portfolio" && portfolioPieces.length > 0) return current;
+      if (current === "drops" && drops.length > 0) return current;
+      if (portfolioPieces.length > 0) return "portfolio";
+      if (drops.length > 0) return "drops";
+      return "portfolio";
+    });
+  }, [drops.length, portfolioPieces.length]);
 
   if (invalidArtistId) {
     return (
@@ -240,43 +298,6 @@ const ArtistProfilePage = () => {
       </div>
     );
   }
-
-  const portfolioPieces = transformedArtist.portfolio
-    .map((piece) => ({
-      id: piece.id,
-      image: resolvePortfolioImage(piece) || transformedArtist.banner,
-      title: piece.title,
-      medium: piece.medium,
-      year: piece.year,
-    }))
-    .filter((piece) => Boolean(piece.image));
-
-  const featuredPortfolio = portfolioPieces[0] || {
-    id: "artist-feature",
-    image: transformedArtist.banner,
-    title: `${transformedArtist.name} portfolio`,
-    medium: transformedArtist.tag,
-    year: "Now",
-  };
-  const portfolioSlides = portfolioPieces.length > 0 ? portfolioPieces : [featuredPortfolio];
-
-  const publicLinks = [
-    { label: "X / Twitter", href: transformedArtist.twitterUrl },
-    { label: "Instagram", href: transformedArtist.instagramUrl },
-    { label: "Website", href: transformedArtist.websiteUrl },
-  ].filter((link) => Boolean(link.href));
-  const isArtistOwner = !!address && address.toLowerCase() === transformedArtist.wallet.toLowerCase();
-  const featuredDrop = drops[0] ?? null;
-
-  useEffect(() => {
-    setActiveContentTab((current) => {
-      if (current === "portfolio" && portfolioPieces.length > 0) return current;
-      if (current === "drops" && drops.length > 0) return current;
-      if (portfolioPieces.length > 0) return "portfolio";
-      if (drops.length > 0) return "drops";
-      return "portfolio";
-    });
-  }, [drops.length, portfolioPieces.length]);
 
   const handleSubscribe = async () => {
     if (!isConnected) {

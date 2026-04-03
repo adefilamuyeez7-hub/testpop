@@ -25,7 +25,7 @@ ON subscriptions(artist_id, expiry_time DESC);
 -- Index for active/live drops queries (used in discovery and filtering)
 CREATE INDEX IF NOT EXISTS idx_drops_active 
 ON drops(artist_id, status, ends_at DESC)
-WHERE status != 'draft';
+WHERE status IN ('live', 'active', 'published');
 
 -- Index for time-based queries (ended drops)
 CREATE INDEX IF NOT EXISTS idx_drops_ended
@@ -44,7 +44,7 @@ WHERE status IN ('published', 'draft');
 -- Index for published products (discovery)
 CREATE INDEX IF NOT EXISTS idx_products_published
 ON products(status, created_at DESC)
-WHERE status = 'published';
+WHERE status IN ('published', 'active');
 
 -- ═══════════════════════════════════════════════════════════════════════════════
 -- ORDERS TABLE INDICES
@@ -132,7 +132,7 @@ ON orders(product_id, status);
 
 -- Get published products for marketplace:
 -- SELECT * FROM products
--- WHERE status = 'published'
+-- WHERE status IN ('published', 'active')
 -- ORDER BY created_at DESC
 -- Index: idx_products_published ✓
 

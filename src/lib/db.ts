@@ -2,6 +2,7 @@
 import { createClient } from "@supabase/supabase-js";
 import { getRuntimeApiToken } from "@/lib/runtimeSession";
 import { SECURE_API_BASE } from "@/lib/apiBase";
+import { PUBLIC_PRODUCT_STATUSES } from "@/lib/catalogVisibility";
 
 // ─── TypeScript Types for Database Models ──────────────────────────────
 export interface Artist {
@@ -73,7 +74,7 @@ export interface Product {
   delivery_uri?: string | null;
   is_gated?: boolean;
   nft_link?: string;
-  status?: "draft" | "published" | "out_of_stock";
+  status?: "draft" | "published" | "active" | "out_of_stock";
   metadata?: Record<string, unknown>;
   contract_product_id?: number | null;
   metadata_uri?: string | null;
@@ -634,11 +635,11 @@ export async function getProducts() {
   try {
     if (!supabaseUrl || !supabaseAnonKey) return [];
 
-    console.log("📖 Fetching published products");
+    console.log("📖 Fetching public products");
     const { data, error } = await supabase
       .from("products")
       .select("*")
-      .in("status", ["published", "active"])
+      .in("status", [...PUBLIC_PRODUCT_STATUSES])
       .order("created_at", { ascending: false });
 
     if (error) {

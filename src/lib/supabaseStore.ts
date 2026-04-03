@@ -6,11 +6,15 @@
 
 import { supabase } from "./db";
 import { toast } from "sonner";
+import {
+  LIVE_DROP_STATUSES,
+  PUBLIC_PRODUCT_STATUSES,
+  normalizePublicDropStatus,
+} from "@/lib/catalogVisibility";
 
 let dropsColumnsMode: "full" | "legacy" | null = null;
 let dropsArtistRelationMode: "embedded" | "detached" | null = null;
 let artistsStatusMode: "native" | "legacy" | null = null;
-const LIVE_DROP_STATUSES = ["live", "active", "published"] as const;
 
 const PUBLIC_PRODUCT_SELECT = [
   "id",
@@ -55,17 +59,7 @@ function isMissingRelationError(
 }
 
 function normalizeDropStatus(status?: string | null) {
-  const normalizedStatus = status?.toLowerCase?.() || "";
-
-  if (LIVE_DROP_STATUSES.includes(normalizedStatus as (typeof LIVE_DROP_STATUSES)[number])) {
-    return "live";
-  }
-
-  if (normalizedStatus === "draft" || normalizedStatus === "upcoming" || normalizedStatus === "pending") {
-    return "draft";
-  }
-
-  return "ended";
+  return normalizePublicDropStatus(status);
 }
 
 function normalizeDropType(type?: string | null) {
@@ -386,11 +380,11 @@ export async function fetchAllProductsFromSupabase() {
 
 export async function fetchPublishedProductsFromSupabase() {
   try {
-    console.log("📖 Fetching published products from Supabase...");
+    console.log("📖 Fetching public products from Supabase...");
     const { data, error } = await supabase
       .from("products")
       .select(PUBLIC_PRODUCT_SELECT)
-      .in("status", ["published", "active"])
+      .in("status", [...PUBLIC_PRODUCT_STATUSES])
       .order("created_at", { ascending: false });
 
     if (error) {
@@ -398,7 +392,7 @@ export async function fetchPublishedProductsFromSupabase() {
       throw error;
     }
 
-    console.log(`✅ Fetched ${data?.length || 0} published products from Supabase`);
+    console.log(`✅ Fetched ${data?.length || 0} public products from Supabase`);
     return data || [];
   } catch (error: any) {
     console.error("❌ fetchPublishedProductsFromSupabase failed:", error.message);
@@ -413,7 +407,7 @@ export async function fetchProductByIdFromSupabase(productId: string) {
       .from("products")
       .select(PUBLIC_PRODUCT_SELECT)
       .eq("id", productId)
-      .in("status", ["published", "active"])
+      .in("status", [...PUBLIC_PRODUCT_STATUSES])
       .maybeSingle();
 
     if (error) {

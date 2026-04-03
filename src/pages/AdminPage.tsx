@@ -35,6 +35,7 @@ import {
 } from "@/lib/db";
 import { createOnchainProduct } from "@/lib/productStoreChain";
 import { extractContractProductId, extractProductMetadataUri, mergeProductMetadata } from "@/lib/productMetadata";
+import { toAdminProductStatus } from "@/lib/catalogVisibility";
 import { useSupabaseAllProducts, useSupabaseAllDrops } from "@/hooks/useSupabase";
 import { useAdminArtists, useApproveArtist, useRejectArtist } from "@/lib/adminApi";
 import FeaturedCreatorsManager from "@/components/admin/FeaturedCreatorsManager";
@@ -833,7 +834,7 @@ const AdminPage = () => {
         priceEth: String(p.price_eth || 0),
         stock: p.stock || 0,
         sold: p.sold || 0,
-        status: (p.status === "published" ? "active" : (p.status as "draft" | "out_of_stock") || "draft") as "active" | "draft" | "out_of_stock",
+        status: toAdminProductStatus(p.status),
         nftLink: p.nft_link || "#",
         uploadedAt: new Date(p.created_at || Date.now()).toLocaleDateString("en-GB", { day: "numeric", month: "short" }),
         description: p.description || "",
@@ -1409,12 +1410,7 @@ const AdminPage = () => {
                           : undefined,
                       stock: created.stock,
                       sold: created.sold,
-                      status:
-                        created.status === "published"
-                          ? "active"
-                          : created.status === "out_of_stock"
-                            ? "out_of_stock"
-                            : "draft",
+                      status: toAdminProductStatus(created.status),
                       nftLink: created.nft_link,
                       uploadedAt: created.created_at
                         ? new Date(created.created_at).toLocaleDateString("en-GB", { day: "numeric", month: "short" })

@@ -4,6 +4,10 @@ import { useLocation, useNavigate } from "react-router-dom";
 import logo from "@/assets/logo.png";
 import { supabase } from "@/lib/db";
 import { resolveMediaUrl } from "@/lib/pinata";
+import {
+  LIVE_DROP_STATUSES,
+  PUBLIC_PRODUCT_STATUSES,
+} from "@/lib/catalogVisibility";
 import { appShellNavItems, isAppShellNavActive } from "./appShellNav";
 import { NavLink } from "./NavLink";
 
@@ -45,13 +49,13 @@ function SearchPanel({ onClose }: { onClose: () => void }) {
             .from("drops")
             .select("id, title, price_eth, image_url, image_ipfs_uri, preview_uri, status")
             .ilike("title", `%${query}%`)
-            .eq("status", "live")
+            .in("status", [...LIVE_DROP_STATUSES])
             .limit(4),
           supabase
             .from("products")
             .select("id, name, price_eth, image_url, image_ipfs_uri")
             .or(`name.ilike.%${query}%,description.ilike.%${query}%`)
-            .in("status", ["published", "active"])
+            .in("status", [...PUBLIC_PRODUCT_STATUSES])
             .limit(4),
         ]);
 

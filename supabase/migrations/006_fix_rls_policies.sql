@@ -129,10 +129,10 @@ USING (
 -- PRODUCTS TABLE - Secure policies
 -- ─────────────────────────────────────────────────────────────────────────────────
 
--- Anyone can READ published products (status = 'published')
+-- Anyone can READ public products, including legacy active rows
 CREATE POLICY "products_read_published" ON products
 FOR SELECT
-USING (status = 'published');
+USING (status IN ('published', 'active'));
 
 -- Creators can READ their own draft products
 CREATE POLICY "products_read_own_draft" ON products

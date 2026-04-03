@@ -1,4 +1,5 @@
-﻿import { useState, useRef, useEffect, useMemo } from "react";
+﻿import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -941,6 +942,7 @@ type ArtistStudioPageProps = {
 };
 
 const ArtistStudioPage = ({ embedded = false }: ArtistStudioPageProps) => {
+  const queryClient = useQueryClient();
   const { address, balance, disconnect } = useWallet();
   const [tab, setTab] = useState("home");
   const [drops, setDrops] = useState<Drop[]>(seedDrops);
@@ -989,6 +991,9 @@ const ArtistStudioPage = ({ embedded = false }: ArtistStudioPageProps) => {
   });
   const { data: artistProfileRecord, refetch: refetchArtistProfile } = useSupabaseArtistByWallet(address);
   const { data: artistDropRecords, refetch: refetchArtistDrops } = useSupabaseDropsByArtist(artistProfileRecord?.id);
+  const refreshPublicDropQueries = useCallback(async () => {
+    await queryClient.invalidateQueries({ queryKey: ["drops"] });
+  }, [queryClient]);
 
   const deployedContractAddress = useGetArtistContract(address); // Fetch deployed contract address
   const deploymentPending = false;
@@ -1434,7 +1439,7 @@ const ArtistStudioPage = ({ embedded = false }: ArtistStudioPageProps) => {
       );
       setEditingCampaignDrop(null);
       toast.success("Campaign details updated.");
-      await refetchArtistDrops();
+      await Promise.all([refetchArtistDrops(), refreshPublicDropQueries()]);
     } catch (error) {
       console.error("Failed to update campaign details:", error);
       toast.error(error instanceof Error ? error.message : "Failed to update campaign details");
@@ -1703,7 +1708,7 @@ const ArtistStudioPage = ({ embedded = false }: ArtistStudioPageProps) => {
                         setDropDeletingId(d.id);
                         await deleteArtistDrop(d.id);
                         setDrops(prev => prev.filter(x => x.id !== d.id));
-                        await refetchArtistDrops();
+                        await Promise.all([refetchArtistDrops(), refreshPublicDropQueries()]);
                         toast.success("Drop removed");
                       } catch (error) {
                         toast.error(error instanceof Error ? error.message : "Failed to remove drop");
@@ -2354,6 +2359,7 @@ const ArtistStudioPage = ({ embedded = false }: ArtistStudioPageProps) => {
             bought: d.sold,
             status: d.status === "draft" ? "upcoming" : d.status,
           });
+          void refreshPublicDropQueries();
         }}
       />
     </div>

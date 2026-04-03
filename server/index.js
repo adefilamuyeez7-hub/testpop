@@ -69,6 +69,8 @@ const DROP_UPDATE_COLUMNS = new Set([
   "ends_at",
   "metadata",
 ]);
+const LIVE_DROP_STATUSES = ["live", "active", "published"];
+const PUBLIC_PRODUCT_STATUSES = ["published", "active"];
 
 const ARTIST_SUBSCRIPTION_ABI = [
   "function getSubscriberCount() view returns (uint256)",
@@ -589,7 +591,7 @@ async function cleanupExpiredDropsAndCampaigns() {
       status: "ended",
       updated_at: nowIso,
     })
-    .eq("status", "live")
+    .in("status", LIVE_DROP_STATUSES)
     .not("ends_at", "is", null)
     .lt("ends_at", nowIso)
     .select("id");
@@ -2208,7 +2210,12 @@ async function createLegacyCheckoutOrders({
       throw new Error("One or more items are no longer available.");
     }
 
-    if (!skipAvailabilityValidation && product.status && product.status !== "published") {
+    const normalizedProductStatus = String(product.status || "").toLowerCase();
+    if (
+      !skipAvailabilityValidation &&
+      normalizedProductStatus &&
+      !PUBLIC_PRODUCT_STATUSES.includes(normalizedProductStatus)
+    ) {
       throw new Error(`${product.name || "Item"} is no longer available.`);
     }
 
