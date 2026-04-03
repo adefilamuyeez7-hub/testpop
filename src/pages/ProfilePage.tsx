@@ -52,7 +52,7 @@ const ProfilePage = () => {
             </div>
             <div>
               <p className="text-lg font-black tracking-tight text-foreground">Collector Hub</p>
-              <p className="text-xs text-muted-foreground">Wallet, library & artist memberships</p>
+              <p className="text-xs text-muted-foreground">Wallet, collection & artist memberships</p>
             </div>
           </div>
 

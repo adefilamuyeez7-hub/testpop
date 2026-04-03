@@ -1,10 +1,9 @@
-import { Flame, Grid3X3, Home, ShoppingBag, User, Users } from "lucide-react";
+import { Flame, Home, ShoppingBag, User, Users } from "lucide-react";
 
 export const appShellNavItems = [
   { icon: Home, label: "Home", path: "/" },
   { icon: Flame, label: "Drops", path: "/drops" },
   { icon: Users, label: "Artists", path: "/artists" },
-  { icon: Grid3X3, label: "Library", path: "/collection" },
   { icon: ShoppingBag, label: "Shop", path: "/products" },
   { icon: User, label: "Profile", path: "/profile" },
 ] as const;
@@ -14,7 +13,6 @@ export function isAppShellNavActive(itemPath: string, pathname: string) {
     pathname === itemPath ||
     (itemPath === "/artists" && pathname.startsWith("/artists/")) ||
     (itemPath === "/drops" && pathname.startsWith("/drops/")) ||
-    (itemPath === "/collection" && pathname.startsWith("/collection")) ||
     (itemPath === "/profile" &&
       (pathname.startsWith("/profile") || pathname.startsWith("/wallet"))) ||
     (itemPath === "/products" &&

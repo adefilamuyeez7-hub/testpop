@@ -66,7 +66,7 @@ export function useMobileWebAppGate() {
   }, []);
 
   const isAppleMobile = useMemo(() => getAppleMobileState(), []);
-  const shouldGateMobileApp = false;
+  const shouldGateMobileApp = isMobile && !isStandalone;
 
   const promptInstall = async () => {
     if (!deferredPrompt) {
