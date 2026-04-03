@@ -200,11 +200,15 @@ export async function verifyWalletChallenge(
   return response.json();
 }
 
-export async function establishSecureSession(wallet: string): Promise<SecureSession> {
+export async function establishSecureSession(
+  wallet: string,
+  options: { forceRefresh?: boolean } = {}
+): Promise<SecureSession> {
   try {
     const normalizedWallet = wallet.trim().toLowerCase();
     const existingSession = getRuntimeSession();
     if (
+      !options.forceRefresh &&
       existingSession.apiToken &&
       existingSession.wallet &&
       existingSession.wallet.trim().toLowerCase() === normalizedWallet &&
@@ -222,6 +226,10 @@ export async function establishSecureSession(wallet: string): Promise<SecureSess
     console.log("🌐 API Base URL:", secureApiBaseUrl);
 
     console.log("📡 Step 1: Requesting wallet challenge...");
+    if (options.forceRefresh) {
+      clearRuntimeSession();
+    }
+
     const challenge = await requestWalletChallenge(wallet);
     console.log("✅ Challenge received:", challenge);
 

@@ -1111,7 +1111,7 @@ const ArtistStudioPage = ({ embedded = false }: ArtistStudioPageProps) => {
           throw error;
         }
 
-        const session = await establishSecureSession(address);
+        const session = await establishSecureSession(address, { forceRefresh: true });
         if (!session.apiToken) {
           throw error;
         }
