@@ -10,6 +10,7 @@ import {
 } from "@/lib/catalogVisibility";
 import { appShellNavItems, isAppShellNavActive } from "./appShellNav";
 import { NavLink } from "./NavLink";
+import ThemeToggle from "./ThemeToggle";
 
 const TopBarWalletControls = lazy(() => import("./wallet/TopBarWalletControls"));
 
@@ -205,6 +206,7 @@ const TopBar = () => {
         <div className="mx-auto flex h-12 max-w-lg items-center justify-between px-3 md:hidden">
           <img src={logo} alt="POPUP" className="h-7 w-7 rounded-sm object-contain" />
           <div className="flex items-center gap-1">
+            <ThemeToggle />
             <button
               onClick={() => {
                 setShowSearch(true);
@@ -249,6 +251,7 @@ const TopBar = () => {
           </nav>
 
           <div className="flex items-center gap-2">
+            <ThemeToggle />
             <button
               onClick={() => {
                 setShowSearch(true);

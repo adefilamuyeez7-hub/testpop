@@ -634,11 +634,35 @@ export async function fetchDropByIdFromSupabase(dropId: string) {
 export async function fetchDropsByArtistFromSupabase(artistId: string) {
   try {
     console.log(`📖 Fetching drops for artist: ${artistId}`);
-    const { data, error } = await supabase
+    let { data, error } = await supabase
       .from("drops")
-      .select("*")
+      .select(getLiveDropsSelectClause())
       .eq("artist_id", artistId)
+      .in("status", [...LIVE_DROP_STATUSES])
       .order("created_at", { ascending: false });
+
+    updateDropSchemaModes(error);
+    if (error && shouldUseEmbeddedArtistRelation()) {
+      dropsArtistRelationMode = "detached";
+    }
+
+    const needsFallback = Boolean(error && (dropsColumnsMode === "legacy" || dropsArtistRelationMode === "detached"));
+
+    if (needsFallback) {
+      ({ data, error } = await supabase
+        .from("drops")
+        .select(getLiveDropsSelectClause())
+        .eq("artist_id", artistId)
+        .in("status", [...LIVE_DROP_STATUSES])
+        .order("created_at", { ascending: false }));
+
+      if (!error && dropsArtistRelationMode === "detached") {
+        data = await attachArtistsToDrops(data || []);
+      }
+    } else {
+      dropsColumnsMode = shouldUseFullDropColumns() ? "full" : "legacy";
+      dropsArtistRelationMode = shouldUseEmbeddedArtistRelation() ? "embedded" : "detached";
+    }
 
     if (error) {
       console.error("❌ Error fetching drops:", error.message);

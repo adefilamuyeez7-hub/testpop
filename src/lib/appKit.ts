@@ -4,6 +4,10 @@ import { networks, projectId, wagmiAdapter } from "@/lib/wagmi";
 let appKitPromise: Promise<ReturnType<typeof createAppKit>> | null = null;
 
 function createPopupAppKit() {
+  const isDarkMode =
+    typeof document !== "undefined" &&
+    document.documentElement.classList.contains("dark");
+
   return createAppKit({
     adapters: [wagmiAdapter],
     networks,
@@ -17,7 +21,7 @@ function createPopupAppKit() {
     features: {
       analytics: false,
     },
-    themeMode: "dark",
+    themeMode: isDarkMode ? "dark" : "light",
   });
 }
 

@@ -1040,7 +1040,7 @@ const Index = () => {
 
       <div className="md:hidden pb-8 pt-3">
         <div className="mb-4">
-          <div className="inline-flex items-center gap-2 rounded-full border border-border bg-white/80 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.28em] text-foreground/70 shadow-sm">
+          <div className="inline-flex items-center gap-2 rounded-full border border-[#bfdbfe] bg-white/85 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.28em] text-[#1d4ed8] shadow-sm dark:border-white/10 dark:bg-slate-950/75 dark:text-sky-200">
             <Sparkles className="h-3 w-3 text-primary" />
             Discover creators
           </div>
@@ -1074,26 +1074,26 @@ const Index = () => {
               onTouchEnd={handleTouchEnd}
             >
               <div
-                className={`relative overflow-hidden rounded-[2.4rem] border border-[#222] bg-[#0f0f10] p-4 text-white shadow-[0_28px_80px_rgba(15,23,42,0.28)] ${isSwiping ? "" : "transition-transform duration-500 ease-out"}`}
+                className={`relative overflow-hidden rounded-[2.4rem] border border-[#93c5fd] bg-[linear-gradient(180deg,#2563eb_0%,#1e3a8a_100%)] p-4 text-white shadow-[0_28px_80px_rgba(37,99,235,0.28)] dark:border-white/10 dark:bg-[linear-gradient(180deg,#0f172a_0%,#172554_100%)] dark:shadow-[0_30px_85px_rgba(15,23,42,0.45)] ${isSwiping ? "" : "transition-transform duration-500 ease-out"}`}
                 style={{
                   transform: `translateX(${swipeOffset}px) rotate(${swipeOffset * 0.02}deg)`,
                 }}
               >
                 <div className="flex items-center justify-between gap-3">
-                  <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-[10px] uppercase tracking-[0.3em] text-white/68">
-                    <Sparkles className="h-3 w-3 text-[#f7b955]" />
+                  <div className="inline-flex items-center gap-2 rounded-full border border-white/20 bg-white/10 px-3 py-1.5 text-[10px] uppercase tracking-[0.3em] text-white/78">
+                    <Sparkles className="h-3 w-3 text-[#bfdbfe]" />
                     Featured Artist
                   </div>
                   <button
                     type="button"
                     aria-label="Save artist"
-                    className="flex h-10 w-10 items-center justify-center rounded-full border border-white/10 bg-white/5 text-white/78"
+                    className="flex h-10 w-10 items-center justify-center rounded-full border border-white/20 bg-white/10 text-white/88"
                   >
                     <Heart className="h-4 w-4" />
                   </button>
                 </div>
 
-                <div className="relative mt-4 min-h-[19rem] overflow-hidden rounded-[2rem] border border-white/8 bg-[#111]">
+                <div className="relative mt-4 min-h-[19rem] overflow-hidden rounded-[2rem] border border-white/12 bg-[#0f172a]">
                   {activeMobilePiece?.image ? (
                     <img
                       src={activeMobilePiece.image}
@@ -1111,24 +1111,24 @@ const Index = () => {
                       decoding="async"
                     />
                   ) : null}
-                  <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(11,11,11,0.28)_0%,rgba(11,11,11,0.72)_55%,rgba(11,11,11,0.96)_100%)]" />
+                  <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(37,99,235,0.18)_0%,rgba(30,58,138,0.72)_55%,rgba(15,23,42,0.96)_100%)] dark:bg-[linear-gradient(180deg,rgba(15,23,42,0.22)_0%,rgba(15,23,42,0.72)_55%,rgba(2,6,23,0.96)_100%)]" />
 
                   <div className="relative flex min-h-[19rem] flex-col justify-between p-4">
                     <div className="flex items-center justify-between gap-3">
-                      <div className="rounded-full border border-white/18 px-4 py-2 text-[10px] uppercase tracking-[0.26em] text-white/75">
+                      <div className="rounded-full border border-white/22 bg-white/10 px-4 py-2 text-[10px] uppercase tracking-[0.26em] text-white/80">
                         {activeMobileArtist.tag || "Other"}
                       </div>
-                      <div className="rounded-full border border-white/12 px-3 py-2 text-[10px] uppercase tracking-[0.26em] text-white/58">
+                      <div className="rounded-full border border-white/16 bg-white/10 px-3 py-2 text-[10px] uppercase tracking-[0.26em] text-white/68">
                         Base
                       </div>
                     </div>
 
-                    <div className="rounded-[1.75rem] border border-white/10 bg-black/18 p-4 backdrop-blur-[1px]">
-                      <p className="text-[11px] uppercase tracking-[0.28em] text-white/56">@ Creator</p>
+                    <div className="rounded-[1.75rem] border border-white/16 bg-white/10 p-4 backdrop-blur-[2px]">
+                      <p className="text-[11px] uppercase tracking-[0.28em] text-white/68">@ Creator</p>
                       <h2 className="mt-3 text-[2.15rem] font-black leading-[0.92] tracking-[-0.05em] text-white">
                         {activeMobileArtist.name}
                       </h2>
-                      <p className="mt-3 text-sm text-white/72">
+                      <p className="mt-3 text-sm text-white/82">
                         {activeMobileArtist.bio || activeMobileArtist.tag || "Featured artist on Base."}
                       </p>
                     </div>
@@ -1146,7 +1146,7 @@ const Index = () => {
                   <Button
                     variant="outline"
                     size="default"
-                    className="h-12 rounded-full border-white/14 bg-white/6 px-4 text-sm font-semibold text-white hover:bg-white/10 hover:text-white"
+                    className="h-12 rounded-full border-white/20 bg-white/10 px-4 text-sm font-semibold text-white hover:bg-white/16 hover:text-white"
                     asChild
                   >
                     <Link to={`/artists/${activeMobileArtist.id}`}>
@@ -1156,7 +1156,7 @@ const Index = () => {
                   <Button
                     variant="outline"
                     size="icon"
-                    className="h-12 w-12 rounded-full border-white/14 bg-white/6 text-white hover:bg-white/10 hover:text-white"
+                    className="h-12 w-12 rounded-full border-white/20 bg-white/10 text-white hover:bg-white/16 hover:text-white"
                     asChild
                   >
                     <Link to={`/artists/${activeMobileArtist.id}`} aria-label="Open artist profile">
@@ -1166,17 +1166,17 @@ const Index = () => {
                 </div>
 
                 <div className="mt-3 grid grid-cols-3 gap-2">
-                  <div className="rounded-[1.4rem] border border-white/10 bg-white/5 p-3">
+                  <div className="rounded-[1.4rem] border border-white/16 bg-white/10 p-3">
                     <p className="text-2xl font-bold leading-none">{featuredArtists.length}</p>
-                    <p className="mt-2 text-[10px] uppercase tracking-[0.24em] text-white/54">Creators</p>
+                    <p className="mt-2 text-[10px] uppercase tracking-[0.24em] text-white/68">Creators</p>
                   </div>
-                  <div className="rounded-[1.4rem] border border-white/10 bg-white/5 p-3">
+                  <div className="rounded-[1.4rem] border border-white/16 bg-white/10 p-3">
                     <p className="truncate text-sm font-semibold capitalize">{activeMobileArtist.tag || "Other"}</p>
-                    <p className="mt-2 text-[10px] uppercase tracking-[0.24em] text-white/54">Discipline</p>
+                    <p className="mt-2 text-[10px] uppercase tracking-[0.24em] text-white/68">Discipline</p>
                   </div>
-                  <div className="rounded-[1.4rem] border border-white/10 bg-white/5 p-3">
+                  <div className="rounded-[1.4rem] border border-white/16 bg-white/10 p-3">
                     <p className="text-sm font-semibold">Base</p>
-                    <p className="mt-2 text-[10px] uppercase tracking-[0.24em] text-white/54">Network</p>
+                    <p className="mt-2 text-[10px] uppercase tracking-[0.24em] text-white/68">Network</p>
                   </div>
                 </div>
               </div>
@@ -1186,7 +1186,7 @@ const Index = () => {
               <div className="mt-5 flex items-center justify-center gap-4">
                 <button
                   onClick={prevCard}
-                  className="flex h-11 w-11 items-center justify-center rounded-full bg-white text-foreground shadow-[0_12px_30px_rgba(15,23,42,0.10)]"
+                  className="flex h-11 w-11 items-center justify-center rounded-full bg-white text-[#1d4ed8] shadow-[0_12px_30px_rgba(37,99,235,0.16)] dark:bg-slate-950 dark:text-sky-200 dark:shadow-[0_16px_32px_rgba(15,23,42,0.35)]"
                 >
                   <ArrowRight className="h-4 w-4 rotate-180" />
                 </button>
@@ -1197,14 +1197,14 @@ const Index = () => {
                       key={artist.id}
                       onClick={() => setCurrentCard(index)}
                       className={`h-2 rounded-full transition-all duration-300 ${
-                        index === currentCard ? "w-6 bg-foreground" : "w-2 bg-foreground/20"
+                        index === currentCard ? "w-6 bg-[#1d4ed8] dark:bg-sky-300" : "w-2 bg-[#1d4ed8]/20 dark:bg-white/20"
                       }`}
                     />
                   ))}
                 </div>
                 <button
                   onClick={nextCard}
-                  className="flex h-11 w-11 items-center justify-center rounded-full bg-white text-foreground shadow-[0_12px_30px_rgba(15,23,42,0.10)]"
+                  className="flex h-11 w-11 items-center justify-center rounded-full bg-white text-[#1d4ed8] shadow-[0_12px_30px_rgba(37,99,235,0.16)] dark:bg-slate-950 dark:text-sky-200 dark:shadow-[0_16px_32px_rgba(15,23,42,0.35)]"
                 >
                   <ArrowRight className="h-4 w-4" />
                 </button>
