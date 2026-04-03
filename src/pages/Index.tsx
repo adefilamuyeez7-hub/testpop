@@ -537,6 +537,7 @@ const Index = () => {
   const visibleCards = getVisibleCards();
   const visibleDropCards = getVisibleDropCards();
   const desktopLiveDrops = liveDrops.slice(0, 3);
+  const activeMobileArtist = visibleCards[0] ?? null;
   const getPortfolioImage = (piece: any) => resolvePortfolioImage(piece) || "";
   const getArtistFeaturedPiece = (artist: any) => {
     const featuredPiece = Array.isArray(artist?.portfolio) ? artist.portfolio[0] : null;
@@ -547,6 +548,7 @@ const Index = () => {
       year: featuredPiece?.year || "Now",
     };
   };
+  const activeMobilePiece = activeMobileArtist ? getArtistFeaturedPiece(activeMobileArtist) : null;
   const getArtistPreviewPieces = (artist: any) => {
     const portfolioPieces = Array.isArray(artist?.portfolio) ? artist.portfolio.slice(0, 3) : [];
     const resolvedPieces = portfolioPieces
@@ -987,165 +989,176 @@ const Index = () => {
         )}
       </div>
 
-      <div className="md:hidden">
-      {/* Hero */}
-      <section className="py-4">
-        <h1 className="text-3xl font-bold text-foreground">Collect. Support. Own.</h1>
-        <p className="text-sm text-muted-foreground font-body mt-1">
-          Art drops, POAP campaigns & IP investment — all on-chain.
-        </p>
-      </section>
-
-      {/* Live Drops — 2-card carousel */}
-      {!dropsLoading && !dropsError && liveDrops.length > 0 && (
-        <section className="py-6">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-semibold">Live Drops</h2>
-            <Link to="/drops" className="text-xs text-primary font-medium">See all</Link>
+      <div className="md:hidden pb-8 pt-3">
+        {loading ? (
+          <div className="flex min-h-[60vh] items-center justify-center">
+            <Loader2 className="h-8 w-8 animate-spin text-primary" />
           </div>
-
-          {/* 2-Card Carousel */}
-          <div
-            className="relative w-full touch-pan-y"
-            onTouchStart={handleDropTouchStart}
-            onTouchMove={handleDropTouchMove}
-            onTouchEnd={handleDropTouchEnd}
-          >
-            <div className="grid grid-cols-2 gap-3">
-              {visibleDropCards.map((drop, i) => {
-                const isLeft = i === 0;
-                const swipeX = isLeft ? dropSwipeOffset : 0;
-                const swipeOpacity = isLeft ? Math.max(0.5, 1 - Math.abs(dropSwipeOffset) / 300) : 1;
-
-                return (
-                  <div
-                    key={`${drop.id}-${i}`}
-                    className={`${isDropSwiping && isLeft ? '' : 'transition-all duration-500 ease-out'}`}
-                    style={{
-                      transform: flippingDropId === drop.id
-                        ? "translateX(0) rotateY(180deg) scale(0.88)"
-                        : `translateX(${swipeX}px)`,
-                      opacity: flippingDropId === drop.id ? 0.2 : swipeOpacity,
-                    }}
-                  >
-                    <div className="rounded-2xl bg-card shadow-card overflow-hidden transition-all duration-700 [transform-style:preserve-3d]">
-                      {/* Drop Image */}
-                      <div className="relative aspect-square overflow-hidden">
-                        {drop.assetType === "image" && drop.image ? (
-                          <img
-                            src={drop.image}
-                            alt={drop.title}
-                            className="w-full h-full object-cover"
-                          />
-                        ) : drop.assetType === "video" && (drop.previewUri || drop.image) ? (
-                          <img
-                            src={drop.previewUri || drop.image}
-                            alt={drop.title}
-                            className="w-full h-full object-cover"
-                          />
-                        ) : (
-                          <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-slate-900 via-slate-700 to-slate-500 text-white text-xs font-semibold uppercase tracking-[0.2em]">
-                            {drop.assetType || "digital"}
-                          </div>
-                        )}
-                        <Badge className="absolute top-2 left-2 bg-background/80 text-foreground backdrop-blur-sm text-[10px]">
-                          {drop.type === "drop" ? "collect" : drop.type}
-                        </Badge>
-                        {drop.status === "live" && (
-                          <span className="absolute top-2 right-2 h-2.5 w-2.5 rounded-full bg-primary animate-pulse" />
-                        )}
-                      </div>
-
-                      {/* Drop Info */}
-                      <div className="p-3">
-                        <p className="font-semibold text-sm truncate text-card-foreground">{drop.title}</p>
-                        <p className="text-xs text-muted-foreground truncate">{drop.artist}</p>
-                        <div className="flex items-center justify-between mt-2">
-                          <span className="text-sm font-bold text-primary">{drop.priceEth} ETH</span>
-                          {drop.status === "live" && (
-                            <span className="text-[10px] text-muted-foreground flex items-center gap-0.5">
-                              <Clock className="h-3 w-3" /> {drop.endsIn}
-                            </span>
-                          )}
-                        </div>
-
-                        {/* Collect/Bid Buttons */}
-                        <div className="flex gap-2 mt-3">
-                          {drop.type === "auction" ? (
-                            <Button
-                              size="sm"
-                              onClick={() => handleBidOnDrop(drop)}
-                              disabled={isBidding || biddingDropId === drop.id}
-                              className="flex-1 h-8 rounded-full gradient-primary text-primary-foreground font-semibold text-xs"
-                            >
-                              {biddingDropId === drop.id ? (
-                                <><Loader2 className="h-3 w-3 mr-1.5 animate-spin" /> Bidding...</>
-                              ) : (
-                                <><Gavel className="h-3 w-3 mr-1" /> Bid</>
-                              )}
-                            </Button>
-                          ) : drop.type === "campaign" ? (
-                            <Button
-                              size="sm"
-                              onClick={() => navigate(`/drops/${drop.id}`)}
-                              className="flex-1 h-8 rounded-full gradient-primary text-primary-foreground font-semibold text-xs"
-                            >
-                              View
-                            </Button>
-                          ) : (
-                            <Button
-                              size="sm"
-                              onClick={() => handleCollectDrop(drop)}
-                              disabled={isMintingArtist || mintingDropId === drop.id}
-                              className="flex-1 h-8 rounded-full gradient-primary text-primary-foreground font-semibold text-xs"
-                            >
-                              {mintingDropId === drop.id ? (
-                                <><Loader2 className="h-3 w-3 mr-1.5 animate-spin" /> Collecting...</>
-                              ) : (
-                                <><ShoppingCart className="h-3 w-3 mr-1" /> Collect</>
-                              )}
-                            </Button>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
+        ) : error ? (
+          <div className="flex min-h-[60vh] items-center justify-center">
+            <div className="rounded-[2rem] border border-[#fecaca] bg-white/80 p-6 text-center shadow-sm">
+              <p className="text-sm text-red-500">{error.message}</p>
             </div>
           </div>
-
-          {/* Slide Controls */}
-          {liveDrops.length > 2 && (
-            <div className="flex items-center justify-center gap-4 py-2 mt-3">
-              <button
-                onClick={prevDropCard}
-                className="h-10 w-10 rounded-full bg-secondary flex items-center justify-center hover:bg-secondary/80 transition-colors"
+        ) : !activeMobileArtist ? (
+          <div className="flex min-h-[60vh] items-center justify-center">
+            <div className="w-full rounded-[2.2rem] border border-dashed border-border bg-card/70 p-8 text-center">
+              <Sparkles className="mx-auto h-10 w-10 text-primary" />
+              <p className="mt-3 text-lg font-semibold text-foreground">No featured artists yet</p>
+              <p className="mt-2 text-sm text-muted-foreground">
+                Artists will appear here once approved creators publish their public profiles.
+              </p>
+            </div>
+          </div>
+        ) : (
+          <>
+            <section
+              className="touch-pan-y"
+              onTouchStart={handleTouchStart}
+              onTouchMove={handleTouchMove}
+              onTouchEnd={handleTouchEnd}
+            >
+              <div
+                className={`relative overflow-hidden rounded-[2.4rem] border border-[#222] bg-[#0f0f10] p-4 text-white shadow-[0_28px_80px_rgba(15,23,42,0.28)] ${isSwiping ? "" : "transition-transform duration-500 ease-out"}`}
+                style={{
+                  transform: `translateX(${swipeOffset}px) rotate(${swipeOffset * 0.02}deg)`,
+                }}
               >
-                <ArrowRight className="h-4 w-4 text-secondary-foreground rotate-180" />
-              </button>
-              <div className="flex gap-1.5">
-                {Array.from({ length: Math.max(1, liveDrops.length - 1) }).map((_, i) => (
+                <div className="flex items-center justify-between gap-3">
+                  <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-[10px] uppercase tracking-[0.3em] text-white/68">
+                    <Sparkles className="h-3 w-3 text-[#f7b955]" />
+                    Featured Artist
+                  </div>
                   <button
                     type="button"
-                    key={i}
-                    onClick={() => setCurrentDropCard(i)}
-                    className={`h-2 rounded-full transition-all duration-300 ${
-                      i === currentDropCard ? "w-7 bg-primary" : "w-2 bg-border"
-                    }`}
+                    aria-label="Save artist"
+                    className="flex h-10 w-10 items-center justify-center rounded-full border border-white/10 bg-white/5 text-white/78"
+                  >
+                    <Heart className="h-4 w-4" />
+                  </button>
+                </div>
+
+                <div className="relative mt-4 min-h-[19rem] overflow-hidden rounded-[2rem] border border-white/8 bg-[#111]">
+                  {activeMobilePiece?.image ? (
+                    <img
+                      src={activeMobilePiece.image}
+                      alt={activeMobilePiece.title}
+                      className="absolute inset-0 h-full w-full object-cover opacity-[0.22]"
+                    />
+                  ) : activeMobileArtist.cover ? (
+                    <img
+                      src={activeMobileArtist.cover}
+                      alt={activeMobileArtist.name}
+                      className="absolute inset-0 h-full w-full object-cover opacity-[0.22]"
+                    />
+                  ) : null}
+                  <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(11,11,11,0.28)_0%,rgba(11,11,11,0.72)_55%,rgba(11,11,11,0.96)_100%)]" />
+
+                  <div className="relative flex min-h-[19rem] flex-col justify-between p-4">
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="rounded-full border border-white/18 px-4 py-2 text-[10px] uppercase tracking-[0.26em] text-white/75">
+                        {activeMobileArtist.tag || "Other"}
+                      </div>
+                      <div className="rounded-full border border-white/12 px-3 py-2 text-[10px] uppercase tracking-[0.26em] text-white/58">
+                        Base
+                      </div>
+                    </div>
+
+                    <div className="rounded-[1.75rem] border border-white/10 bg-black/18 p-4 backdrop-blur-[1px]">
+                      <p className="text-[11px] uppercase tracking-[0.28em] text-white/56">@ Creator</p>
+                      <h2 className="mt-3 text-[2.15rem] font-black leading-[0.92] tracking-[-0.05em] text-white">
+                        {activeMobileArtist.name}
+                      </h2>
+                      <p className="mt-3 text-sm text-white/72">
+                        {activeMobileArtist.bio || activeMobileArtist.tag || "Featured artist on Base."}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="mt-4 grid grid-cols-[minmax(0,1fr)_auto_48px] gap-2">
+                  <SubscribeButtonWrapper
+                    artist={activeMobileArtist}
+                    isConnected={isConnected}
+                    connectWallet={connectWallet}
+                    address={address}
+                    toast={toast}
                   />
-                ))}
+                  <Button
+                    variant="outline"
+                    size="default"
+                    className="h-12 rounded-full border-white/14 bg-white/6 px-4 text-sm font-semibold text-white hover:bg-white/10 hover:text-white"
+                    asChild
+                  >
+                    <Link to={`/artists/${activeMobileArtist.id}`}>
+                      <User className="mr-1.5 h-4 w-4" /> Profile
+                    </Link>
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    className="h-12 w-12 rounded-full border-white/14 bg-white/6 text-white hover:bg-white/10 hover:text-white"
+                    asChild
+                  >
+                    <Link to={`/artists/${activeMobileArtist.id}`} aria-label="Open artist profile">
+                      <ArrowRight className="h-4 w-4" />
+                    </Link>
+                  </Button>
+                </div>
+
+                <div className="mt-3 grid grid-cols-3 gap-2">
+                  <div className="rounded-[1.4rem] border border-white/10 bg-white/5 p-3">
+                    <p className="text-2xl font-bold leading-none">{featuredArtists.length}</p>
+                    <p className="mt-2 text-[10px] uppercase tracking-[0.24em] text-white/54">Creators</p>
+                  </div>
+                  <div className="rounded-[1.4rem] border border-white/10 bg-white/5 p-3">
+                    <p className="truncate text-sm font-semibold capitalize">{activeMobileArtist.tag || "Other"}</p>
+                    <p className="mt-2 text-[10px] uppercase tracking-[0.24em] text-white/54">Discipline</p>
+                  </div>
+                  <div className="rounded-[1.4rem] border border-white/10 bg-white/5 p-3">
+                    <p className="text-sm font-semibold">Base</p>
+                    <p className="mt-2 text-[10px] uppercase tracking-[0.24em] text-white/54">Network</p>
+                  </div>
+                </div>
               </div>
-              <button
-                onClick={nextDropCard}
-                className="h-10 w-10 rounded-full bg-secondary flex items-center justify-center hover:bg-secondary/80 transition-colors"
-              >
-                <ArrowRight className="h-4 w-4 text-secondary-foreground" />
-              </button>
-            </div>
-          )}
-        </section>
-      )}
+            </section>
+
+            {featuredArtists.length > 1 && (
+              <div className="mt-5 flex items-center justify-center gap-4">
+                <button
+                  onClick={prevCard}
+                  className="flex h-11 w-11 items-center justify-center rounded-full bg-white text-foreground shadow-[0_12px_30px_rgba(15,23,42,0.10)]"
+                >
+                  <ArrowRight className="h-4 w-4 rotate-180" />
+                </button>
+                <div className="flex items-center gap-1.5">
+                  {featuredArtists.map((artist, index) => (
+                    <button
+                      type="button"
+                      key={artist.id}
+                      onClick={() => setCurrentCard(index)}
+                      className={`h-2 rounded-full transition-all duration-300 ${
+                        index === currentCard ? "w-6 bg-foreground" : "w-2 bg-foreground/20"
+                      }`}
+                    />
+                  ))}
+                </div>
+                <button
+                  onClick={nextCard}
+                  className="flex h-11 w-11 items-center justify-center rounded-full bg-white text-foreground shadow-[0_12px_30px_rgba(15,23,42,0.10)]"
+                >
+                  <ArrowRight className="h-4 w-4" />
+                </button>
+              </div>
+            )}
+          </>
+        )}
+
+        {false && (
+          <>
+          Art drops, POAP campaigns & IP investment — all on-chain.
+      {/* Live Drops — 2-card carousel */}
+
 
       {/* Featured Artists — Card Deck */}
       <section className="py-6">
@@ -1366,6 +1379,8 @@ const Index = () => {
 
       {/* Spacer */}
       <div className="h-8" />
+          </>
+        )}
       </div>
     </div>
   );
