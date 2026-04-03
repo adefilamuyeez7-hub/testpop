@@ -588,6 +588,18 @@ const Index = () => {
   const desktopLiveDrops = liveDrops.slice(0, 3);
   const activeMobileArtist = visibleCards[0] ?? null;
   const getPortfolioImage = (piece: any) => resolvePortfolioImage(piece) || "";
+  const getArtistPortfolioPieces = (artist: any) =>
+    Array.isArray(artist?.portfolio)
+      ? artist.portfolio
+          .map((piece: any, index: number) => ({
+            id: piece?.id || `${artist?.id || "artist"}-portfolio-${index}`,
+            image: getPortfolioImage(piece),
+            title: piece?.title || `${artist?.name || "Artist"} feature`,
+            medium: piece?.medium || "Digital artwork",
+            year: piece?.year || "Now",
+          }))
+          .filter((piece: any) => Boolean(piece.image))
+      : [];
   const getArtistFeaturedPiece = (artist: any) => {
     const featuredPiece = Array.isArray(artist?.portfolio) ? artist.portfolio[0] : null;
     return {
@@ -597,18 +609,20 @@ const Index = () => {
       year: featuredPiece?.year || "Now",
     };
   };
-  const activeMobilePiece = activeMobileArtist ? getArtistFeaturedPiece(activeMobileArtist) : null;
+  const getArtistMobileHeroPiece = (artist: any) => {
+    const pieces = getArtistPortfolioPieces(artist);
+    if (pieces.length > 0) {
+      const artistSeed = String(artist?.id || artist?.name || "artist")
+        .split("")
+        .reduce((sum, character) => sum + character.charCodeAt(0), 0);
+      return pieces[(artistSeed + currentCard) % pieces.length];
+    }
+
+    return getArtistFeaturedPiece(artist);
+  };
+  const activeMobilePiece = activeMobileArtist ? getArtistMobileHeroPiece(activeMobileArtist) : null;
   const getArtistPreviewPieces = (artist: any) => {
-    const portfolioPieces = Array.isArray(artist?.portfolio) ? artist.portfolio.slice(0, 3) : [];
-    const resolvedPieces = portfolioPieces
-      .map((piece: any, index: number) => ({
-        id: piece?.id || `${artist?.id || "artist"}-${index}`,
-        image: getPortfolioImage(piece),
-        title: piece?.title || `Portfolio ${index + 1}`,
-        medium: piece?.medium || "Digital artwork",
-        year: piece?.year || "Now",
-      }))
-      .filter((piece: any) => Boolean(piece.image));
+    const resolvedPieces = getArtistPortfolioPieces(artist).slice(0, 3);
 
     if (resolvedPieces.length > 0) {
       return resolvedPieces;
@@ -1093,12 +1107,12 @@ const Index = () => {
                   </button>
                 </div>
 
-                <div className="relative mt-4 min-h-[19rem] overflow-hidden rounded-[2rem] border border-white/12 bg-[#0f172a]">
+                <div className="relative mt-4 min-h-[33rem] overflow-hidden rounded-[2rem] border border-white/12 bg-[#0f172a]">
                   {activeMobilePiece?.image ? (
                     <img
                       src={activeMobilePiece.image}
                       alt={activeMobilePiece.title}
-                      className="absolute inset-0 h-full w-full object-cover opacity-[0.22]"
+                      className="absolute inset-0 h-full w-full object-cover opacity-[0.56]"
                       loading="eager"
                       decoding="async"
                     />
@@ -1106,14 +1120,14 @@ const Index = () => {
                     <img
                       src={activeMobileArtist.cover}
                       alt={activeMobileArtist.name}
-                      className="absolute inset-0 h-full w-full object-cover opacity-[0.22]"
+                      className="absolute inset-0 h-full w-full object-cover opacity-[0.56]"
                       loading="eager"
                       decoding="async"
                     />
                   ) : null}
-                  <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(37,99,235,0.18)_0%,rgba(30,58,138,0.72)_55%,rgba(15,23,42,0.96)_100%)] dark:bg-[linear-gradient(180deg,rgba(15,23,42,0.22)_0%,rgba(15,23,42,0.72)_55%,rgba(2,6,23,0.96)_100%)]" />
+                  <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(15,23,42,0.1)_0%,rgba(37,99,235,0.16)_24%,rgba(15,23,42,0.28)_52%,rgba(15,23,42,0.78)_76%,rgba(15,23,42,0.97)_100%)] dark:bg-[linear-gradient(180deg,rgba(2,6,23,0.14)_0%,rgba(15,23,42,0.22)_26%,rgba(2,6,23,0.38)_52%,rgba(2,6,23,0.82)_76%,rgba(2,6,23,0.99)_100%)]" />
 
-                  <div className="relative flex min-h-[19rem] flex-col justify-between p-4">
+                  <div className="relative flex min-h-[33rem] flex-col justify-between p-4">
                     <div className="flex items-center justify-between gap-3">
                       <div className="rounded-full border border-white/22 bg-white/10 px-4 py-2 text-[10px] uppercase tracking-[0.26em] text-white/80">
                         {activeMobileArtist.tag || "Other"}
@@ -1123,60 +1137,55 @@ const Index = () => {
                       </div>
                     </div>
 
-                    <div className="rounded-[1.75rem] border border-white/16 bg-white/10 p-4 backdrop-blur-[2px]">
-                      <p className="text-[11px] uppercase tracking-[0.28em] text-white/68">@ Creator</p>
-                      <h2 className="mt-3 text-[2.15rem] font-black leading-[0.92] tracking-[-0.05em] text-white">
-                        {activeMobileArtist.name}
-                      </h2>
-                      <p className="mt-3 text-sm text-white/82">
-                        {activeMobileArtist.bio || activeMobileArtist.tag || "Featured artist on Base."}
-                      </p>
+                    <div className="space-y-3">
+                      <div className="max-w-[92%] rounded-[1.9rem] border border-white/18 bg-[linear-gradient(180deg,rgba(15,23,42,0.16)_0%,rgba(15,23,42,0.78)_100%)] p-4 backdrop-blur-md">
+                        <p className="text-[11px] uppercase tracking-[0.28em] text-white/68">@ Creator</p>
+                        <h2 className="mt-3 text-[2.1rem] font-black leading-[0.92] tracking-[-0.05em] text-white">
+                          {activeMobileArtist.name}
+                        </h2>
+                        <p className="mt-2 text-sm text-white/86">
+                          {activeMobileArtist.tag || "Featured artist on Base"}
+                        </p>
+                        <p className="mt-3 line-clamp-2 text-sm text-white/72">
+                          {activeMobileArtist.bio || activeMobilePiece?.title || "Explore a rotating portfolio moment from this creator."}
+                        </p>
+                        <div className="mt-4 inline-flex rounded-full border border-white/16 bg-white/10 px-3 py-1.5 text-[10px] uppercase tracking-[0.24em] text-white/72">
+                          {activeMobilePiece?.medium || "Portfolio"}
+                        </div>
+                      </div>
+
+                      <div className="rounded-[1.65rem] border border-white/14 bg-[linear-gradient(180deg,rgba(37,99,235,0.26)_0%,rgba(15,23,42,0.48)_100%)] p-2 backdrop-blur-md">
+                        <div className="grid grid-cols-[minmax(0,1fr)_auto_48px] gap-2">
+                          <SubscribeButtonWrapper
+                            artist={activeMobileArtist}
+                            isConnected={isConnected}
+                            connectWallet={connectWallet}
+                            address={address}
+                            toast={toast}
+                          />
+                          <Button
+                            variant="outline"
+                            size="default"
+                            className="h-12 rounded-full border-white/20 bg-white/10 px-4 text-sm font-semibold text-white hover:bg-white/16 hover:text-white"
+                            asChild
+                          >
+                            <Link to={`/artists/${activeMobileArtist.id}`}>
+                              <User className="mr-1.5 h-4 w-4" /> Profile
+                            </Link>
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="icon"
+                            className="h-12 w-12 rounded-full border-white/20 bg-white/10 text-white hover:bg-white/16 hover:text-white"
+                            asChild
+                          >
+                            <Link to={`/artists/${activeMobileArtist.id}`} aria-label="Open artist profile">
+                              <ArrowRight className="h-4 w-4" />
+                            </Link>
+                          </Button>
+                        </div>
+                      </div>
                     </div>
-                  </div>
-                </div>
-
-                <div className="mt-4 grid grid-cols-[minmax(0,1fr)_auto_48px] gap-2">
-                  <SubscribeButtonWrapper
-                    artist={activeMobileArtist}
-                    isConnected={isConnected}
-                    connectWallet={connectWallet}
-                    address={address}
-                    toast={toast}
-                  />
-                  <Button
-                    variant="outline"
-                    size="default"
-                    className="h-12 rounded-full border-white/20 bg-white/10 px-4 text-sm font-semibold text-white hover:bg-white/16 hover:text-white"
-                    asChild
-                  >
-                    <Link to={`/artists/${activeMobileArtist.id}`}>
-                      <User className="mr-1.5 h-4 w-4" /> Profile
-                    </Link>
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="icon"
-                    className="h-12 w-12 rounded-full border-white/20 bg-white/10 text-white hover:bg-white/16 hover:text-white"
-                    asChild
-                  >
-                    <Link to={`/artists/${activeMobileArtist.id}`} aria-label="Open artist profile">
-                      <ArrowRight className="h-4 w-4" />
-                    </Link>
-                  </Button>
-                </div>
-
-                <div className="mt-3 grid grid-cols-3 gap-2">
-                  <div className="rounded-[1.4rem] border border-white/16 bg-white/10 p-3">
-                    <p className="text-2xl font-bold leading-none">{featuredArtists.length}</p>
-                    <p className="mt-2 text-[10px] uppercase tracking-[0.24em] text-white/68">Creators</p>
-                  </div>
-                  <div className="rounded-[1.4rem] border border-white/16 bg-white/10 p-3">
-                    <p className="truncate text-sm font-semibold capitalize">{activeMobileArtist.tag || "Other"}</p>
-                    <p className="mt-2 text-[10px] uppercase tracking-[0.24em] text-white/68">Discipline</p>
-                  </div>
-                  <div className="rounded-[1.4rem] border border-white/16 bg-white/10 p-3">
-                    <p className="text-sm font-semibold">Base</p>
-                    <p className="mt-2 text-[10px] uppercase tracking-[0.24em] text-white/68">Network</p>
                   </div>
                 </div>
               </div>
