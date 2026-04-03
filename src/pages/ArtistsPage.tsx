@@ -279,39 +279,37 @@ const ArtistsPage = () => {
   }
 
   return (
-    <div className="bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.24),transparent_28%),linear-gradient(180deg,#cbc5b8_0%,#918a80_24%,#4f4b48_100%)] md:bg-[radial-gradient(circle_at_top,rgba(96,165,250,0.16),transparent_30%),linear-gradient(180deg,#f7fbff_0%,#edf5ff_100%)]">
+    <div className="bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.88),transparent_26%),linear-gradient(180deg,#fbf7ef_0%,#f5efe3_34%,#e8eef9_100%)] md:bg-[radial-gradient(circle_at_top,rgba(96,165,250,0.16),transparent_30%),linear-gradient(180deg,#f7fbff_0%,#edf5ff_100%)]">
       <div className="mx-auto max-w-6xl px-4 py-4 md:px-0 md:py-0">
         <div className="md:hidden">
           <div className="space-y-4 pb-6">
-            <div className="rounded-[2rem] border border-white/12 bg-[linear-gradient(180deg,rgba(34,32,30,0.82)_0%,rgba(18,18,18,0.92)_100%)] p-4 text-white shadow-[0_30px_90px_rgba(15,23,42,0.34)] backdrop-blur-xl">
-              <div className="flex items-start justify-between gap-4">
-                <div>
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.3em] text-white/55">Artist Radar</p>
-                  <h1 className="mt-2 text-[2rem] font-black leading-none tracking-[-0.05em]">
-                    Pick your next future icon.
-                  </h1>
-                  <p className="mt-3 max-w-xs text-sm leading-6 text-white/68">
-                    Follow creators early, unlock drops, and track the artists building culture on Base.
-                  </p>
-                </div>
-                <div className="rounded-full border border-white/10 bg-white/10 px-3 py-1.5 text-[11px] font-medium text-white/78">
-                  {creatorDeckCountLabel}
-                </div>
+            <div className="flex items-start justify-between gap-3 px-1 pt-1">
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-slate-500">Artists</p>
+                <h1 className="mt-2 text-[1.9rem] font-black leading-none tracking-[-0.05em] text-slate-900">
+                  Pick your next future icon.
+                </h1>
+                <p className="mt-3 max-w-xs text-sm leading-6 text-slate-600">
+                  Follow creators early, unlock drops, and track the artists building culture on Base.
+                </p>
+              </div>
+              <div className="rounded-full border border-slate-200/80 bg-white/80 px-3 py-1.5 text-[11px] font-medium text-slate-600 shadow-sm backdrop-blur-sm">
+                {creatorDeckCountLabel}
               </div>
             </div>
 
             {artists.length === 0 ? (
-              <div className="rounded-[2rem] border border-white/14 bg-[linear-gradient(180deg,rgba(34,32,30,0.78)_0%,rgba(20,20,20,0.9)_100%)] p-8 text-center text-white shadow-[0_24px_60px_rgba(15,23,42,0.24)]">
-                <Sparkles className="mx-auto mb-3 h-10 w-10 text-[#7dd3fc]" />
+              <div className="rounded-[2rem] border border-white/80 bg-white/88 p-8 text-center text-slate-900 shadow-[0_24px_60px_rgba(15,23,42,0.10)] backdrop-blur-sm">
+                <Sparkles className="mx-auto mb-3 h-10 w-10 text-primary" />
                 <p className="text-lg font-semibold">No artists are live yet</p>
-                <p className="mt-2 text-sm text-white/62">
+                <p className="mt-2 text-sm text-slate-600">
                   Approved artists will appear here once they save a public profile from the studio.
                 </p>
               </div>
             ) : featuredArtist ? (
               <>
                 <div
-                  className="relative pt-10"
+                  className="relative pt-6"
                   onTouchStart={handleTouchStart}
                   onTouchMove={handleTouchMove}
                   onTouchEnd={handleTouchEnd}
@@ -324,7 +322,7 @@ const ArtistsPage = () => {
                         top: `${(index + 1) * 16}px`,
                         left: `${(index + 1) * 14}px`,
                         right: `${(index + 1) * 14}px`,
-                        height: index === 0 ? "470px" : "430px",
+                        height: index === 0 ? "min(29rem, 68vh)" : "min(26rem, 60vh)",
                         opacity: 0.82 - index * 0.18,
                       }}
                     >
@@ -362,7 +360,7 @@ const ArtistsPage = () => {
                     </div>
 
                     <div className="relative overflow-hidden rounded-[1.85rem]">
-                      <img src={featuredArtist.banner} alt={featuredArtist.name} className="h-[22rem] w-full object-cover" />
+                      <img src={featuredArtist.banner} alt={featuredArtist.name} className="h-[min(22rem,52vh)] w-full object-cover" />
                       <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(5,5,5,0.16)_0%,rgba(5,5,5,0.22)_45%,rgba(5,5,5,0.86)_100%)]" />
                       <div className="absolute inset-x-0 top-0 flex items-start justify-between p-4">
                         <div className="inline-flex items-center gap-2 rounded-full border border-white/12 bg-black/22 px-3 py-1 text-[10px] uppercase tracking-[0.24em] text-white/75 backdrop-blur-sm">
@@ -381,7 +379,7 @@ const ArtistsPage = () => {
                           <p className="text-[11px] uppercase tracking-[0.28em] text-white/58">
                             {featuredIdentity || "Creator spotlight"}
                           </p>
-                          <h2 className="mt-2 text-[2rem] font-black leading-[0.92] tracking-[-0.05em]">
+                          <h2 className="mt-2 text-[clamp(1.75rem,8vw,2rem)] font-black leading-[0.92] tracking-[-0.05em]">
                             {featuredArtist.name}
                           </h2>
                           <p className="mt-3 line-clamp-3 text-sm leading-6 text-white/72">
@@ -438,7 +436,7 @@ const ArtistsPage = () => {
 
                 {artists.length > 1 && (
                   <div className="flex items-center justify-center gap-4">
-                    <button onClick={prevCard} className="flex h-10 w-10 items-center justify-center rounded-full border border-white/12 bg-white/10 text-white shadow-sm">
+                    <button onClick={prevCard} className="flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 bg-white/90 text-slate-700 shadow-sm backdrop-blur-sm">
                       <ArrowRight className="h-4 w-4 rotate-180" />
                     </button>
                     <div className="flex gap-1.5">
@@ -447,23 +445,23 @@ const ArtistsPage = () => {
                           key={index}
                           type="button"
                           onClick={() => setCurrentCard(index)}
-                          className={`h-2 rounded-full transition-all duration-300 ${index === currentCard ? "w-8 bg-white" : "w-2 bg-white/28"}`}
+                          className={`h-2 rounded-full transition-all duration-300 ${index === currentCard ? "w-8 bg-slate-900" : "w-2 bg-slate-300"}`}
                         />
                       ))}
                     </div>
-                    <button onClick={nextCard} className="flex h-10 w-10 items-center justify-center rounded-full border border-white/12 bg-white/10 text-white shadow-sm">
+                    <button onClick={nextCard} className="flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 bg-white/90 text-slate-700 shadow-sm backdrop-blur-sm">
                       <ArrowRight className="h-4 w-4" />
                     </button>
                   </div>
                 )}
 
-                <section className="rounded-[2rem] border border-white/10 bg-[linear-gradient(180deg,rgba(24,24,24,0.78)_0%,rgba(14,14,17,0.88)_100%)] p-4 text-white shadow-[0_20px_54px_rgba(15,23,42,0.22)]">
+                <section className="rounded-[2rem] border border-white/80 bg-white/88 p-4 text-slate-900 shadow-[0_20px_54px_rgba(15,23,42,0.10)] backdrop-blur-sm">
                   <div className="flex items-center justify-between gap-3">
                     <div>
-                      <p className="text-[11px] uppercase tracking-[0.28em] text-white/52">Artist Queue</p>
+                      <p className="text-[11px] uppercase tracking-[0.28em] text-slate-400">Artist Queue</p>
                       <h3 className="mt-2 text-xl font-bold">You might want next</h3>
                     </div>
-                    <div className="rounded-full border border-white/10 bg-white/6 px-3 py-1 text-[10px] uppercase tracking-[0.2em] text-white/58">
+                    <div className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-[10px] uppercase tracking-[0.2em] text-slate-500">
                       {discoveryArtists.length} live
                     </div>
                   </div>
@@ -473,19 +471,19 @@ const ArtistsPage = () => {
                       <Link
                         key={`discover-${artist.id}`}
                         to={`/artists/${artist.id}`}
-                        className="flex items-center gap-3 rounded-[1.45rem] border border-white/10 bg-white/6 p-3 transition-transform active:scale-[0.99]"
+                        className="flex items-center gap-3 rounded-[1.45rem] border border-slate-200/80 bg-[#f8fafc] p-3 transition-transform active:scale-[0.99]"
                       >
-                        <div className="h-16 w-16 overflow-hidden rounded-[1.1rem] border border-white/10 bg-white/10">
+                        <div className="h-16 w-16 overflow-hidden rounded-[1.1rem] border border-slate-200 bg-white">
                           <img src={artist.avatar} alt={artist.name} className="h-full w-full object-cover" />
                         </div>
                         <div className="min-w-0 flex-1">
                           <p className="truncate text-sm font-semibold">{artist.name}</p>
-                          <p className="mt-1 truncate text-xs text-white/56">
+                          <p className="mt-1 truncate text-xs text-slate-500">
                             {artist.handle ? `@${artist.handle}` : artist.tag}
                           </p>
-                          <p className="mt-2 line-clamp-2 text-xs leading-5 text-white/62">{artist.bio}</p>
+                          <p className="mt-2 line-clamp-2 text-xs leading-5 text-slate-600">{artist.bio}</p>
                         </div>
-                        <div className="flex h-10 w-10 items-center justify-center rounded-full border border-white/10 bg-white/8 text-white/70">
+                        <div className="flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-600">
                           <ArrowRight className="h-4 w-4" />
                         </div>
                       </Link>
@@ -500,8 +498,8 @@ const ArtistsPage = () => {
                         onClick={() => setCurrentCard(index)}
                         className={`whitespace-nowrap rounded-full border px-3 py-2 text-xs font-medium transition-colors ${
                           index === currentCard
-                            ? "border-white/16 bg-white text-[#111111]"
-                            : "border-white/10 bg-white/6 text-white/68"
+                            ? "border-slate-900 bg-slate-900 text-white"
+                            : "border-slate-200 bg-white text-slate-600"
                         }`}
                       >
                         {artist.name}
