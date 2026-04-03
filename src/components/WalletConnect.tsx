@@ -14,7 +14,7 @@ const WalletConnect = () => {
     chain,
     balance,
     connectWallet,
-    switchToActiveChain,
+    requestActiveChainSwitch,
     isSwitchingNetwork,
     disconnect,
   } = useWallet();
@@ -57,7 +57,7 @@ const WalletConnect = () => {
           size="sm"
           onClick={async () => {
             try {
-              await switchToActiveChain();
+              await requestActiveChainSwitch(`A wallet switch is required before you can use POPUP on ${ACTIVE_CHAIN.name}.`);
             } catch (error) {
               const message = error instanceof Error ? error.message : `Switch to ${ACTIVE_CHAIN.name} in your wallet`;
               toast.error(message);

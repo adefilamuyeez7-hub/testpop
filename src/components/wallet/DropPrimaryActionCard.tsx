@@ -39,7 +39,7 @@ type DropPrimaryActionCardProps = {
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 
 function DropPrimaryActionCardInner({ drop, onCollectSuccess }: DropPrimaryActionCardProps) {
-  const { address, isConnected, connectWallet, chain, switchToActiveChain, isSwitchingNetwork } = useWallet();
+  const { address, isConnected, connectWallet, chain, requestActiveChainSwitch, isSwitchingNetwork } = useWallet();
   const { placeBid, isPending: isBidPending, isConfirming: isBidConfirming, isSuccess: isBidSuccess, error: bidError } = usePlaceBid();
   const { mint: mintArtist, mintedTokenId, isConfirming: isMintConfirming, isSuccess: isMintSuccess, error: mintError } = useMintArtist();
   const [bidAmount, setBidAmount] = useState("");
@@ -100,7 +100,7 @@ function DropPrimaryActionCardInner({ drop, onCollectSuccess }: DropPrimaryActio
     }
     if (chain?.id !== ACTIVE_CHAIN.id) {
       try {
-        await switchToActiveChain();
+        await requestActiveChainSwitch(`Collecting this drop requires ${ACTIVE_CHAIN.name}.`);
       } catch (error) {
         toast.error(error instanceof Error ? error.message : `Switch to ${ACTIVE_CHAIN.name} and try again.`);
       }
@@ -133,7 +133,7 @@ function DropPrimaryActionCardInner({ drop, onCollectSuccess }: DropPrimaryActio
     }
     if (chain?.id !== ACTIVE_CHAIN.id) {
       try {
-        await switchToActiveChain();
+        await requestActiveChainSwitch(`Bidding on this drop requires ${ACTIVE_CHAIN.name}.`);
       } catch (error) {
         toast.error(error instanceof Error ? error.message : `Switch to ${ACTIVE_CHAIN.name} and try again.`);
       }

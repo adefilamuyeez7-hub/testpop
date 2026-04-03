@@ -102,8 +102,34 @@ export function useWallet() {
     await openAppKit();
   };
 
+  const isWrongNetwork = isConnected && chain?.id !== ACTIVE_CHAIN.id;
+
   const switchToActiveChain = async () => {
     await switchChain({ chainId: ACTIVE_CHAIN.id });
+  };
+
+  const requestActiveChainSwitch = async (reason?: string) => {
+    if (!isConnected) {
+      throw new Error("Connect wallet before switching network");
+    }
+
+    if (!isWrongNetwork) {
+      return true;
+    }
+
+    const approved =
+      typeof window === "undefined"
+        ? true
+        : window.confirm(
+            `${reason ? `${reason}\n\n` : ""}POPUP needs ${ACTIVE_CHAIN.name}.\n\nYour wallet is currently on ${chain?.name ?? "the wrong network"}.\nAllow POPUP to request a network switch now?`
+          );
+
+    if (!approved) {
+      throw new Error(`Network change not approved. Please switch to ${ACTIVE_CHAIN.name} to continue.`);
+    }
+
+    await switchToActiveChain();
+    return true;
   };
 
   return {
@@ -111,9 +137,11 @@ export function useWallet() {
     isConnected,
     isConnecting: false,
     chain,
+    isWrongNetwork,
     balance,
     connectWallet,
     switchToActiveChain,
+    requestActiveChainSwitch,
     isSwitchingNetwork,
     switchNetworkError,
     disconnect,

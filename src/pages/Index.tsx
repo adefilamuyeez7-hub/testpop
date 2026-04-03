@@ -23,6 +23,7 @@ import {
 } from "@/lib/featuredCreators";
 
 const SubscribeButtonWrapper = ({ artist, isConnected, connectWallet, address, toast }: any) => {
+  const { chain, requestActiveChainSwitch } = useWallet();
   const effectiveContractAddress = useResolvedArtistContract(artist?.wallet, artist?.contractAddress);
   const { subscribe, isPending: isSubscribePending, isConfirming: isSubscribeConfirming, isSuccess: isSubscribeSuccess } = useSubscribeToArtistContract(effectiveContractAddress);
   const { isSubscribed, isLoading: isSubscribedLoading, refetch: refetchSubscriptionStatus } =
@@ -54,6 +55,19 @@ const SubscribeButtonWrapper = ({ artist, isConnected, connectWallet, address, t
         variant: "destructive",
       });
       return;
+    }
+
+    if (chain?.id !== ACTIVE_CHAIN.id) {
+      try {
+        await requestActiveChainSwitch(`Subscribing to this creator requires ${ACTIVE_CHAIN.name}.`);
+      } catch (error) {
+        toast({
+          title: "Wrong network",
+          description: error instanceof Error ? error.message : `Switch to ${ACTIVE_CHAIN.name} and try again.`,
+          variant: "destructive",
+        });
+        return;
+      }
     }
 
     const subscriptionPrice = String(artist.subscriptionPrice ?? "0.01");
@@ -120,7 +134,7 @@ const SubscribeButtonWrapper = ({ artist, isConnected, connectWallet, address, t
 
 const Index = () => {
   const navigate = useNavigate();
-  const { isConnected, connectWallet, address, chain, switchToActiveChain } = useWallet();
+  const { isConnected, connectWallet, address, chain, requestActiveChainSwitch } = useWallet();
   const { data: supabaseArtists, loading, error } = useSupabaseArtists();
   const { data: supabaseLiveDrops, loading: dropsLoading, error: dropsError, refetch: refetchDrops } = useSupabaseLiveDrops();
   const { placeBid, isPending: isBidding, error: bidError } = usePlaceBid();
@@ -326,7 +340,7 @@ const Index = () => {
 
     if (chain?.id !== ACTIVE_CHAIN.id) {
       try {
-        await switchToActiveChain();
+        await requestActiveChainSwitch(`Collecting this drop requires ${ACTIVE_CHAIN.name}.`);
       } catch (error) {
         toast({
           title: "Wrong network",
@@ -474,7 +488,7 @@ const Index = () => {
 
     if (chain?.id !== ACTIVE_CHAIN.id) {
       try {
-        await switchToActiveChain();
+        await requestActiveChainSwitch(`Bidding on this drop requires ${ACTIVE_CHAIN.name}.`);
       } catch (error) {
         toast({
           title: "Wrong network",
