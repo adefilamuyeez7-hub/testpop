@@ -11,9 +11,11 @@ import { useResolvedArtistContract } from "@/hooks/useContractIntegrations";
 import { recordPageVisit, recordDropView } from "@/lib/analyticsStore";
 import { useSupabaseArtists, useSupabaseLiveDrops } from "@/hooks/useSupabase";
 import { useToast } from "@/hooks/use-toast";
+import type { AssetType } from "@/lib/assetTypes";
 import { parseEther } from "viem";
 import { useCollectionStore } from "@/stores/collectionStore";
 import { resolveMediaUrl } from "@/lib/pinata";
+import { resolveDropCoverImage } from "@/lib/mediaPreview";
 import { resolvePortfolioImage } from "@/lib/portfolio";
 import { ACTIVE_CHAIN } from "@/lib/wagmi";
 import {
@@ -255,6 +257,14 @@ const Index = () => {
     setLiveDrops(supabaseLiveDrops.map((drop) => {
       const artist = drop.artists && !Array.isArray(drop.artists) ? drop.artists : null;
       const normalizedType = (drop.type || "drop").toLowerCase() as "drop" | "auction" | "campaign";
+      const coverImage = resolveDropCoverImage({
+        assetType: (drop.asset_type || "image") as AssetType,
+        previewUri: drop.preview_uri,
+        imageUrl: drop.image_url,
+        imageIpfsUri: drop.image_ipfs_uri,
+        deliveryUri: drop.delivery_uri,
+        metadata: (drop.metadata as Record<string, unknown> | undefined) || null,
+      });
       return {
         id: drop.id,
         contractAddress: drop.contract_address,
@@ -262,8 +272,8 @@ const Index = () => {
         title: drop.title,
         artist: artist?.name || "Unknown Artist",
         priceEth: drop.price_eth ? parseFloat(drop.price_eth).toFixed(3) : "0",
-        image: resolveMediaUrl(drop.preview_uri, drop.image_url, drop.image_ipfs_uri),
-        previewUri: resolveMediaUrl(drop.preview_uri, drop.image_url, drop.image_ipfs_uri),
+        image: coverImage,
+        previewUri: resolveMediaUrl(drop.preview_uri),
         deliveryUri: drop.delivery_uri || "",
         assetType: drop.asset_type || "image",
         type: normalizedType,

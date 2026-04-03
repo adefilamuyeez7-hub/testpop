@@ -4,6 +4,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 import logo from "@/assets/logo.png";
 import { supabase } from "@/lib/db";
 import { resolveMediaUrl } from "@/lib/pinata";
+import { resolveDropCoverImage } from "@/lib/mediaPreview";
 import {
   LIVE_DROP_STATUSES,
   PUBLIC_PRODUCT_STATUSES,
@@ -16,7 +17,17 @@ const TopBarWalletControls = lazy(() => import("./wallet/TopBarWalletControls"))
 
 type SearchResults = {
   artists: Array<{ id: string; name?: string | null; tag?: string | null; avatar_url?: string | null }>;
-  drops: Array<{ id: string; title?: string | null; price_eth?: string | number | null; image_url?: string | null; image_ipfs_uri?: string | null; preview_uri?: string | null; status?: string | null }>;
+  drops: Array<{
+    id: string;
+    title?: string | null;
+    price_eth?: string | number | null;
+    image_url?: string | null;
+    image_ipfs_uri?: string | null;
+    preview_uri?: string | null;
+    delivery_uri?: string | null;
+    asset_type?: "image" | "video" | "audio" | "pdf" | "epub" | "merchandise" | "digital" | null;
+    status?: string | null;
+  }>;
   products: Array<{ id: string; name?: string | null; price_eth?: string | number | null; image_url?: string | null; image_ipfs_uri?: string | null }>;
 };
 
@@ -48,7 +59,7 @@ function SearchPanel({ onClose }: { onClose: () => void }) {
             .limit(4),
           supabase
             .from("drops")
-            .select("id, title, price_eth, image_url, image_ipfs_uri, preview_uri, status")
+            .select("id, title, price_eth, image_url, image_ipfs_uri, preview_uri, delivery_uri, asset_type, status")
             .ilike("title", `%${query}%`)
             .in("status", [...LIVE_DROP_STATUSES])
             .limit(4),
@@ -150,8 +161,24 @@ function SearchPanel({ onClose }: { onClose: () => void }) {
                   className="w-full flex items-center gap-3 p-3 rounded-xl hover:bg-secondary transition-colors text-left"
                 >
                   <div className="h-10 w-10 rounded-lg bg-secondary overflow-hidden flex-shrink-0">
-                    {resolveMediaUrl(drop.preview_uri, drop.image_url, drop.image_ipfs_uri) && (
-                      <img src={resolveMediaUrl(drop.preview_uri, drop.image_url, drop.image_ipfs_uri)} alt={drop.title} className="h-full w-full object-cover" />
+                    {resolveDropCoverImage({
+                      assetType: drop.asset_type || undefined,
+                      previewUri: drop.preview_uri,
+                      imageUrl: drop.image_url,
+                      imageIpfsUri: drop.image_ipfs_uri,
+                      deliveryUri: drop.delivery_uri,
+                    }) && (
+                      <img
+                        src={resolveDropCoverImage({
+                          assetType: drop.asset_type || undefined,
+                          previewUri: drop.preview_uri,
+                          imageUrl: drop.image_url,
+                          imageIpfsUri: drop.image_ipfs_uri,
+                          deliveryUri: drop.delivery_uri,
+                        })}
+                        alt={drop.title}
+                        className="h-full w-full object-cover"
+                      />
                     )}
                   </div>
                   <div>

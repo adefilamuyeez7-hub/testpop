@@ -1,6 +1,6 @@
 import { FC, useEffect, useRef, useState } from "react";
 import { ChevronLeft, ChevronRight, ExternalLink, Loader2, X } from "lucide-react";
-import { GlobalWorkerOptions, getDocument, type PDFDocumentProxy, type RenderTask } from "pdfjs-dist";
+import { GlobalWorkerOptions, getDocument, type PDFDocumentLoadingTask, type PDFDocumentProxy, type RenderTask } from "pdfjs-dist";
 import pdfWorkerSrc from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 
 GlobalWorkerOptions.workerSrc = pdfWorkerSrc;
@@ -25,7 +25,8 @@ export const PdfReader: FC<PdfReaderProps> = ({ src, title, onClose }) => {
 
   useEffect(() => {
     let cancelled = false;
-    const loadingTask = getDocument(src);
+    let loadingTask: PDFDocumentLoadingTask | null = null;
+    const abortController = new AbortController();
 
     setIsLoading(true);
     setIsRendering(false);
@@ -33,8 +34,30 @@ export const PdfReader: FC<PdfReaderProps> = ({ src, title, onClose }) => {
     setPageNumber(1);
     setTotalPages(1);
 
-    loadingTask.promise
-      .then((pdf) => {
+    const loadPdf = async () => {
+      try {
+        try {
+          const response = await fetch(src, { signal: abortController.signal });
+          if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+          }
+
+          const bytes = new Uint8Array(await response.arrayBuffer());
+          if (cancelled) {
+            return;
+          }
+
+          loadingTask = getDocument({ data: bytes });
+        } catch (fetchError) {
+          if (abortController.signal.aborted || cancelled) {
+            return;
+          }
+
+          console.warn("Falling back to direct PDF URL loading:", fetchError);
+          loadingTask = getDocument(src);
+        }
+
+        const pdf = await loadingTask.promise;
         if (cancelled) {
           void pdf.destroy();
           return;
@@ -42,24 +65,26 @@ export const PdfReader: FC<PdfReaderProps> = ({ src, title, onClose }) => {
 
         pdfDocumentRef.current = pdf;
         setTotalPages(pdf.numPages);
-      })
-      .catch((err) => {
+      } catch (err) {
         console.error("Failed to load PDF:", err);
         if (!cancelled) {
           setError("This PDF could not be opened in the in-app reader.");
         }
-      })
-      .finally(() => {
+      } finally {
         if (!cancelled) {
           setIsLoading(false);
         }
-      });
+      }
+    };
+
+    void loadPdf();
 
     return () => {
       cancelled = true;
+      abortController.abort();
       renderTaskRef.current?.cancel();
       renderTaskRef.current = null;
-      void loadingTask.destroy();
+      void loadingTask?.destroy();
       void pdfDocumentRef.current?.destroy();
       pdfDocumentRef.current = null;
     };

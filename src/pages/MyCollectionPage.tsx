@@ -5,7 +5,8 @@ import { Button } from "@/components/ui/button";
 import { useWallet } from "@/hooks/useContracts";
 import { trackCollectionView } from "@/lib/analyticsStore";
 import { ImageViewer, VideoViewer, AudioPlayer, PdfReader, DownloadPanel } from "@/components/collection";
-import { ipfsToHttp, resolveMediaUrl } from "@/lib/pinata";
+import { ipfsToHttp } from "@/lib/pinata";
+import { resolveDropCoverImage } from "@/lib/mediaPreview";
 import { useCollectionStore, type CollectedDropItem } from "@/stores/collectionStore";
 import { getOrdersByBuyer, type OrderWithItems } from "@/lib/db";
 import { detectAssetTypeFromUri, type AssetType } from "@/lib/assetTypes";
@@ -44,27 +45,17 @@ function inferCollectedAssetType(item: Pick<CollectedDropItem, "assetType" | "de
   return item.assetType || "image";
 }
 
-function resolveCollectionPreviewImage(...candidates: Array<string | null | undefined>): string {
-  for (const candidate of candidates) {
-    const value = candidate?.trim();
-    if (!value) continue;
-
-    const lower = value.toLowerCase();
-    const isDocumentLike =
-      lower.endsWith(".pdf") ||
-      lower.endsWith(".epub") ||
-      lower.includes(".pdf?") ||
-      lower.includes(".epub?");
-
-    if (isDocumentLike) continue;
-    return resolveMediaUrl(value);
-  }
-
-  return "";
+function resolveCollectionPreviewImage(item: Pick<CollectedDropItem, "assetType" | "deliveryUri" | "previewUri" | "imageUrl">): string {
+  return resolveDropCoverImage({
+    assetType: item.assetType,
+    previewUri: item.previewUri,
+    imageUrl: item.imageUrl,
+    deliveryUri: item.deliveryUri,
+  });
 }
 
 function normalizeCollectedItem(item: CollectedDropItem): CollectedDropItem {
-  const imageUrl = resolveCollectionPreviewImage(item.imageUrl, item.previewUri);
+  const imageUrl = resolveCollectionPreviewImage(item);
   const previewUri = item.previewUri || imageUrl || item.deliveryUri;
   const deliveryUri = item.deliveryUri || item.previewUri || item.imageUrl;
 
@@ -109,9 +100,15 @@ function toOrderCollectionItems(order: OrderWithItems, ownerWallet: string): Col
 
   return orderItems.map((item, index) => {
     const product = Array.isArray(item.products) ? item.products[0] : item.products;
-    const imageUrl = resolveCollectionPreviewImage(product?.image_url, product?.image_ipfs_uri, product?.preview_uri);
     const previewUri = product?.preview_uri || product?.image_url || product?.image_ipfs_uri || undefined;
     const deliveryUri = product?.delivery_uri || product?.image_ipfs_uri || product?.image_url || undefined;
+    const imageUrl = resolveDropCoverImage({
+      assetType: product?.asset_type || undefined,
+      previewUri,
+      imageUrl: product?.image_url || undefined,
+      imageIpfsUri: product?.image_ipfs_uri || undefined,
+      deliveryUri,
+    });
     const assetType = inferCollectedAssetType({
       assetType: product?.asset_type || undefined,
       deliveryUri,

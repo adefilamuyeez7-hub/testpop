@@ -7,7 +7,8 @@ import { Button } from "@/components/ui/button";
 import { recordDropView } from "@/lib/analyticsStore";
 import { useSupabaseDropById } from "@/hooks/useSupabase";
 import type { AssetType } from "@/lib/assetTypes";
-import { ipfsToHttp, resolveMediaUrl } from "@/lib/pinata";
+import { ipfsToHttp } from "@/lib/pinata";
+import { resolveDropCoverImage } from "@/lib/mediaPreview";
 import { VideoViewer } from "@/components/collection/VideoViewer";
 import { AudioPlayer } from "@/components/collection/AudioPlayer";
 import { useCollectionStore } from "@/stores/collectionStore";
@@ -34,6 +35,14 @@ const DropDetailPage = () => {
     const endsAt = dropRecord.ends_at ? new Date(dropRecord.ends_at).getTime() : now + 24 * 60 * 60 * 1000;
     const endsInHours = Math.max(0, Math.ceil((endsAt - now) / (60 * 60 * 1000)));
     const normalizedType = (dropRecord.type || "drop").toLowerCase() as "drop" | "auction" | "campaign";
+    const resolvedCoverImage = resolveDropCoverImage({
+      assetType: (dropRecord.asset_type || "image") as AssetType,
+      previewUri: dropRecord.preview_uri,
+      imageUrl: dropRecord.image_url,
+      imageIpfsUri: dropRecord.image_ipfs_uri,
+      deliveryUri: dropRecord.delivery_uri,
+      metadata: (dropRecord.metadata as Record<string, unknown> | undefined) || null,
+    });
     const normalizedContractKind =
       dropRecord.contract_kind ||
       (normalizedType === "auction"
@@ -59,7 +68,7 @@ const DropDetailPage = () => {
       status: dropRecord.status || "draft",
       type: normalizedType,
       endsIn: `${endsInHours}h left`,
-      image: resolveMediaUrl(dropRecord.preview_uri, dropRecord.image_url, dropRecord.image_ipfs_uri),
+      image: resolvedCoverImage,
       imageUri: dropRecord.image_ipfs_uri || "",
       metadataUri: dropRecord.metadata_ipfs_uri || "",
       deliveryUri: dropRecord.delivery_uri || dropRecord.image_ipfs_uri || "",
@@ -76,8 +85,8 @@ const DropDetailPage = () => {
 
   const hasContractAddress = Boolean(drop?.contractAddress && drop.contractAddress !== ZERO_ADDRESS);
   const mediaSrc = drop ? ipfsToHttp(drop.deliveryUri || drop.imageUri || drop.image || "") : "";
-  const posterSrc = drop ? ipfsToHttp(drop.previewUri || drop.image || "") : "";
-  const coverSrc = drop ? ipfsToHttp(drop.previewUri || drop.imageUri || drop.image || "") : "";
+  const posterSrc = drop ? ipfsToHttp(drop.image || drop.previewUri || "") : "";
+  const coverSrc = drop ? ipfsToHttp(drop.image || "") : "";
 
   useEffect(() => {
     if (id) {

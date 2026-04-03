@@ -1212,7 +1212,7 @@ async function ensureArtistProfile(wallet) {
 
   const application = await getLatestArtistApplication(normalized);
   const now = new Date().toISOString();
-  const portfolio = application?.portfolio_url ? [application.portfolio_url] : [];
+  const portfolio = [];
 
   const { data: createdArtist, error: createArtistError } = await supabase
     .from("artists")
@@ -3248,9 +3248,7 @@ const approveArtistImpl = async (req, res) => {
           portfolio:
             Array.isArray(artistData.portfolio) && artistData.portfolio.length > 0
               ? artistData.portfolio
-              : latestApplication?.portfolio_url
-                ? [latestApplication.portfolio_url]
-                : [],
+              : [],
           ...updatePayload,
         },
         { onConflict: "wallet" }

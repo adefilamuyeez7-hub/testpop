@@ -35,6 +35,7 @@ import {
 import { detectAssetTypeFromFile, getAssetTypeLabel, type AssetType } from "@/lib/assetTypes";
 import { POAP_CAMPAIGN_ADDRESS } from "@/lib/contracts/poapCampaign";
 import { POAP_CAMPAIGN_V2_ADDRESS } from "@/lib/contracts/poapCampaignV2";
+import { resolveDropCoverImage } from "@/lib/mediaPreview";
 import { resolvePortfolioImage } from "@/lib/portfolio";
 import {
   deleteArtistDrop,
@@ -123,9 +124,6 @@ const ART_TYPES = ["Digital Art", "Sculpture", "Photography", "Mixed Media", "Ge
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 
 const toGatewayUrl = (cidOrUri: string) => ipfsToHttp(cidOrUri.startsWith("ipfs://") ? cidOrUri : `ipfs://${cidOrUri}`);
-const isDataUrl = (value?: string | null) => typeof value === "string" && value.startsWith("data:");
-const isTransientPreviewUrl = (value?: string | null) =>
-  typeof value === "string" && (value.startsWith("blob:") || value.startsWith("file:") || value.startsWith("about:"));
 
 const raiseStatusStyles: Record<string, string> = {
   review: "bg-amber-100 text-amber-800",
@@ -492,17 +490,20 @@ const CreateDropSheet = ({
           nextDeliveryUri = `ipfs://${deliveryCid}`;
         }
 
-        const nextPreviewUri = nextImageUri;
+        const nextPreviewUri =
+          requiresSeparateDelivery || nextAssetType === "image"
+            ? nextImageUri
+            : undefined;
         toast.info("Pinning metadata...");
         const nextUri = await uploadMetadataToPinata({
           name: form.title,
           description: form.description,
-          image: nextPreviewUri || nextImageUri,
-          animation_url: !requiresSeparateDelivery && nextAssetType !== "image" ? nextDeliveryUri : undefined,
+          image: nextPreviewUri || (nextAssetType === "image" ? nextImageUri : undefined),
+          animation_url: nextAssetType !== "image" ? nextDeliveryUri : undefined,
           properties: {
             contentKind,
             assetType: nextAssetType,
-            coverImageUri: nextImageUri,
+            coverImageUri: nextPreviewUri || null,
             deliveryUri: nextDeliveryUri,
             previewUri: nextPreviewUri || null,
             isDownloadable: requiresSeparateDelivery || nextAssetType === "digital",
@@ -643,9 +644,12 @@ const CreateDropSheet = ({
             ? "draft"
             : "live";
 
-        const persistedImageUrl = isDataUrl(coverPreview) || isTransientPreviewUrl(coverPreview)
-          ? (pendingResult.previewUri ? ipfsToHttp(pendingResult.previewUri) : ipfsToHttp(pendingResult.imageUri))
-          : (coverPreview || undefined);
+        const persistedImageUri =
+          pendingResult.previewUri ||
+          (pendingResult.assetType === "image" ? pendingResult.imageUri : null);
+        const persistedImageUrl = persistedImageUri
+          ? ipfsToHttp(persistedImageUri)
+          : undefined;
 
         const savedDrop = await dbCreateDrop({
           artist_id: persistedArtist.id,
@@ -657,7 +661,7 @@ const CreateDropSheet = ({
           type: storedType,
           image_url: persistedImageUrl,
           metadata_ipfs_uri: pendingResult.metadataUri,
-          image_ipfs_uri: pendingResult.imageUri,
+          image_ipfs_uri: persistedImageUri,
           asset_type: pendingResult.assetType,
           preview_uri: pendingResult.previewUri,
           delivery_uri: pendingResult.deliveryUri,
@@ -687,9 +691,9 @@ const CreateDropSheet = ({
             type: pendingResult.mode,
             endsIn: `${Math.max(0, Math.ceil((new Date(endsAt).getTime() - Date.now()) / (1000 * 60 * 60)))}h`,
             revenue: "0",
-            image: persistedImageUrl ?? coverPreview,
+            image: persistedImageUrl ?? null,
             metadataUri: pendingResult.metadataUri,
-            imageUri: pendingResult.imageUri,
+            imageUri: persistedImageUri || undefined,
             assetType: pendingResult.assetType,
             previewUri: pendingResult.previewUri,
             deliveryUri: pendingResult.deliveryUri,
@@ -1207,7 +1211,14 @@ const ArtistStudioPage = ({ embedded = false }: ArtistStudioPageProps) => {
             ? `${Math.max(0, Math.floor((new Date(drop.ends_at).getTime() - Date.now()) / (1000 * 60 * 60)))}h`
             : "--",
           revenue: String(drop.price_eth || 0),
-          image: resolveMediaUrl(drop.preview_uri, drop.image_url, drop.image_ipfs_uri),
+          image: resolveDropCoverImage({
+            assetType: (drop.asset_type as AssetType | undefined) || "image",
+            previewUri: drop.preview_uri,
+            imageUrl: drop.image_url,
+            imageIpfsUri: drop.image_ipfs_uri,
+            deliveryUri: drop.delivery_uri,
+            metadata: (drop.metadata as Record<string, unknown> | undefined) || null,
+          }),
           metadataUri: drop.metadata_ipfs_uri || "",
           imageUri: drop.image_ipfs_uri || undefined,
           assetType: (drop.asset_type as AssetType) || "image",

@@ -14,6 +14,7 @@ import { toast } from "sonner";
 import { recordArtistView } from "@/lib/analyticsStore";
 import { useSupabaseArtistById, useSupabaseDropsByArtist } from "@/hooks/useSupabase";
 import { resolveMediaUrl } from "@/lib/pinata";
+import { resolveDropCoverImage } from "@/lib/mediaPreview";
 import { resolvePortfolioImage } from "@/lib/portfolio";
 import { getRuntimeApiToken } from "@/lib/runtimeSession";
 import { normalizePublicDropStatus } from "@/lib/catalogVisibility";
@@ -103,7 +104,17 @@ const ArtistProfilePage = () => {
       status: normalizePublicDropStatus(drop.status),
       type: (drop.type || "drop").toLowerCase() as "drop" | "auction" | "campaign",
       endsAt: drop.ends_at || null,
-      image: resolveMediaUrl(drop.preview_uri, drop.image_url, drop.image_ipfs_uri) || transformedArtist?.banner || artistFallbackArt,
+      image:
+        resolveDropCoverImage({
+          assetType: (drop.asset_type || "image") as "image" | "video" | "audio" | "pdf" | "epub" | "merchandise" | "digital",
+          previewUri: drop.preview_uri,
+          imageUrl: drop.image_url,
+          imageIpfsUri: drop.image_ipfs_uri,
+          deliveryUri: drop.delivery_uri,
+          metadata: (drop.metadata as Record<string, unknown> | undefined) || null,
+        }) ||
+        transformedArtist?.banner ||
+        artistFallbackArt,
     }));
   }, [supabaseDrops, transformedArtist?.banner]);
 

@@ -32,44 +32,52 @@ export const EpubReader: FC<EpubReaderProps> = ({ src, title, onClose }) => {
     }
 
     let cancelled = false;
-    const book = ePub(src);
-    const rendition = book.renderTo(container, {
-      width: "100%",
-      height: "100%",
-      flow: "paginated",
-      manager: "default",
-      spread: "none",
-      allowScriptedContent: false,
-    });
+    const abortController = new AbortController();
+    let book: Book | null = null;
+    let rendition: Rendition | null = null;
 
-    bookRef.current = book;
-    renditionRef.current = rendition;
     setIsLoading(true);
     setError(null);
 
-    rendition.themes.default({
-      body: {
-        "background-color": "#fffdf8",
-        color: "#18181b",
-        "line-height": "1.75",
-        padding: "22px 18px",
-      },
-      p: {
-        "margin-bottom": "1.1em",
-      },
-      "h1, h2, h3, h4, h5, h6": {
-        color: "#111827",
-      },
-      img: {
-        "max-width": "100%",
-        height: "auto",
-      },
-    });
-
-    rendition.themes.fontSize(`${FONT_SCALE_STEPS[1]}%`);
-
     const openBook = async () => {
-      try {
+      const createReader = async (source: string | ArrayBuffer) => {
+        book = ePub(source);
+        rendition = book.renderTo(container, {
+          width: "100%",
+          height: "100%",
+          flow: "paginated",
+          manager: "default",
+          spread: "none",
+          allowScriptedContent: false,
+        });
+
+        bookRef.current = book;
+        renditionRef.current = rendition;
+        rendition.on("relocated", handleRelocated);
+        rendition.on("rendered", handleRendered);
+        rendition.on("displayError", handleRenderError);
+
+        rendition.themes.default({
+          body: {
+            "background-color": "#fffdf8",
+            color: "#18181b",
+            "line-height": "1.75",
+            padding: "22px 18px",
+          },
+          p: {
+            "margin-bottom": "1.1em",
+          },
+          "h1, h2, h3, h4, h5, h6": {
+            color: "#111827",
+          },
+          img: {
+            "max-width": "100%",
+            height: "auto",
+          },
+        });
+
+        rendition.themes.fontSize(`${FONT_SCALE_STEPS[fontScaleIndex]}%`);
+
         const navigation = await book.loaded.navigation;
         if (!cancelled) {
           setToc(navigation.toc || []);
@@ -77,6 +85,29 @@ export const EpubReader: FC<EpubReaderProps> = ({ src, title, onClose }) => {
 
         const savedLocation = window.localStorage.getItem(storageKey) || undefined;
         await rendition.display(savedLocation);
+      };
+
+      try {
+        try {
+          const response = await fetch(src, { signal: abortController.signal });
+          if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+          }
+
+          const binary = await response.arrayBuffer();
+          if (cancelled) {
+            return;
+          }
+
+          await createReader(binary);
+        } catch (binaryError) {
+          if (abortController.signal.aborted || cancelled) {
+            return;
+          }
+
+          console.warn("Falling back to direct EPUB URL loading:", binaryError);
+          await createReader(src);
+        }
       } catch (loadError) {
         console.error("Failed to render EPUB:", loadError);
         if (!cancelled) {
@@ -109,19 +140,19 @@ export const EpubReader: FC<EpubReaderProps> = ({ src, title, onClose }) => {
       setError("This EPUB could not be rendered in the reader.");
       setIsLoading(false);
     };
-
-    rendition.on("relocated", handleRelocated);
-    rendition.on("rendered", () => setIsLoading(false));
-    rendition.on("displayError", handleRenderError);
+    const handleRendered = () => {
+      setIsLoading(false);
+    };
 
     openBook();
 
     return () => {
       cancelled = true;
-      rendition.off("relocated", handleRelocated);
-      rendition.off("displayError", handleRenderError);
-      rendition.destroy();
-      book.destroy();
+      abortController.abort();
+      rendition?.off("relocated", handleRelocated);
+      rendition?.off("displayError", handleRenderError);
+      rendition?.destroy();
+      book?.destroy();
       renditionRef.current = null;
       bookRef.current = null;
     };

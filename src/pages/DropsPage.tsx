@@ -7,6 +7,7 @@ import { getAnalyticsSnapshot, recordDropView, recordPageVisit } from "@/lib/ana
 import { useSupabaseLiveDrops } from "@/hooks/useSupabase";
 import { type AssetType } from "@/lib/assetTypes";
 import { resolveMediaUrl } from "@/lib/pinata";
+import { resolveDropCoverImage } from "@/lib/mediaPreview";
 import {
   getFeaturedCreatorsUpdateEventName,
   loadFeaturedCreatorSlides,
@@ -38,6 +39,15 @@ const DropsPage = () => {
     if (!supabaseDrops || supabaseDrops.length === 0) return [];
     return supabaseDrops.map((drop) => {
       const artist = drop.artists && !Array.isArray(drop.artists) ? drop.artists : null;
+      const coverImage = resolveDropCoverImage({
+        assetType: (drop.asset_type || "image") as AssetType,
+        previewUri: drop.preview_uri,
+        imageUrl: drop.image_url,
+        imageIpfsUri: drop.image_ipfs_uri,
+        deliveryUri: drop.delivery_uri,
+        metadata: (drop.metadata as Record<string, unknown> | undefined) || null,
+      });
+
       return {
         id: drop.id,
         title: drop.title,
@@ -45,8 +55,8 @@ const DropsPage = () => {
         artistAvatar: artist?.avatar_url || "",
         priceEth: drop.price_eth ? parseFloat(drop.price_eth).toFixed(4) : "0",
         sold: Number(drop.sold || 0),
-        image: resolveMediaUrl(drop.preview_uri, drop.image_url, drop.image_ipfs_uri),
-        previewUri: resolveMediaUrl(drop.preview_uri, drop.image_url, drop.image_ipfs_uri),
+        image: coverImage,
+        previewUri: resolveMediaUrl(drop.preview_uri),
         deliveryUri: drop.delivery_uri || "",
         type: (drop.type || "drop").toLowerCase() as "drop" | "auction" | "campaign",
         status: drop.status as "live" | "draft" | "ended",
@@ -343,10 +353,8 @@ const DropsPage = () => {
                       className="overflow-hidden rounded-[1.7rem] bg-white shadow-[0_18px_45px_rgba(37,99,235,0.08)] ring-1 ring-[#dbe7ff] transition-transform hover:-translate-y-1 dark:bg-slate-950/80 dark:ring-white/10"
                     >
                       <div className="relative aspect-[1.05] overflow-hidden bg-secondary dark:bg-slate-900">
-                        {drop.assetType === "image" && drop.image ? (
+                        {drop.image ? (
                           <img src={drop.image} alt={drop.title} className="h-full w-full object-cover" />
-                        ) : drop.assetType === "video" && (drop.previewUri || drop.image) ? (
-                          <img src={drop.previewUri || drop.image} alt={drop.title} className="h-full w-full object-cover" />
                         ) : (
                           <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-slate-900 via-slate-700 to-slate-500 text-xs font-semibold uppercase tracking-[0.2em] text-white">
                             {drop.assetType}
@@ -567,17 +575,9 @@ const DropsPage = () => {
                   style={{ animationDelay: `${index * 70}ms` }}
                 >
                   <div className="relative aspect-[0.9] overflow-hidden bg-[#dbeafe] dark:bg-slate-900">
-                    {drop.assetType === "image" && drop.image ? (
+                    {drop.image ? (
                       <img
                         src={drop.image}
-                        alt={drop.title}
-                        className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
-                        loading={index < 2 ? "eager" : "lazy"}
-                        decoding="async"
-                      />
-                    ) : drop.assetType === "video" && (drop.previewUri || drop.image) ? (
-                      <img
-                        src={drop.previewUri || drop.image}
                         alt={drop.title}
                         className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
                         loading={index < 2 ? "eager" : "lazy"}
