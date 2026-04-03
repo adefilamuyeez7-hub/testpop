@@ -1,5 +1,5 @@
 ﻿import { useEffect, useMemo, useState } from "react";
-import { ArrowLeft, Flame, Globe, Grid3X3, Heart, Loader2, Share2, Users } from "lucide-react";
+import { ArrowLeft, Flame, Globe, Grid3X3, Loader2, Share2, Users } from "lucide-react";
 import { useNavigate, useParams, Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -44,6 +44,7 @@ const ArtistProfilePage = () => {
   const [investorPositions, setInvestorPositions] = useState<Record<string, number>>({});
   const [investingCampaignId, setInvestingCampaignId] = useState<string | null>(null);
   const [selectedCampaign, setSelectedCampaign] = useState<IPCampaign | null>(null);
+  const [activeContentTab, setActiveContentTab] = useState<"portfolio" | "drops">("portfolio");
   const [investmentForm, setInvestmentForm] = useState({
     amountEth: "",
     units: "",
@@ -265,6 +266,17 @@ const ArtistProfilePage = () => {
     { label: "Website", href: transformedArtist.websiteUrl },
   ].filter((link) => Boolean(link.href));
   const isArtistOwner = !!address && address.toLowerCase() === transformedArtist.wallet.toLowerCase();
+  const featuredDrop = drops[0] ?? null;
+
+  useEffect(() => {
+    setActiveContentTab((current) => {
+      if (current === "portfolio" && portfolioPieces.length > 0) return current;
+      if (current === "drops" && drops.length > 0) return current;
+      if (portfolioPieces.length > 0) return "portfolio";
+      if (drops.length > 0) return "drops";
+      return "portfolio";
+    });
+  }, [drops.length, portfolioPieces.length]);
 
   const handleSubscribe = async () => {
     if (!isConnected) {
@@ -450,83 +462,59 @@ const ArtistProfilePage = () => {
                 </a>
               ))}
             </div>
-          </aside>
 
-          <Tabs defaultValue="portfolio" className="space-y-5">
-            <div className="rounded-[1.75rem] border border-[#dbe7ff] bg-[linear-gradient(135deg,#ffffff_0%,#eef5ff_100%)] p-4 shadow-[0_18px_45px_rgba(37,99,235,0.08)]">
+            <div className="mt-6 rounded-[1.5rem] bg-white/12 p-4 backdrop-blur-sm">
               <div className="flex items-start justify-between gap-3">
                 <div>
-                  <p className="text-[10px] uppercase tracking-[0.24em] text-[#1d4ed8]">Investable IP</p>
-                  <h2 className="mt-2 text-2xl font-black tracking-[-0.03em] text-foreground">Approved Raises</h2>
-                  <p className="mt-2 text-sm text-muted-foreground">
-                    Admin-reviewed raises show up here once they are open to investors.
-                  </p>
+                  <p className="text-[10px] uppercase tracking-[0.24em] text-white/70">Investable IP</p>
+                  <h2 className="mt-2 text-lg font-bold text-white">Approved Raises</h2>
                 </div>
-                <Badge className="bg-[#dbeafe] text-[#1d4ed8] hover:bg-[#dbeafe]">
+                <Badge className="bg-white/90 text-[#1d4ed8] hover:bg-white/90">
                   {visibleRaiseCampaigns.length} live
                 </Badge>
               </div>
 
               {raiseCampaignsLoading ? (
-                <div className="mt-4 flex items-center text-sm text-muted-foreground">
+                <div className="mt-4 flex items-center text-sm text-white/80">
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Loading raises...
                 </div>
               ) : visibleRaiseCampaigns.length === 0 ? (
-                <div className="mt-4 rounded-2xl border border-dashed border-[#dbe7ff] bg-white/70 p-4 text-sm text-muted-foreground">
+                <div className="mt-4 rounded-2xl border border-white/15 bg-white/10 p-4 text-sm text-white/78">
                   No approved raises are live right now.
                 </div>
               ) : (
-                <div className="mt-4 grid gap-3 md:grid-cols-2">
-                  {visibleRaiseCampaigns.map((campaign) => {
+                <div className="mt-4 space-y-3">
+                  {visibleRaiseCampaigns.slice(0, 2).map((campaign) => {
                     const committedAmount = Number(campaign.metadata?.committed_amount_eth || 0);
                     const targetAmount = Number(campaign.funding_target_eth || 0);
                     const progress = targetAmount > 0 ? Math.min(100, (committedAmount / targetAmount) * 100) : 0;
                     const ownedUnits = investorPositions[campaign.id] || 0;
 
                     return (
-                      <div key={campaign.id} className="rounded-[1.4rem] bg-white p-4 shadow-[inset_0_0_0_1px_rgba(37,99,235,0.08)]">
-                        <div className="flex items-start justify-between gap-3">
+                      <div key={campaign.id} className="rounded-[1.3rem] bg-white/10 p-3 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.12)]">
+                        <div className="flex items-start justify-between gap-2">
                           <div>
-                            <p className="text-sm font-semibold text-foreground">{campaign.title}</p>
-                            <p className="mt-1 text-xs text-muted-foreground">{campaign.summary || campaign.description}</p>
+                            <p className="text-sm font-semibold text-white">{campaign.title}</p>
+                            <p className="mt-1 text-xs text-white/70">{campaign.summary || campaign.description}</p>
                           </div>
-                          <Badge variant="secondary" className="capitalize">
+                          <Badge className="border-none bg-white/85 text-[#1d4ed8] capitalize hover:bg-white/85">
                             {campaign.status}
                           </Badge>
                         </div>
-
-                        <div className="mt-3 grid grid-cols-3 gap-2">
-                          <div className="rounded-xl bg-secondary p-2 text-center">
-                            <p className="text-xs font-bold text-foreground">{targetAmount || 0} ETH</p>
-                            <p className="text-[9px] text-muted-foreground">Target</p>
-                          </div>
-                          <div className="rounded-xl bg-secondary p-2 text-center">
-                            <p className="text-xs font-bold text-foreground">{campaign.unit_price_eth || "--"}</p>
-                            <p className="text-[9px] text-muted-foreground">Unit Price</p>
-                          </div>
-                          <div className="rounded-xl bg-secondary p-2 text-center">
-                            <p className="text-xs font-bold text-foreground">{campaign.total_units || "--"}</p>
-                            <p className="text-[9px] text-muted-foreground">Units</p>
-                          </div>
+                        <div className="mt-3 flex items-center justify-between text-[11px] text-white/72">
+                          <span>{committedAmount.toFixed(2)} ETH committed</span>
+                          <span>{progress.toFixed(0)}%</span>
                         </div>
-
-                        <div className="mt-3">
-                          <div className="flex items-center justify-between text-[11px] text-muted-foreground">
-                            <span>{committedAmount.toFixed(2)} ETH committed</span>
-                            <span>{progress.toFixed(0)}%</span>
-                          </div>
-                          <div className="mt-1 h-2 rounded-full bg-secondary">
-                            <div className="h-2 rounded-full bg-[#1d4ed8]" style={{ width: `${progress}%` }} />
-                          </div>
+                        <div className="mt-1 h-2 rounded-full bg-white/15">
+                          <div className="h-2 rounded-full bg-white" style={{ width: `${progress}%` }} />
                         </div>
-
-                        <div className="mt-3 flex items-center justify-between gap-3">
-                          <div className="text-[11px] text-muted-foreground">
+                        <div className="mt-3 flex items-center justify-between gap-2">
+                          <p className="text-[11px] text-white/72">
                             {ownedUnits > 0 ? `Your position: ${ownedUnits} units` : "No position yet"}
-                          </div>
+                          </p>
                           <Button
                             size="sm"
-                            className="rounded-full gradient-primary text-primary-foreground"
+                            className="rounded-full bg-white text-[#1d4ed8] hover:bg-white/90"
                             disabled={isArtistOwner}
                             onClick={() => {
                               setSelectedCampaign(campaign);
@@ -542,140 +530,72 @@ const ArtistProfilePage = () => {
                 </div>
               )}
             </div>
-            <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_180px]">
-              <div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <Badge className="rounded-full bg-[#dbeafe] px-3 py-1 text-[10px] uppercase tracking-[0.24em] text-[#1d4ed8] hover:bg-[#dbeafe]">
-                    {transformedArtist.tag}
-                  </Badge>
-                  <span className="text-sm text-muted-foreground">Portfolio</span>
-                </div>
+          </aside>
 
-                <h2 className="mt-3 text-4xl font-black tracking-[-0.04em] text-foreground sm:text-5xl md:text-6xl xl:text-7xl">Portfolio</h2>
-
-                <div className="mt-5 rounded-[1.8rem] bg-[#eaf3ff] p-3 shadow-[0_22px_45px_rgba(37,99,235,0.08)]">
-                  <Carousel
-                    opts={{ loop: portfolioSlides.length > 1 }}
-                    className="mx-auto w-full"
-                  >
-                    <CarouselContent>
-                      {portfolioSlides.map((piece) => (
-                        <CarouselItem key={piece.id}>
-                          <button
-                            type="button"
-                            onClick={() => setLightboxImage(piece)}
-                            className="group relative block h-[260px] w-full overflow-hidden rounded-[1.4rem] sm:h-[340px]"
-                          >
-                            <img src={piece.image} alt={piece.title} className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105" />
-                            <div className="absolute inset-0 bg-gradient-to-t from-black/45 via-black/10 to-transparent" />
-                            <div className="absolute bottom-4 left-4 right-4 flex items-end justify-between gap-3">
-                              <div className="rounded-[1.1rem] bg-white/88 px-4 py-2 text-left text-foreground backdrop-blur-sm">
-                                <p className="text-sm font-semibold">{piece.title}</p>
-                                <p className="text-xs text-muted-foreground">{`${piece.medium} - ${piece.year}`}</p>
-                              </div>
-                              <div className="rounded-full bg-white/82 px-3 py-1 text-xs font-semibold text-foreground backdrop-blur-sm">
-                                {portfolioSlides.length > 1 ? "Open piece" : "Featured work"}
-                              </div>
-                            </div>
-                          </button>
-                        </CarouselItem>
-                      ))}
-                    </CarouselContent>
-                    {portfolioSlides.length > 1 && (
-                      <>
-                        <CarouselPrevious className="left-3 top-auto bottom-3 h-10 w-10 translate-y-0 border-white/70 bg-white/85 text-foreground hover:bg-white" />
-                        <CarouselNext className="right-3 top-auto bottom-3 h-10 w-10 translate-y-0 border-white/70 bg-white/85 text-foreground hover:bg-white" />
-                      </>
-                    )}
-                  </Carousel>
-                </div>
-              </div>
-
-              <div className="grid gap-3">
-                <TabsList className="grid w-full grid-cols-2 rounded-[1.2rem] bg-[#eaf3ff] p-1">
-                  <TabsTrigger value="portfolio" className="rounded-[0.9rem] text-xs font-semibold">
-                    Portfolio
-                  </TabsTrigger>
-                  <TabsTrigger value="drops" className="rounded-[0.9rem] text-xs font-semibold">
-                    Drops
-                  </TabsTrigger>
-                </TabsList>
-                <div className="rounded-[1.5rem] bg-[#eff6ff] p-4">
-                  <p className="text-4xl font-black text-foreground">{portfolioPieces.length}</p>
-                  <p className="mt-1 text-foreground/80">Portfolio Pieces</p>
-                </div>
-                <div className="rounded-[1.5rem] bg-[#1d4ed8] p-4 text-white">
-                  <p className="text-4xl font-black">{onchainSubscribers}</p>
-                  <p className="mt-1 text-white/90">Collectors</p>
-                </div>
-              </div>
-            </div>
-
-            <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_220px]">
-              <div className="rounded-[1.5rem] bg-white/70 p-5 shadow-[inset_0_0_0_1px_rgba(37,99,235,0.08)]">
-                <div className="flex items-center justify-between gap-3">
+          <Tabs value={activeContentTab} onValueChange={(value) => setActiveContentTab(value as "portfolio" | "drops")} className="space-y-5">
+            <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_190px]">
+              <div className="rounded-[1.8rem] bg-[linear-gradient(180deg,#ffffff_0%,#f4f8ff_100%)] p-4 shadow-[inset_0_0_0_1px_rgba(37,99,235,0.08)]">
+                <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
-                    <p className="text-lg font-semibold text-foreground">Portfolio Slider</p>
-                    <p className="mt-1 text-sm text-muted-foreground">
-                      Every portfolio piece now lives in one shared carousel instead of separate stacked frames.
-                    </p>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Badge className="rounded-full bg-[#dbeafe] px-3 py-1 text-[10px] uppercase tracking-[0.24em] text-[#1d4ed8] hover:bg-[#dbeafe]">
+                        {transformedArtist.tag}
+                      </Badge>
+                      <span className="text-xs uppercase tracking-[0.24em] text-muted-foreground">
+                        {activeContentTab === "portfolio" ? "Portfolio Mode" : "Drop Mode"}
+                      </span>
+                    </div>
+                    <h2 className="mt-3 text-3xl font-black tracking-[-0.04em] text-foreground sm:text-4xl xl:text-5xl">
+                      {activeContentTab === "portfolio" ? "Portfolio" : "Live Drops"}
+                    </h2>
                   </div>
-                  <Badge className="bg-[#dbeafe] text-[#1d4ed8] hover:bg-[#dbeafe]">
-                    {portfolioSlides.length} piece{portfolioSlides.length === 1 ? "" : "s"}
-                  </Badge>
+
+                  <TabsList className="grid w-full max-w-[220px] grid-cols-2 rounded-[1.2rem] bg-[#eaf3ff] p-1">
+                    <TabsTrigger value="portfolio" className="rounded-[0.9rem] text-xs font-semibold">
+                      Portfolio
+                    </TabsTrigger>
+                    <TabsTrigger value="drops" className="rounded-[0.9rem] text-xs font-semibold">
+                      Drops
+                    </TabsTrigger>
+                  </TabsList>
                 </div>
-              </div>
 
-              <div className="rounded-[1.5rem] bg-[linear-gradient(135deg,#eff6ff_0%,#dbeafe_100%)] p-5 text-foreground shadow-[0_18px_40px_rgba(37,99,235,0.08)]">
-                <p className="text-4xl font-black">{drops.length}</p>
-                <p className="mt-2 text-2xl leading-tight">Live Drops</p>
-                <p className="mt-4 text-sm text-foreground/70">
-                  Public profile is rendering live drop inventory from Supabase and live subscription status from the artist contract.
-                </p>
-              </div>
-            </div>
+                <div className="mt-5">
+                  <TabsContent value="portfolio" className="mt-0 space-y-4">
+                    <div className="rounded-[1.8rem] bg-[#eaf3ff] p-3 shadow-[0_22px_45px_rgba(37,99,235,0.08)]">
+                      <Carousel opts={{ loop: portfolioSlides.length > 1 }} className="mx-auto w-full">
+                        <CarouselContent>
+                          {portfolioSlides.map((piece) => (
+                            <CarouselItem key={piece.id}>
+                              <button
+                                type="button"
+                                onClick={() => setLightboxImage(piece)}
+                                className="group relative block h-[260px] w-full overflow-hidden rounded-[1.4rem] sm:h-[340px]"
+                              >
+                                <img src={piece.image} alt={piece.title} className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105" />
+                                <div className="absolute inset-0 bg-gradient-to-t from-black/45 via-black/10 to-transparent" />
+                                <div className="absolute bottom-4 left-4 right-4 flex items-end justify-between gap-3">
+                                  <div className="rounded-[1.1rem] bg-white/88 px-4 py-2 text-left text-foreground backdrop-blur-sm">
+                                    <p className="text-sm font-semibold">{piece.title}</p>
+                                    <p className="text-xs text-muted-foreground">{`${piece.medium} - ${piece.year}`}</p>
+                                  </div>
+                                  <div className="rounded-full bg-white/82 px-3 py-1 text-xs font-semibold text-foreground backdrop-blur-sm">
+                                    {portfolioSlides.length > 1 ? "Open piece" : "Featured work"}
+                                  </div>
+                                </div>
+                              </button>
+                            </CarouselItem>
+                          ))}
+                        </CarouselContent>
+                        {portfolioSlides.length > 1 && (
+                          <>
+                            <CarouselPrevious className="left-3 top-auto bottom-3 h-10 w-10 translate-y-0 border-white/70 bg-white/85 text-foreground hover:bg-white" />
+                            <CarouselNext className="right-3 top-auto bottom-3 h-10 w-10 translate-y-0 border-white/70 bg-white/85 text-foreground hover:bg-white" />
+                          </>
+                        )}
+                      </Carousel>
+                    </div>
 
-            <div className="rounded-[1.75rem] bg-[linear-gradient(180deg,#ffffff_0%,#f4f8ff_100%)] p-4 shadow-[inset_0_0_0_1px_rgba(37,99,235,0.08)]">
-              <div className="hidden">
-                <Button
-                  onClick={handleSubscribe}
-                  disabled={isSubscribing || isSubscribePending || isSubscribeConfirming || isSubscribed || isSubscribedLoading}
-                  className="w-full rounded-full gradient-primary text-primary-foreground sm:w-auto"
-                >
-                  {isConnected
-                    ? isSubscribed
-                      ? "Subscribed Γ£ô"
-                      : isSubscribedLoading
-                        ? "Checking..."
-                        : isSubscribing || isSubscribePending
-                          ? "Processing..."
-                          : isSubscribeConfirming
-                            ? "Confirming..."
-                            : `Subscribe ┬╖ ${transformedArtist.subscriptionPrice} ETH/mo`
-                    : "Connect Wallet to Subscribe"}
-                </Button>
-                <Button
-                  onClick={() => setBuySharesOpen(true)}
-                  disabled={!isArtistOwner || onchainSubscribers < 100}
-                  variant={onchainSubscribers < 100 ? "secondary" : "outline"}
-                  className="w-full rounded-full sm:w-auto"
-                  title={
-                    !isArtistOwner
-                      ? "Only the artist can request an IP raise from their own profile"
-                      : onchainSubscribers < 100
-                        ? "Artist needs 100+ subscribers to request an IP raise"
-                        : ""
-                  }
-                >
-                  {!isArtistOwner ? "IP Raise Locked" : onchainSubscribers < 100 ? `Request Raise (${onchainSubscribers}/100)` : "Request IP Raise"}
-                </Button>
-                <Button variant="outline" size="icon" className="rounded-full self-start">
-                  <Heart className="h-4 w-4" />
-                </Button>
-              </div>
-
-              <div className="mt-1">
-                  <TabsContent value="portfolio" className="mt-4">
                     {portfolioPieces.length === 0 ? (
                       <p className="py-8 text-center text-xs text-muted-foreground">No portfolio pieces yet.</p>
                     ) : (
@@ -696,39 +616,87 @@ const ArtistProfilePage = () => {
                         ))}
                       </div>
                     )}
-                    <p className="mt-4 text-center font-body text-xs text-muted-foreground">
+
+                    <p className="text-center font-body text-xs text-muted-foreground">
                       <Grid3X3 className="mr-1 inline h-3 w-3" />
                       {portfolioPieces.length} pieces in collection
                     </p>
                   </TabsContent>
 
-                  <TabsContent value="drops" className="mt-4">
+                  <TabsContent value="drops" className="mt-0 space-y-4">
                     {dropsLoading ? (
-                      <div className="py-10 text-center text-sm text-muted-foreground">Loading drops...</div>
+                      <div className="rounded-[1.5rem] bg-white/80 py-12 text-center text-sm text-muted-foreground">
+                        Loading drops...
+                      </div>
                     ) : drops.length === 0 ? (
-                      <p className="py-8 text-center text-xs text-muted-foreground">No drops yet.</p>
+                      <div className="rounded-[1.5rem] border border-dashed border-[#dbe7ff] bg-white/80 py-12 text-center text-sm text-muted-foreground">
+                        No drops yet.
+                      </div>
                     ) : (
-                      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                        {drops.map((drop) => (
-                          <Link key={drop.id} to={`/drops/${drop.id}`} className="overflow-hidden rounded-2xl bg-card shadow-card">
-                            <div className="aspect-square overflow-hidden">
-                              <img src={drop.image} alt={drop.title} className="h-full w-full object-cover" />
-                            </div>
-                            <div className="p-3">
-                              <div className="flex items-center justify-between gap-2">
-                                <p className="truncate text-sm font-semibold text-card-foreground">{drop.title}</p>
-                                <span className="text-[10px] uppercase tracking-[0.22em] text-muted-foreground">{drop.type}</span>
-                              </div>
-                              <div className="mt-2 flex items-center gap-3 text-xs text-muted-foreground">
-                                <span className="inline-flex items-center gap-1"><Flame className="h-3 w-3 text-primary" /> {drop.priceEth} ETH</span>
-                                <span className="inline-flex items-center gap-1"><Users className="h-3 w-3 text-primary" /> {drop.bought}/{drop.maxBuy}</span>
+                      <>
+                        {featuredDrop && (
+                          <Link to={`/drops/${featuredDrop.id}`} className="group block overflow-hidden rounded-[1.8rem] bg-[#eaf3ff] p-3 shadow-[0_22px_45px_rgba(37,99,235,0.08)]">
+                            <div className="relative overflow-hidden rounded-[1.4rem]">
+                              <img src={featuredDrop.image} alt={featuredDrop.title} className="h-[260px] w-full object-cover transition-transform duration-500 group-hover:scale-105 sm:h-[340px]" />
+                              <div className="absolute inset-0 bg-gradient-to-t from-black/50 via-black/10 to-transparent" />
+                              <div className="absolute inset-x-4 bottom-4 flex flex-wrap items-end justify-between gap-3">
+                                <div className="max-w-xl rounded-[1.1rem] bg-white/88 px-4 py-3 text-foreground backdrop-blur-sm">
+                                  <p className="text-xs uppercase tracking-[0.24em] text-[#1d4ed8]">{featuredDrop.type}</p>
+                                  <p className="mt-2 text-xl font-black">{featuredDrop.title}</p>
+                                  <p className="mt-2 text-sm text-muted-foreground">
+                                    {featuredDrop.priceEth} ETH · {featuredDrop.bought}/{featuredDrop.maxBuy} collected
+                                  </p>
+                                </div>
+                                <div className="rounded-full bg-white/82 px-3 py-1 text-xs font-semibold text-foreground backdrop-blur-sm">
+                                  Open drop
+                                </div>
                               </div>
                             </div>
                           </Link>
-                        ))}
-                      </div>
+                        )}
+
+                        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                          {drops.map((drop) => (
+                            <Link key={drop.id} to={`/drops/${drop.id}`} className="overflow-hidden rounded-2xl bg-card shadow-card">
+                              <div className="aspect-square overflow-hidden">
+                                <img src={drop.image} alt={drop.title} className="h-full w-full object-cover" />
+                              </div>
+                              <div className="p-3">
+                                <div className="flex items-center justify-between gap-2">
+                                  <p className="truncate text-sm font-semibold text-card-foreground">{drop.title}</p>
+                                  <span className="text-[10px] uppercase tracking-[0.22em] text-muted-foreground">{drop.type}</span>
+                                </div>
+                                <div className="mt-2 flex items-center gap-3 text-xs text-muted-foreground">
+                                  <span className="inline-flex items-center gap-1"><Flame className="h-3 w-3 text-primary" /> {drop.priceEth} ETH</span>
+                                  <span className="inline-flex items-center gap-1"><Users className="h-3 w-3 text-primary" /> {drop.bought}/{drop.maxBuy}</span>
+                                </div>
+                              </div>
+                            </Link>
+                          ))}
+                        </div>
+                      </>
                     )}
                   </TabsContent>
+                </div>
+              </div>
+
+              <div className="grid gap-3">
+                <div className="rounded-[1.5rem] bg-[#eff6ff] p-4">
+                  <p className="text-4xl font-black text-foreground">
+                    {activeContentTab === "portfolio" ? portfolioPieces.length : drops.length}
+                  </p>
+                  <p className="mt-1 text-foreground/80">
+                    {activeContentTab === "portfolio" ? "Portfolio Pieces" : "Live Drops"}
+                  </p>
+                </div>
+                <div className="rounded-[1.5rem] bg-[#1d4ed8] p-4 text-white">
+                  <p className="text-4xl font-black">{onchainSubscribers}</p>
+                  <p className="mt-1 text-white/90">Collectors</p>
+                </div>
+                <div className="rounded-[1.5rem] bg-white/80 p-4 shadow-[inset_0_0_0_1px_rgba(37,99,235,0.08)]">
+                  <p className="text-4xl font-black text-foreground">{visibleRaiseCampaigns.length}</p>
+                  <p className="mt-1 text-foreground/80">Approved Raises</p>
+                </div>
               </div>
             </div>
           </Tabs>
