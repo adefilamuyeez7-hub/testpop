@@ -39,6 +39,13 @@ type DropActionData = {
 type DropPrimaryActionCardProps = {
   drop: DropActionData;
   linkedProduct?: Product | null;
+  linkedRelease?: {
+    contract_kind?: "artDrop" | "productStore" | "creativeReleaseEscrow" | null;
+    contract_listing_id?: number | null;
+    contract_drop_id?: number | null;
+    metadata?: Record<string, unknown> | null;
+  } | null;
+  isCommerceLoading?: boolean;
   sourceKind?: string | null;
   onCollectSuccess: (payload: { ownerWallet: string; mintedTokenId: number | null }) => void;
 };
@@ -48,6 +55,8 @@ const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 function DropPrimaryActionCardInner({
   drop,
   linkedProduct,
+  linkedRelease,
+  isCommerceLoading = false,
   sourceKind,
   onCollectSuccess,
 }: DropPrimaryActionCardProps) {
@@ -67,9 +76,10 @@ function DropPrimaryActionCardInner({
       resolveDropBehavior({
         drop,
         linkedProduct,
+        linkedRelease,
         sourceKind,
       }),
-    [drop, linkedProduct, sourceKind]
+    [drop, linkedProduct, linkedRelease, sourceKind]
   );
   const isBuyDrop = behavior.mode === "collect";
   const isAuctionDrop = behavior.mode === "auction";
@@ -345,15 +355,22 @@ function DropPrimaryActionCardInner({
             </div>
           </div>
           {!behavior.isOnchainReady && (
-            <div className="rounded-xl border border-warning/60 bg-warning/10 p-3 text-warning text-xs flex items-center gap-2">
-              <AlertTriangle className="h-4 w-4" />
-              This release is visible, but its checkout contract is not ready yet.
-            </div>
+            isCommerceLoading ? (
+              <div className="rounded-xl border border-border bg-secondary/30 p-3 text-xs text-muted-foreground flex items-center gap-2">
+                <Clock className="h-4 w-4" />
+                Loading release checkout details...
+              </div>
+            ) : (
+              <div className="rounded-xl border border-warning/60 bg-warning/10 p-3 text-warning text-xs flex items-center gap-2">
+                <AlertTriangle className="h-4 w-4" />
+                This release is visible, but its checkout contract is not ready yet.
+              </div>
+            )
           )}
           <div className="flex gap-2">
             <Button
               onClick={handleAddToCart}
-              disabled={!linkedProduct?.id || !behavior.isOnchainReady || isCheckoutSoldOut}
+              disabled={!linkedProduct?.id || isCommerceLoading || !behavior.isOnchainReady || isCheckoutSoldOut}
               variant="outline"
               className="flex-1 rounded-full h-11"
             >
@@ -362,7 +379,7 @@ function DropPrimaryActionCardInner({
             </Button>
             <Button
               onClick={handleCheckoutNow}
-              disabled={!linkedProduct?.id || !behavior.isOnchainReady || isCheckoutSoldOut}
+              disabled={!linkedProduct?.id || isCommerceLoading || !behavior.isOnchainReady || isCheckoutSoldOut}
               className="flex-1 rounded-full gradient-primary text-primary-foreground font-semibold h-11"
             >
               {isCheckoutSoldOut ? "Sold Out" : "Checkout Now"}

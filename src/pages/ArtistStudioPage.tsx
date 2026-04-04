@@ -806,11 +806,13 @@ const CreateDropSheet = ({
           status: "published",
           type: "drop",
           contract_address: CREATIVE_RELEASE_ESCROW_ADDRESS,
+          contract_drop_id: onchainRelease.contractListingId,
           contract_kind: "creativeReleaseEscrow",
           metadata: {
             source_kind: "release_product",
             source_product_id: createdProduct.id,
             creative_release_id: releaseRecord.id,
+            contract_listing_id: onchainRelease.contractListingId,
             release_type: releaseType,
             product_type: releaseType,
             content_kind: contentKind,

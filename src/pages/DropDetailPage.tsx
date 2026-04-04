@@ -177,6 +177,7 @@ const DropDetailPage = () => {
   const resolvedLinkedRelease = linkedRelease || inlineLinkedRelease;
   const resolvedLinkedProduct = linkedProduct || inlineLinkedProduct;
   const linkedProductMetadata = toRecord(resolvedLinkedProduct?.metadata);
+  const dropMetadata = toRecord(dropRecord?.metadata);
   const releaseType =
     resolvedLinkedRelease?.release_type ||
     resolvedLinkedProduct?.product_type ||
@@ -188,10 +189,13 @@ const DropDetailPage = () => {
         ? resolveDropBehavior({
             drop,
             linkedProduct: resolvedLinkedProduct,
-            sourceKind: typeof dropRecord?.source_kind === "string" ? dropRecord.source_kind : null,
+            linkedRelease: resolvedLinkedRelease,
+            sourceKind:
+              (typeof dropRecord?.source_kind === "string" ? dropRecord.source_kind : null) ||
+              (typeof dropMetadata?.source_kind === "string" ? dropMetadata.source_kind : null),
           })
         : null,
-    [drop, dropRecord?.source_kind, resolvedLinkedProduct]
+    [drop, dropMetadata?.source_kind, dropRecord?.source_kind, resolvedLinkedProduct, resolvedLinkedRelease]
   );
   // FIXED #1: Better fallback sources for mediaSrc
   const mediaSrc = useMemo(() => {
@@ -581,7 +585,12 @@ const DropDetailPage = () => {
           <DropPrimaryActionCard
             drop={drop}
             linkedProduct={resolvedLinkedProduct}
-            sourceKind={typeof dropRecord?.source_kind === "string" ? dropRecord.source_kind : null}
+            linkedRelease={resolvedLinkedRelease}
+            isCommerceLoading={linkedDetailsLoading}
+            sourceKind={
+              (typeof dropRecord?.source_kind === "string" ? dropRecord.source_kind : null) ||
+              (typeof dropMetadata?.source_kind === "string" ? dropMetadata.source_kind : null)
+            }
             onCollectSuccess={handleCollectSuccess}
           />
         </Suspense>
