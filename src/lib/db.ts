@@ -1721,77 +1721,33 @@ export async function getAllWaitlistEntries() {
 export async function submitArtistApplication(
   data: ArtistApplicationInsert
 ): Promise<ArtistApplication> {
-  if (!supabaseUrl || !supabaseAnonKey) {
-    throw new Error("Supabase is not configured. Cannot submit application.");
-  }
-
   const normalized = {
     ...data,
     wallet_address: data.wallet_address.toLowerCase().trim(),
   };
 
-  const { data: result, error } = await supabase
-    .from("artist_applications")
-    .insert([normalized])
-    .select()
-    .single();
-
-  if (error) {
-    if (error.code === "23505") {
-      throw new Error("You've already submitted an application from this wallet.");
-    }
-    throw new Error(`Failed to submit application: ${error.message}`);
-  }
-
-  const { error: whitelistError } = await supabase
-    .from("whitelist")
-    .upsert(
-      {
-        wallet: normalized.wallet_address,
-        name: normalized.artist_name,
-        tag: normalized.art_types?.[0] || "artist",
-        status: "pending",
-        updated_at: new Date().toISOString(),
-      },
-      { onConflict: "wallet" }
-    );
-
-  if (whitelistError) {
-    throw new Error(`Application saved but whitelist sync failed: ${whitelistError.message}`);
-  }
-
-  if (!result) throw new Error("Application submitted but no confirmation received.");
-  return result as ArtistApplication;
+  return await secureApiRequest<ArtistApplication>("/artist-applications", {
+    method: "POST",
+    body: JSON.stringify(normalized),
+  });
 }
 
 export async function getArtistApplication(
   walletAddress: string
 ): Promise<ArtistApplication | null> {
-  if (!supabaseUrl || !supabaseAnonKey) return null;
-  const normalized = walletAddress.toLowerCase().trim();
-  const { data, error } = await supabase
-    .from("artist_applications")
-    .select("*")
-    .eq("wallet_address", normalized)
-    .single();
-  if (error && error.code !== "PGRST116") throw error;
-  return (data as ArtistApplication) ?? null;
+  if (!walletAddress?.trim()) return null;
+  return await secureApiRequest<ArtistApplication | null>("/artist-applications/me");
 }
 
 export async function getAllApplications(
   status?: "pending" | "approved" | "rejected"
 ): Promise<ArtistApplication[]> {
-  if (!supabaseUrl || !supabaseAnonKey) return [];
-  let query = supabase
-    .from("artist_applications")
-    .select("*")
-    .order("submitted_at", { ascending: false });
+  const params = new URLSearchParams();
+  if (status) params.set("status", status);
 
-  if (status) query = query.eq("status", status);
-
-  const { data, error } = await query;
-  if (error) throw error;
-  return (data as ArtistApplication[]) || [];
+  return await secureApiRequest<ArtistApplication[]>(
+    `/artist-applications${params.toString() ? `?${params.toString()}` : ""}`
+  );
 }
 
 export async function updateApplicationStatus(
@@ -1800,20 +1756,14 @@ export async function updateApplicationStatus(
   reviewedBy: string,
   adminNotes?: string
 ): Promise<ArtistApplication> {
-  const { data, error } = await supabase
-    .from("artist_applications")
-    .update({
+  return await secureApiRequest<ArtistApplication>(`/artist-applications/${applicationId}`, {
+    method: "PATCH",
+    body: JSON.stringify({
       status,
-      reviewed_at: new Date().toISOString(),
       reviewed_by: reviewedBy,
       admin_notes: adminNotes ?? null,
-    })
-    .eq("id", applicationId)
-    .select()
-    .single();
-
-  if (error) throw error;
-  return data as ArtistApplication;
+    }),
+  });
 }
 
 /**
@@ -1831,50 +1781,20 @@ export async function approveArtistAtomically(
   reviewedBy: string,
   adminNotes?: string
 ): Promise<{ success: boolean; message: string }> {
-  const normalized = walletAddress.toLowerCase().trim();
-
-  // Step 1: update application
-  const { error: appError } = await supabase
-    .from("artist_applications")
-    .update({
-      status: "approved",
-      reviewed_at: new Date().toISOString(),
-      reviewed_by: reviewedBy,
-      admin_notes: adminNotes ?? null,
-    })
-    .eq("id", applicationId);
-
-  if (appError) throw new Error(`Failed to update application: ${appError.message}`);
-
-  // Step 2: upsert whitelist
-  const { error: wlError } = await supabase
-    .from("whitelist")
-    .upsert(
-      {
-        wallet: normalized,
-        name: artistName,
-        status: "approved",
-        approved_at: new Date().toISOString(),
-      },
-      { onConflict: "wallet" }
-    );
-
-  if (wlError) throw new Error(`Failed to add to whitelist: ${wlError.message}`);
-
-  // Step 3: upsert artist profile
-  const { error: artistError } = await supabase
-    .from("artists")
-    .upsert(
-      {
-        wallet: normalized,
-        name: artistName,
-        bio,
-        updated_at: new Date().toISOString(),
-      },
-      { onConflict: "wallet" }
-    );
-
-  if (artistError) throw new Error(`Failed to create artist profile: ${artistError.message}`);
+  await secureApiRequest("/admin/approve-artist", {
+    method: "POST",
+    body: JSON.stringify({
+      wallet: walletAddress.toLowerCase().trim(),
+      approve: true,
+      deployContract: false,
+      applicationId,
+      artistName,
+      email,
+      bio,
+      reviewedBy,
+      adminNotes,
+    }),
+  });
 
   return { success: true, message: `${artistName} approved successfully.` };
 }

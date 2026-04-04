@@ -63,6 +63,13 @@ export const POAP_CAMPAIGN_V2_ABI = [
   },
   {
     type: "function",
+    name: "claimCancelledEthRefund",
+    inputs: [{ name: "campaignId", type: "uint256" }],
+    outputs: [],
+    stateMutability: "nonpayable",
+  },
+  {
+    type: "function",
     name: "getRedeemableCount",
     inputs: [
       { name: "campaignId", type: "uint256" },
@@ -131,7 +138,34 @@ export const POAP_CAMPAIGN_V2_ABI = [
   },
   {
     type: "function",
+    name: "ethRedeemedCredits",
+    inputs: [
+      { name: "", type: "uint256" },
+      { name: "", type: "address" },
+    ],
+    outputs: [{ name: "", type: "uint256" }],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
+    name: "contentRedeemedCredits",
+    inputs: [
+      { name: "", type: "uint256" },
+      { name: "", type: "address" },
+    ],
+    outputs: [{ name: "", type: "uint256" }],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
     name: "issuedCredits",
+    inputs: [{ name: "", type: "uint256" }],
+    outputs: [{ name: "", type: "uint256" }],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
+    name: "campaignEthBalance",
     inputs: [{ name: "", type: "uint256" }],
     outputs: [{ name: "", type: "uint256" }],
     stateMutability: "view",
@@ -155,6 +189,24 @@ export const POAP_CAMPAIGN_V2_ABI = [
       { name: "startTime", type: "uint64", indexed: false },
       { name: "endTime", type: "uint64", indexed: false },
       { name: "redeemStartTime", type: "uint64", indexed: false },
+    ],
+  },
+  {
+    type: "event",
+    name: "CampaignCancelled",
+    inputs: [
+      { name: "campaignId", type: "uint256", indexed: true },
+      { name: "reservedRefundWei", type: "uint256", indexed: false },
+    ],
+  },
+  {
+    type: "event",
+    name: "CancelledEthRefundClaimed",
+    inputs: [
+      { name: "campaignId", type: "uint256", indexed: true },
+      { name: "wallet", type: "address", indexed: true },
+      { name: "quantity", type: "uint256", indexed: false },
+      { name: "amountWei", type: "uint256", indexed: false },
     ],
   },
   {

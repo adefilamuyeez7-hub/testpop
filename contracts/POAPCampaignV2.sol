@@ -44,7 +44,10 @@ contract POAPCampaignV2 is ERC721, ERC721URIStorage, Ownable, ReentrancyGuard {
     mapping(uint256 => mapping(address => uint256)) public ethCredits;
     mapping(uint256 => mapping(address => uint256)) public contentCredits;
     mapping(uint256 => mapping(address => uint256)) public redeemedCredits;
+    mapping(uint256 => mapping(address => uint256)) public ethRedeemedCredits;
+    mapping(uint256 => mapping(address => uint256)) public contentRedeemedCredits;
     mapping(uint256 => uint256) public issuedCredits;
+    mapping(uint256 => uint256) public campaignEthBalance;
     mapping(uint256 => uint256) public tokenCampaign;
     mapping(address => uint256) public artistBalance;
 
@@ -63,7 +66,13 @@ contract POAPCampaignV2 is ERC721, ERC721URIStorage, Ownable, ReentrancyGuard {
     event ContentCreditsRevoked(uint256 indexed campaignId, address indexed wallet, uint256 quantity);
     event RewardsRedeemed(uint256 indexed campaignId, address indexed wallet, uint256 quantity);
     event ArtistBalanceWithdrawn(address indexed artist, uint256 amount);
-    event CampaignCancelled(uint256 indexed campaignId);
+    event CampaignCancelled(uint256 indexed campaignId, uint256 reservedRefundWei);
+    event CancelledEthRefundClaimed(
+        uint256 indexed campaignId,
+        address indexed wallet,
+        uint256 quantity,
+        uint256 amountWei
+    );
 
     constructor() ERC721("POAP Campaign V2", "POAP2") Ownable(msg.sender) {}
 
@@ -127,6 +136,7 @@ contract POAPCampaignV2 is ERC721, ERC721URIStorage, Ownable, ReentrancyGuard {
 
         ethCredits[campaignId][msg.sender] += quantity;
         issuedCredits[campaignId] += quantity;
+        campaignEthBalance[campaignId] += msg.value;
         artistBalance[campaign.artist] += msg.value;
 
         emit EthEntriesPurchased(campaignId, msg.sender, quantity, msg.value);
@@ -174,10 +184,22 @@ contract POAPCampaignV2 is ERC721, ERC721URIStorage, Ownable, ReentrancyGuard {
         require(block.timestamp >= campaign.redeemStartTime, "Redeem locked");
         require(quantity > 0, "Zero quantity");
 
-        uint256 redeemable = getRedeemableCount(campaignId, msg.sender);
+        uint256 ethRedeemable = _getAvailableEthCredits(campaignId, msg.sender);
+        uint256 contentRedeemable = _getAvailableContentCredits(campaignId, msg.sender);
+        uint256 redeemable = ethRedeemable + contentRedeemable;
         require(redeemable >= quantity, "Insufficient credits");
         require(campaign.minted + quantity <= campaign.maxSupply, "Supply exhausted");
 
+        uint256 ethToRedeem = quantity > ethRedeemable ? ethRedeemable : quantity;
+        uint256 contentToRedeem = quantity - ethToRedeem;
+
+        if (ethToRedeem > 0) {
+            ethRedeemedCredits[campaignId][msg.sender] += ethToRedeem;
+            campaignEthBalance[campaignId] -= ethToRedeem * campaign.ticketPriceWei;
+        }
+        if (contentToRedeem > 0) {
+            contentRedeemedCredits[campaignId][msg.sender] += contentToRedeem;
+        }
         redeemedCredits[campaignId][msg.sender] += quantity;
 
         for (uint256 i = 0; i < quantity; i++) {
@@ -190,11 +212,37 @@ contract POAPCampaignV2 is ERC721, ERC721URIStorage, Ownable, ReentrancyGuard {
     function cancelCampaign(uint256 campaignId) external {
         Campaign storage campaign = campaigns[campaignId];
         require(campaign.artist != address(0), "Campaign not found");
+        require(campaign.status == CampaignStatus.Active, "Campaign inactive");
         require(msg.sender == campaign.artist || msg.sender == owner(), "Not authorized");
+
+        uint256 reservedRefundWei = campaignEthBalance[campaignId];
+        if (reservedRefundWei > 0) {
+            require(artistBalance[campaign.artist] >= reservedRefundWei, "Refund reserve unavailable");
+            artistBalance[campaign.artist] -= reservedRefundWei;
+        }
 
         campaign.status = CampaignStatus.Cancelled;
 
-        emit CampaignCancelled(campaignId);
+        emit CampaignCancelled(campaignId, reservedRefundWei);
+    }
+
+    function claimCancelledEthRefund(uint256 campaignId) external nonReentrant {
+        Campaign storage campaign = campaigns[campaignId];
+        require(campaign.artist != address(0), "Campaign not found");
+        require(campaign.status == CampaignStatus.Cancelled, "Campaign not cancelled");
+
+        uint256 refundableCredits = _getAvailableEthCredits(campaignId, msg.sender);
+        require(refundableCredits > 0, "No cancelled ETH refund");
+
+        uint256 refundAmount = refundableCredits * campaign.ticketPriceWei;
+        ethCredits[campaignId][msg.sender] -= refundableCredits;
+        issuedCredits[campaignId] -= refundableCredits;
+        campaignEthBalance[campaignId] -= refundAmount;
+
+        (bool ok, ) = msg.sender.call{value: refundAmount}("");
+        require(ok, "Refund failed");
+
+        emit CancelledEthRefundClaimed(campaignId, msg.sender, refundableCredits, refundAmount);
     }
 
     function withdrawArtistBalance() external nonReentrant {
@@ -213,9 +261,7 @@ contract POAPCampaignV2 is ERC721, ERC721URIStorage, Ownable, ReentrancyGuard {
     }
 
     function getRedeemableCount(uint256 campaignId, address wallet) public view returns (uint256) {
-        uint256 totalCredits = getTotalCredits(campaignId, wallet);
-        uint256 redeemed = redeemedCredits[campaignId][wallet];
-        return totalCredits > redeemed ? totalCredits - redeemed : 0;
+        return _getAvailableEthCredits(campaignId, wallet) + _getAvailableContentCredits(campaignId, wallet);
     }
 
     function _supportsEth(EntryMode entryMode) internal pure returns (bool) {
@@ -224,6 +270,18 @@ contract POAPCampaignV2 is ERC721, ERC721URIStorage, Ownable, ReentrancyGuard {
 
     function _supportsContent(EntryMode entryMode) internal pure returns (bool) {
         return entryMode == EntryMode.Content || entryMode == EntryMode.Both;
+    }
+
+    function _getAvailableEthCredits(uint256 campaignId, address wallet) internal view returns (uint256) {
+        uint256 totalEthCredits = ethCredits[campaignId][wallet];
+        uint256 redeemedEthCredits = ethRedeemedCredits[campaignId][wallet];
+        return totalEthCredits > redeemedEthCredits ? totalEthCredits - redeemedEthCredits : 0;
+    }
+
+    function _getAvailableContentCredits(uint256 campaignId, address wallet) internal view returns (uint256) {
+        uint256 totalContentCredits = contentCredits[campaignId][wallet];
+        uint256 redeemedContentCredits = contentRedeemedCredits[campaignId][wallet];
+        return totalContentCredits > redeemedContentCredits ? totalContentCredits - redeemedContentCredits : 0;
     }
 
     function _mintPOAP(uint256 campaignId, address to) internal {

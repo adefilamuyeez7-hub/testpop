@@ -8,6 +8,7 @@ import {
   getArtistApplication,
   type ArtistApplicationInsert,
 } from "@/lib/db";
+import { establishSecureSession } from "@/lib/secureAuth";
 import { validateApplicationData } from "@/lib/validation";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
@@ -78,6 +79,7 @@ export default function ArtistApplicationPage({ embedded = false }: ArtistApplic
     const checkStatus = async () => {
       setCheckingStatus(true);
       try {
+        await establishSecureSession(address);
         const existing = await getArtistApplication(address);
         if (existing) {
           setApplicationStatus(existing.status as ApplicationStatus);
@@ -139,6 +141,7 @@ export default function ArtistApplicationPage({ embedded = false }: ArtistApplic
 
     setLoading(true);
     try {
+      await establishSecureSession(address);
       const result = await submitArtistApplication(validated);
 
       if (!result?.id) {

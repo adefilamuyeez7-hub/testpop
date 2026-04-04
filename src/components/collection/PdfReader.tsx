@@ -4,9 +4,17 @@ import { Document, Page, pdfjs } from "react-pdf";
 import "react-pdf/dist/Page/AnnotationLayer.css";
 import "react-pdf/dist/Page/TextLayer.css";
 
-// Configure PDF.js worker - use CDN as fallback for Vite builds
+// FIXED #4: Configure PDF.js worker with better fallback and error handling
 if (typeof window !== 'undefined') {
-  pdfjs.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjs.version}/pdf.worker.min.js`;
+  // Use HTTPS CDN for security
+  const workerUrl = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjs.version}/pdf.worker.min.js`;
+  pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
+  
+  // Log worker configuration for debugging
+  console.debug("[PDF] Worker configured:", {
+    version: pdfjs.version,
+    workerUrl: workerUrl,
+  });
 }
 
 interface PdfReaderProps {
@@ -30,7 +38,10 @@ export const PdfReader: FC<PdfReaderProps> = ({ src, title, onClose }) => {
     if (trimmed.startsWith("blob:") || trimmed.startsWith("data:") || trimmed.startsWith("/")) {
       return trimmed;
     }
-    if (trimmed.startsWith("http://") || trimmed.startsWith("https://") || trimmed.startsWith("ipfs://")) {
+    if (trimmed.startsWith("ipfs://")) {
+      return `/api/media/proxy?url=${encodeURIComponent(trimmed)}`;
+    }
+    if (/^https?:\/\/[^/]+\/ipfs\/.+/i.test(trimmed)) {
       return `/api/media/proxy?url=${encodeURIComponent(trimmed)}`;
     }
     return trimmed;
@@ -133,18 +144,35 @@ export const PdfReader: FC<PdfReaderProps> = ({ src, title, onClose }) => {
               file={pdfSource}
               loading=""
               onLoadSuccess={({ numPages }) => {
+                console.debug("[PDF] Document loaded successfully:", { numPages, src });
                 setTotalPages(numPages);
                 setIsLoading(false);
                 setError(null);
                 setPageNumber((current) => Math.min(current, numPages));
               }}
               onLoadError={(loadError) => {
-                console.error("Failed to load PDF:", loadError);
+                // FIXED #6: Better error logging
+                const errorDetails = {
+                  type: "LoadError",
+                  message: loadError?.message || String(loadError),
+                  src: src,
+                  resolvedSourceUrl: resolvedSourceUrl,
+                  timestamp: new Date().toISOString(),
+                };
+                console.error("[PDF] Load failed:", errorDetails);
                 setError("This PDF could not be opened in the in-app reader.");
                 setIsLoading(false);
               }}
               onSourceError={(sourceError) => {
-                console.error("Failed to resolve PDF source:", sourceError);
+                // FIXED #6: Better error logging
+                const errorDetails = {
+                  type: "SourceError",
+                  message: sourceError?.message || String(sourceError),
+                  src: src,
+                  resolvedSourceUrl: resolvedSourceUrl,
+                  timestamp: new Date().toISOString(),
+                };
+                console.error("[PDF] Source error:", errorDetails);
                 setError("This PDF source could not be reached.");
                 setIsLoading(false);
               }}
@@ -155,9 +183,20 @@ export const PdfReader: FC<PdfReaderProps> = ({ src, title, onClose }) => {
                 renderAnnotationLayer
                 renderTextLayer
                 loading=""
-                onRenderSuccess={() => setIsLoading(false)}
+                onRenderSuccess={() => {
+                  console.debug("[PDF] Page rendered successfully:", { pageNumber });
+                  setIsLoading(false);
+                }}
                 onRenderError={(renderError) => {
-                  console.error("Failed to render PDF page:", renderError);
+                  // FIXED #6: Better error logging
+                  const errorDetails = {
+                    type: "RenderError",
+                    message: renderError?.message || String(renderError),
+                    pageNumber,
+                    src,
+                    timestamp: new Date().toISOString(),
+                  };
+                  console.error("[PDF] Render failed:", errorDetails);
                   setError("This PDF loaded but could not be rendered on this device.");
                   setIsLoading(false);
                 }}

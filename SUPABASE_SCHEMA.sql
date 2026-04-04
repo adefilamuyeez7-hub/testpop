@@ -1140,20 +1140,34 @@ CREATE INDEX IF NOT EXISTS idx_artist_applications_submitted
 -- RLS
 ALTER TABLE public.artist_applications ENABLE ROW LEVEL SECURITY;
 
--- Anyone (including unauthenticated users) can submit
 DROP POLICY IF EXISTS "applications_public_insert" ON public.artist_applications;
-CREATE POLICY "applications_public_insert" ON public.artist_applications
-  FOR INSERT WITH CHECK (true);
-
--- Anyone can read (admin panel uses anon key for now)
 DROP POLICY IF EXISTS "applications_public_select" ON public.artist_applications;
-CREATE POLICY "applications_public_select" ON public.artist_applications
-  FOR SELECT USING (true);
-
--- Admins can update (approve / reject)
 DROP POLICY IF EXISTS "applications_admin_update" ON public.artist_applications;
-CREATE POLICY "applications_admin_update" ON public.artist_applications
-  FOR UPDATE USING (true);
+DROP POLICY IF EXISTS "applications_owner_insert" ON public.artist_applications;
+DROP POLICY IF EXISTS "applications_owner_select" ON public.artist_applications;
+DROP POLICY IF EXISTS "applications_service_update" ON public.artist_applications;
+
+CREATE POLICY "applications_owner_insert" ON public.artist_applications
+  FOR INSERT WITH CHECK (
+    auth.role() = 'service_role'
+    OR (
+      auth.role() = 'authenticated'
+      AND lower(coalesce(auth.jwt() ->> 'wallet', '')) = lower(wallet_address)
+    )
+  );
+
+CREATE POLICY "applications_owner_select" ON public.artist_applications
+  FOR SELECT USING (
+    auth.role() = 'service_role'
+    OR (
+      auth.role() = 'authenticated'
+      AND lower(coalesce(auth.jwt() ->> 'wallet', '')) = lower(wallet_address)
+    )
+  );
+
+CREATE POLICY "applications_service_update" ON public.artist_applications
+  FOR UPDATE USING (auth.role() = 'service_role')
+  WITH CHECK (auth.role() = 'service_role');
 
 -- ── updated_at trigger (reuse function if it already exists) ──────────────────
 CREATE OR REPLACE FUNCTION public.update_updated_at()

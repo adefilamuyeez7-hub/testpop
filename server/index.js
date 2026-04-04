@@ -5,7 +5,11 @@ import cookieParser from "cookie-parser";
 import multer from "multer";
 import jwt from "jsonwebtoken";
 import rateLimit from "express-rate-limit";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { createClient } from "@supabase/supabase-js";
+import { ethers } from "ethers";
 import { dropUpdateSchema, validateInput } from "./validation.js";
 import { appJwtSecret } from "./config.js";
 import { getPinataAuthMode } from "./pinataAuth.js";
@@ -139,15 +143,6 @@ function resolveMediaProxyTarget(value = "") {
 
   if (isBareIpfsCid(normalized)) {
     return `${IPFS_GATEWAY_BASE}/${normalized}`;
-  }
-
-  try {
-    const parsed = new URL(normalized);
-    if (parsed.protocol === "http:" || parsed.protocol === "https:") {
-      return parsed.toString();
-    }
-  } catch {
-    return null;
   }
 
   return null;
@@ -1046,6 +1041,28 @@ async function getWhitelistStatusByWallet(wallet) {
   return data?.status || null;
 }
 
+async function getArtistAccessByWallet(wallet) {
+  const normalizedWallet = normalizeWallet(wallet);
+  if (!normalizedWallet) {
+    return {
+      artistRecord: null,
+      whitelistStatus: null,
+      isApprovedArtist: false,
+    };
+  }
+
+  const [artistRecord, whitelistStatus] = await Promise.all([
+    getArtistRecordByWallet(normalizedWallet),
+    getWhitelistStatusByWallet(normalizedWallet),
+  ]);
+
+  return {
+    artistRecord,
+    whitelistStatus,
+    isApprovedArtist: Boolean(artistRecord?.id) && whitelistStatus === "approved",
+  };
+}
+
 async function getArtistSubscriberCount(contractAddress) {
   const normalizedAddress = String(contractAddress || "").trim();
   if (!normalizedAddress) return 0;
@@ -1799,26 +1816,30 @@ app.get("/api/auth/session", authRequired, (req, res) => {
 
 app.post("/artists/profile", authRequired, async (req, res) => {
   const wallet = normalizeWallet(req.body?.wallet);
+  if (!wallet) {
+    return res.status(400).json({ error: "A valid wallet is required" });
+  }
+
   if (!sameWalletOrAdmin(wallet, req.auth)) {
     return res.status(403).json({ error: "Cannot edit another wallet profile" });
   }
 
+  const isAdmin = req.auth.role === "admin";
   const profile = req.body?.profile || {};
-  const { data: whitelistEntry } = await supabase
-    .from("whitelist")
-    .select("status")
-    .eq("wallet", wallet)
-    .maybeSingle();
+  const { whitelistStatus } = await getArtistAccessByWallet(wallet);
+
+  if (!isAdmin && whitelistStatus !== "approved") {
+    return res.status(403).json({ error: "Only approved artists can create or update artist profiles" });
+  }
 
   const inferredStatus =
-    profile.status ??
-    (whitelistEntry?.status === "approved"
+    (whitelistStatus === "approved"
       ? "approved"
-      : whitelistEntry?.status === "rejected"
+      : whitelistStatus === "rejected"
         ? "rejected"
-        : whitelistEntry?.status === "pending"
+        : whitelistStatus === "pending"
           ? "pending"
-          : undefined);
+          : null);
 
   const payload = {
     wallet,
@@ -1826,8 +1847,8 @@ app.post("/artists/profile", authRequired, async (req, res) => {
     handle: profile.handle ?? null,
     bio: profile.bio ?? null,
     tag: profile.tag ?? null,
-    role: profile.role ?? null,
-    status: inferredStatus,
+    role: isAdmin ? (profile.role ?? null) : "artist",
+    status: isAdmin ? (profile.status ?? inferredStatus) : inferredStatus,
     subscription_price: profile.subscription_price ?? profile.subscriptionPrice ?? null,
     avatar_url: profile.avatar_url ?? profile.avatar ?? null,
     banner_url: profile.banner_url ?? profile.banner ?? null,
@@ -1836,7 +1857,9 @@ app.post("/artists/profile", authRequired, async (req, res) => {
     website_url: profile.website_url ?? profile.websiteUrl ?? null,
     poap_allocation: profile.poap_allocation ?? profile.defaultPoapAllocation ?? undefined,
     portfolio: profile.portfolio ?? undefined,
-    contract_address: profile.contract_address ?? profile.contractAddress ?? undefined,
+    contract_address: isAdmin ? (profile.contract_address ?? profile.contractAddress ?? undefined) : undefined,
+    contract_deployment_tx: isAdmin ? (profile.contract_deployment_tx ?? profile.contractDeploymentTx ?? undefined) : undefined,
+    contract_deployed_at: isAdmin ? (profile.contract_deployed_at ?? profile.contractDeployedAt ?? undefined) : undefined,
     updated_at: new Date().toISOString(),
   };
 
@@ -1850,10 +1873,10 @@ app.post("/artists/profile", authRequired, async (req, res) => {
   return res.json(data);
 });
 
-app.post("/artists/contract-address", authRequired, async (req, res) => {
+app.post("/artists/contract-address", authRequired, adminRequired, async (req, res) => {
   const wallet = normalizeWallet(req.body?.wallet);
-  if (!sameWalletOrAdmin(wallet, req.auth)) {
-    return res.status(403).json({ error: "Cannot update another wallet contract address" });
+  if (!wallet) {
+    return res.status(400).json({ error: "A valid wallet is required" });
   }
 
   const { contractAddress, deploymentTx } = req.body || {};
@@ -1908,6 +1931,12 @@ app.post("/drops", authRequired, async (req, res) => {
   if (artistError) return res.status(400).json({ error: artistError.message });
   if (!sameWalletOrAdmin(artist.wallet, req.auth)) {
     return res.status(403).json({ error: "Cannot create a drop for another artist" });
+  }
+  if (req.auth.role !== "admin") {
+    const whitelistStatus = await getWhitelistStatusByWallet(artist.wallet);
+    if (whitelistStatus !== "approved") {
+      return res.status(403).json({ error: "Only approved artists can create drops" });
+    }
   }
 
   let insertPayload = { ...drop };
@@ -2310,6 +2339,13 @@ registerRoute("post", "/creative-releases", authRequired, async (req, res) => {
       return res.status(403).json({ error: "Cannot create releases for another artist" });
     }
 
+    if (req.auth.role !== "admin") {
+      const whitelistStatus = await getWhitelistStatusByWallet(artistRecord.wallet);
+      if (whitelistStatus !== "approved") {
+        return res.status(403).json({ error: "Only approved artists can create creative releases" });
+      }
+    }
+
     const now = new Date().toISOString();
     const insertPayload = {
       ...payload,
@@ -2379,8 +2415,21 @@ app.post("/products", authRequired, async (req, res) => {
     return res.status(403).json({ error: "Cannot create products for another wallet" });
   }
 
+  const isAdmin = req.auth.role === "admin";
   let inferredArtistId = product.artist_id ?? null;
-  if (!inferredArtistId) {
+  if (!isAdmin) {
+    const { artistRecord, whitelistStatus } = await getArtistAccessByWallet(creatorWallet);
+    if (!artistRecord?.id) {
+      return res.status(400).json({ error: "Artist profile not found. Complete your profile first." });
+    }
+    if (whitelistStatus !== "approved") {
+      return res.status(403).json({ error: "Only approved artists can create products" });
+    }
+    if (inferredArtistId && inferredArtistId !== artistRecord.id) {
+      return res.status(403).json({ error: "Products can only be created for your own artist profile" });
+    }
+    inferredArtistId = artistRecord.id;
+  } else if (!inferredArtistId) {
     try {
       inferredArtistId = await findArtistIdByWallet(creatorWallet);
     } catch (resolveError) {
@@ -3470,6 +3519,164 @@ app.patch("/orders/:id", authRequired, async (req, res) => {
   return res.json(data);
 });
 
+registerRoute("post", "/artist-applications", authRequired, async (req, res) => {
+  try {
+    const payload = req.body || {};
+    if (payload.wallet_address && normalizeWallet(payload.wallet_address) !== req.auth.wallet) {
+      return res.status(403).json({ error: "Applications can only be submitted for your connected wallet" });
+    }
+
+    const artTypes = Array.isArray(payload.art_types)
+      ? payload.art_types.map((entry) => String(entry || "").trim()).filter(Boolean)
+      : [];
+
+    const insertPayload = {
+      wallet_address: req.auth.wallet,
+      email: String(payload.email || "").trim(),
+      artist_name: String(payload.artist_name || "").trim(),
+      bio: payload.bio ? String(payload.bio) : null,
+      art_types: artTypes,
+      twitter_url: payload.twitter_url ? String(payload.twitter_url).trim() : null,
+      instagram_url: payload.instagram_url ? String(payload.instagram_url).trim() : null,
+      website_url: payload.website_url ? String(payload.website_url).trim() : null,
+      portfolio_url: payload.portfolio_url ? String(payload.portfolio_url).trim() : null,
+      terms_agreed: payload.terms_agreed === true,
+    };
+
+    if (!insertPayload.artist_name || !insertPayload.email) {
+      return res.status(400).json({ error: "artist_name and email are required" });
+    }
+    if (!insertPayload.terms_agreed) {
+      return res.status(400).json({ error: "terms_agreed must be accepted" });
+    }
+    if (insertPayload.art_types.length === 0) {
+      return res.status(400).json({ error: "At least one art type is required" });
+    }
+
+    const { data, error } = await supabase
+      .from("artist_applications")
+      .insert([insertPayload])
+      .select("*")
+      .single();
+
+    if (error?.code === "23505") {
+      return res.status(409).json({ error: "You've already submitted an application from this wallet." });
+    }
+    if (error) {
+      return res.status(400).json({ error: error.message || "Failed to submit application" });
+    }
+
+    const now = new Date().toISOString();
+    const { data: whitelistEntry, error: whitelistReadError } = await supabase
+      .from("whitelist")
+      .select("status")
+      .eq("wallet", req.auth.wallet)
+      .maybeSingle();
+
+    if (whitelistReadError) {
+      return res.status(400).json({ error: whitelistReadError.message || "Failed to sync whitelist entry" });
+    }
+
+    const { error: whitelistError } = await supabase
+      .from("whitelist")
+      .upsert(
+        {
+          wallet: req.auth.wallet,
+          name: insertPayload.artist_name,
+          tag: insertPayload.art_types[0] || "artist",
+          status: whitelistEntry?.status || "pending",
+          joined_at: whitelistEntry?.status ? undefined : now,
+          updated_at: now,
+        },
+        { onConflict: "wallet" }
+      );
+
+    if (whitelistError) {
+      return res.status(400).json({ error: whitelistError.message || "Failed to sync whitelist entry" });
+    }
+
+    return res.status(201).json(data);
+  } catch (error) {
+    return res.status(500).json({ error: error.message || "Failed to submit artist application" });
+  }
+});
+
+registerRoute("get", "/artist-applications/me", authRequired, async (req, res) => {
+  try {
+    const application = await getLatestArtistApplication(req.auth.wallet);
+    return res.json(application || null);
+  } catch (error) {
+    return res.status(500).json({ error: error.message || "Failed to load artist application" });
+  }
+});
+
+registerRoute("get", "/artist-applications", authRequired, adminRequired, async (req, res) => {
+  try {
+    const requestedStatus =
+      typeof req.query.status === "string" && req.query.status.trim()
+        ? req.query.status.trim()
+        : null;
+
+    let query = supabase
+      .from("artist_applications")
+      .select("*")
+      .order("submitted_at", { ascending: false });
+
+    if (requestedStatus) {
+      query = query.eq("status", requestedStatus);
+    }
+
+    const { data, error } = await query;
+    if (error) {
+      return res.status(400).json({ error: error.message || "Failed to load artist applications" });
+    }
+
+    return res.json(data || []);
+  } catch (error) {
+    return res.status(500).json({ error: error.message || "Failed to load artist applications" });
+  }
+});
+
+registerRoute("patch", "/artist-applications/:id", authRequired, adminRequired, async (req, res) => {
+  try {
+    const nextStatus = req.body?.status;
+    if (nextStatus && !["pending", "approved", "rejected"].includes(String(nextStatus))) {
+      return res.status(400).json({ error: "Invalid application status" });
+    }
+
+    const updates = {
+      updated_at: new Date().toISOString(),
+    };
+
+    if (nextStatus) {
+      updates.status = String(nextStatus);
+      updates.reviewed_at = new Date().toISOString();
+      updates.reviewed_by = req.auth.wallet;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(req.body || {}, "admin_notes")) {
+      updates.admin_notes = req.body.admin_notes ?? null;
+    } else if (Object.prototype.hasOwnProperty.call(req.body || {}, "adminNotes")) {
+      updates.admin_notes = req.body.adminNotes ?? null;
+    }
+
+    const { data, error } = await supabase
+      .from("artist_applications")
+      .update(updates)
+      .eq("id", req.params.id)
+      .select("*")
+      .single();
+
+    if (error) {
+      return res.status(400).json({ error: error.message || "Failed to update artist application" });
+    }
+
+    return res.json(data);
+  } catch (error) {
+    return res.status(500).json({ error: error.message || "Failed to update artist application" });
+  }
+});
+
 app.post("/whitelist", authRequired, async (req, res) => {
   const entry = req.body || {};
   const wallet = normalizeWallet(entry.wallet || req.auth.wallet);
@@ -4005,14 +4212,23 @@ const mediaProxyImpl = async (req, res) => {
       return res.status(400).json({ error: "A valid media URL or IPFS URI is required." });
     }
 
+    // FIXED #5: Add upstream headers to avoid rejection
     const upstream = await fetch(target, {
       method: "GET",
       headers: {
         Accept: req.headers.accept || "*/*",
+        "User-Agent": req.headers["user-agent"] || "POPUP-Media-Proxy/1.0",
+        "Referer": `https://${req.headers.host || "localhost"}`,
       },
+      timeout: 30000,
     });
 
     if (!upstream.ok) {
+      console.error("[PROXY] Upstream fetch failed:", {
+        target,
+        status: upstream.status,
+        statusText: upstream.statusText,
+      });
       return res.status(upstream.status).json({
         error: `Upstream media request failed with ${upstream.status} ${upstream.statusText}`,
       });
@@ -4042,8 +4258,14 @@ const mediaProxyImpl = async (req, res) => {
 
     return res.status(200).send(Buffer.from(arrayBuffer));
   } catch (error) {
+    // FIXED #6: Better error logging
+    console.error("[PROXY] Media proxy error:", {
+      error: error?.message || String(error),
+      url: req.query?.url,
+      stack: error?.stack,
+    });
     return res.status(500).json({
-      error: error.message || "Failed to proxy media",
+      error: error?.message || "Failed to proxy media",
     });
   }
 };

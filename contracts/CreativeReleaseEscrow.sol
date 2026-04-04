@@ -78,6 +78,10 @@ contract CreativeReleaseEscrow is ERC721, Ownable, ReentrancyGuard {
         uint256 payoutBps
     ) external returns (uint256 listingId) {
         require(artist != address(0), "artist required");
+        require(
+            msg.sender == owner() || msg.sender == artist || (adminWallet != address(0) && msg.sender == adminWallet),
+            "not authorized"
+        );
         require(bytes(metadataURI).length > 0, "metadata required");
         require(unitPrice > 0, "price required");
         require(supply > 0, "supply required");
@@ -178,6 +182,22 @@ contract CreativeReleaseEscrow is ERC721, Ownable, ReentrancyGuard {
         require(!order.released, "already released");
         require(!order.refunded, "already refunded");
 
+        ReleaseListing storage listing = listings[order.listingId];
+        uint256[] storage tokenIds = _orderTokenIds[orderId];
+        require(tokenIds.length == order.quantity, "order token tracking mismatch");
+
+        for (uint256 index = 0; index < tokenIds.length; index++) {
+            require(ownerOf(tokenIds[index]) == order.buyer, "refund requires buyer-held tokens");
+        }
+
+        for (uint256 index = 0; index < tokenIds.length; index++) {
+            uint256 tokenId = tokenIds[index];
+            _burn(tokenId);
+            delete tokenListingIds[tokenId];
+        }
+
+        listing.sold -= order.quantity;
+        delete _orderTokenIds[orderId];
         order.refunded = true;
         if (platformBalance >= order.platformFee) {
             platformBalance -= order.platformFee;
