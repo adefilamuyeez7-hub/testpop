@@ -1610,6 +1610,44 @@ app.use((req, _res, next) => {
   next();
 });
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// PAGINATION UTILITIES (Phase 2 Optimization)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Extract pagination parameters from request query
+ * @param {Object} req Express request object
+ * @returns {{page: number, limit: number, sort: string, order: 'asc'|'desc'}}
+ */
+function getPaginationParams(req) {
+  const page = Math.max(parseInt(req.query.page || '1', 10), 1);
+  const limit = Math.min(Math.max(parseInt(req.query.limit || '20', 10), 1), 100); // Max 100 items
+  const sort = req.query.sort || 'created_at';
+  const order = req.query.order === 'asc' ? 'asc' : 'desc';
+  
+  return { page, limit, sort, order };
+}
+
+/**
+ * Build paginated API response
+ * @param {Array} items Data items
+ * @param {number} total Total count
+ * @param {number} page Current page
+ * @param {number} limit Items per page
+ * @returns {{items: Array, total: number, page: number, limit: number, pages: number, hasMore: boolean}}
+ */
+function buildPaginatedResponse(items, total, page, limit) {
+  const pages = Math.ceil(total / limit);
+  return {
+    items,
+    total,
+    page,
+    limit,
+    pages,
+    hasMore: page < pages
+  };
+}
+
 app.get("/health", (_req, res) => {
   console.log("✅ /health endpoint called");
   res.json({ ok: true, service: "popup-api", env: NODE_ENV });
@@ -4313,27 +4351,39 @@ app.post("/api/admin/reject-artist", authRequired, adminRequired, rejectArtistIm
 
 /**
  * ═════════════════════════════════════════════════════════════
- * ADMIN - Get pending and approved artists
+ * ADMIN - Get pending and approved artists (with pagination)
  * Registered at both /admin/* and /api/admin/*
+ * Query params: status, page, limit, sort, order
  * ═════════════════════════════════════════════════════════════
  */
 const getAdminArtistsImpl = async (req, res) => {
   try {
     const { status } = req.query; // "pending", "approved", or undefined for all
+    const { page, limit, sort, order } = getPaginationParams(req);
+    const offset = (page - 1) * limit;
     
-    let query = supabase.from("whitelist").select("*");
-    
+    // Build count query
+    let countQuery = supabase.from("whitelist").select("*", { count: "exact" });
     if (status && ["pending", "approved", "rejected"].includes(status)) {
-      query = query.eq("status", status);
+      countQuery = countQuery.eq("status", status);
+    }
+    
+    // Build data query
+    let dataQuery = supabase.from("whitelist").select("*");
+    if (status && ["pending", "approved", "rejected"].includes(status)) {
+      dataQuery = dataQuery.eq("status", status);
+    }
+    dataQuery = dataQuery
+      .order(sort, { ascending: order === 'asc' })
+      .range(offset, offset + limit - 1);
+
+    const [countResult, dataResult] = await Promise.all([countQuery, dataQuery]);
+
+    if (countResult.error || dataResult.error) {
+      return res.status(400).json({ error: (countResult.error || dataResult.error).message });
     }
 
-    const { data, error } = await query.order("created_at", { ascending: false });
-
-    if (error) {
-      return res.status(400).json({ error: error.message });
-    }
-
-    const whitelistEntries = data || [];
+    const whitelistEntries = dataResult.data || [];
     const wallets = whitelistEntries
       .map((entry) => normalizeWallet(entry.wallet))
       .filter(Boolean);
@@ -4366,10 +4416,10 @@ const getAdminArtistsImpl = async (req, res) => {
       artists: artistsByWallet.get(normalizeWallet(entry.wallet)) || null,
     }));
 
-    return res.json({
-      artists: merged,
-      total: merged.length,
-    });
+    const total = countResult.count || 0;
+    const paginatedResponse = buildPaginatedResponse(merged, total, page, limit);
+
+    return res.json(paginatedResponse);
   } catch (error) {
     console.error("❌ Admin artists fetch error:", error);
     return res.status(500).json({ error: error.message || "Failed to fetch artists" });

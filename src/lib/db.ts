@@ -481,6 +481,43 @@ async function secureApiRequest<T>(path: string, init: RequestInit = {}): Promis
 }
 
 // ──────────────────────────────────────────────
+//  Pagination Types & Utilities
+// ──────────────────────────────────────────────
+
+export interface PaginationOptions {
+  page?: number;
+  limit?: number;
+  sort?: string;
+  order?: 'asc' | 'desc';
+}
+
+export interface PaginatedResponse<T> {
+  items: T[];
+  total: number;
+  page: number;
+  limit: number;
+  pages: number;
+  hasMore: boolean;
+}
+
+// Helper to build pagination query parameters
+export function buildPaginationParams(options: PaginationOptions): URLSearchParams {
+  const params = new URLSearchParams();
+  const page = Math.max(options.page || 1, 1);
+  const limit = Math.min(Math.max(options.limit || 20, 1), 100); // Max 100 items per page
+  
+  params.set('page', page.toString());
+  params.set('limit', limit.toString());
+  
+  if (options.sort) {
+    params.set('sort', options.sort);
+    params.set('order', options.order === 'desc' ? 'desc' : 'asc');
+  }
+  
+  return params;
+}
+
+// ──────────────────────────────────────────────
 //  Health Check & Connection Verification
 // ──────────────────────────────────────────────
 
@@ -619,6 +656,56 @@ export async function getArtistDrops(artistId: string) {
   } catch (error: any) {
     console.error("❌ getArtistDrops failed:", error.message);
     return [];
+  }
+}
+
+// Paginated version of getArtistDrops
+export async function getArtistDropsPaginated(
+  artistId: string,
+  options: PaginationOptions = {}
+): Promise<PaginatedResponse<Drop>> {
+  try {
+    const page = Math.max(options.page || 1, 1);
+    const limit = Math.min(Math.max(options.limit || 20, 1), 100);
+    const offset = (page - 1) * limit;
+
+    if (!supabaseUrl || !supabaseAnonKey) {
+      return { items: [], total: 0, page, limit, pages: 0, hasMore: false };
+    }
+
+    const countQuery = supabase
+      .from("drops")
+      .select("*", { count: "exact" })
+      .eq("artist_id", artistId);
+
+    const dataQuery = supabase
+      .from("drops")
+      .select("*")
+      .eq("artist_id", artistId)
+      .order(options.sort || "created_at", { ascending: options.order === 'asc' })
+      .range(offset, offset + limit - 1);
+
+    const [countResult, dataResult] = await Promise.all([countQuery, dataQuery]);
+
+    if (countResult.error || dataResult.error) {
+      throw countResult.error || dataResult.error;
+    }
+
+    const total = countResult.count || 0;
+    const items = dataResult.data || [];
+    const pages = Math.ceil(total / limit);
+
+    return {
+      items,
+      total,
+      page,
+      limit,
+      pages,
+      hasMore: page < pages
+    };
+  } catch (error: any) {
+    console.error("❌ getArtistDropsPaginated failed:", error.message);
+    return { items: [], total: 0, page: 1, limit: 20, pages: 0, hasMore: false };
   }
 }
 
@@ -808,6 +895,53 @@ export async function getProducts() {
   }
 }
 
+// Paginated version of getProducts
+export async function getProductsPaginated(options: PaginationOptions = {}): Promise<PaginatedResponse<Product>> {
+  try {
+    const page = Math.max(options.page || 1, 1);
+    const limit = Math.min(Math.max(options.limit || 20, 1), 100);
+    const offset = (page - 1) * limit;
+
+    if (!supabaseUrl || !supabaseAnonKey) {
+      return { items: [], total: 0, page, limit, pages: 0, hasMore: false };
+    }
+
+    const countQuery = supabase
+      .from("products")
+      .select("*", { count: "exact" })
+      .in("status", [...PUBLIC_PRODUCT_STATUSES]);
+
+    const dataQuery = supabase
+      .from("products")
+      .select("*")
+      .in("status", [...PUBLIC_PRODUCT_STATUSES])
+      .order(options.sort || "created_at", { ascending: options.order === 'asc' })
+      .range(offset, offset + limit - 1);
+
+    const [countResult, dataResult] = await Promise.all([countQuery, dataQuery]);
+
+    if (countResult.error || dataResult.error) {
+      throw countResult.error || dataResult.error;
+    }
+
+    const total = countResult.count || 0;
+    const items = dataResult.data || [];
+    const pages = Math.ceil(total / limit);
+
+    return {
+      items,
+      total,
+      page,
+      limit,
+      pages,
+      hasMore: page < pages
+    };
+  } catch (error: any) {
+    console.error("❌ getProductsPaginated failed:", error.message);
+    return { items: [], total: 0, page: 1, limit: 20, pages: 0, hasMore: false };
+  }
+}
+
 export async function getCreatorProducts(creatorWallet: string) {
   try {
     if (!supabaseUrl || !supabaseAnonKey) return [];
@@ -829,6 +963,56 @@ export async function getCreatorProducts(creatorWallet: string) {
   } catch (error: any) {
     console.error("❌ getCreatorProducts failed:", error.message);
     return [];
+  }
+}
+
+// Paginated version of getCreatorProducts
+export async function getCreatorProductsPaginated(
+  creatorWallet: string,
+  options: PaginationOptions = {}
+): Promise<PaginatedResponse<Product>> {
+  try {
+    const page = Math.max(options.page || 1, 1);
+    const limit = Math.min(Math.max(options.limit || 20, 1), 100);
+    const offset = (page - 1) * limit;
+
+    if (!supabaseUrl || !supabaseAnonKey) {
+      return { items: [], total: 0, page, limit, pages: 0, hasMore: false };
+    }
+
+    const countQuery = supabase
+      .from("products")
+      .select("*", { count: "exact" })
+      .eq("creator_wallet", creatorWallet.toLowerCase());
+
+    const dataQuery = supabase
+      .from("products")
+      .select("*")
+      .eq("creator_wallet", creatorWallet.toLowerCase())
+      .order(options.sort || "created_at", { ascending: options.order === 'asc' })
+      .range(offset, offset + limit - 1);
+
+    const [countResult, dataResult] = await Promise.all([countQuery, dataQuery]);
+
+    if (countResult.error || dataResult.error) {
+      throw countResult.error || dataResult.error;
+    }
+
+    const total = countResult.count || 0;
+    const items = dataResult.data || [];
+    const pages = Math.ceil(total / limit);
+
+    return {
+      items,
+      total,
+      page,
+      limit,
+      pages,
+      hasMore: page < pages
+    };
+  } catch (error: any) {
+    console.error("❌ getCreatorProductsPaginated failed:", error.message);
+    return { items: [], total: 0, page: 1, limit: 20, pages: 0, hasMore: false };
   }
 }
 

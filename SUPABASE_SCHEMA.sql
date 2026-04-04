@@ -2851,6 +2851,62 @@ CREATE INDEX IF NOT EXISTS idx_ip_campaigns_artist_id ON ip_campaigns(artist_id)
 CREATE INDEX IF NOT EXISTS idx_ip_investments_wallet ON ip_investments(lower(investor_wallet));
 CREATE INDEX IF NOT EXISTS idx_royalty_distributions_recipient_wallet ON royalty_distributions(lower(recipient_wallet));
 
+-- ═══════════════════════════════════════════════════════════════════════════════
+-- ADDITIONAL CONSTRAINTS FOR PHASE 2 PERFORMANCE & DATA INTEGRITY
+-- ═══════════════════════════════════════════════════════════════════════════════
+
+-- Prevent duplicate artists per wallet (unique constraint helps with queries)
+DO $$ BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint c
+    WHERE c.conname = 'unique_artist_wallet' AND c.conrelid = 'artists'::regclass
+  ) THEN
+    ALTER TABLE artists ADD CONSTRAINT unique_artist_wallet UNIQUE (wallet);
+  END IF;
+END $$;
+
+-- Ensure orders have either drop or product
+DO $$ BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint c
+    WHERE c.conname = 'check_drop_or_product' AND c.conrelid = 'orders'::regclass
+  ) THEN
+    ALTER TABLE orders ADD CONSTRAINT check_drop_or_product 
+      CHECK ((drop_id IS NOT NULL AND product_id IS NULL) 
+        OR (drop_id IS NULL AND product_id IS NOT NULL));
+  END IF;
+END $$;
+
+-- Prevent negative prices
+DO $$ BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint c
+    WHERE c.conname = 'check_drop_price_positive' AND c.conrelid = 'drops'::regclass
+  ) THEN
+    ALTER TABLE drops ADD CONSTRAINT check_drop_price_positive CHECK (price_eth > 0);
+  END IF;
+END $$;
+
+DO $$ BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint c
+    WHERE c.conname = 'check_product_price_positive' AND c.conrelid = 'products'::regclass
+  ) THEN
+    ALTER TABLE products ADD CONSTRAINT check_product_price_positive CHECK (price_eth > 0);
+  END IF;
+END $$;
+
+-- Prevent duplicate subscriptions
+DO $$ BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint c
+    WHERE c.conname = 'unique_subscription' AND c.conrelid = 'subscriptions'::regclass
+  ) THEN
+    ALTER TABLE subscriptions ADD CONSTRAINT unique_subscription 
+      UNIQUE (artist_id, subscriber_wallet);
+  END IF;
+END $$;
+
 CREATE OR REPLACE FUNCTION grant_order_item_entitlements()
 RETURNS TRIGGER AS $$
 DECLARE

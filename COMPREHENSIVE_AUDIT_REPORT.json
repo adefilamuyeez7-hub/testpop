@@ -1,0 +1,1096 @@
+{
+  "audit_date": "2026-04-04",
+  "platform": "POPUP - NFT/Digital Asset Commerce Platform",
+  "architecture": {
+    "frontend": "React 18 + TypeScript + Vite + TailwindCSS",
+    "backend": "Node.js/Express + Supabase + ethers.js",
+    "blockchain": "Base (Sepolia testnet)",
+    "contracts": "8 Solidity smart contracts",
+    "database": "Supabase PostgreSQL with RLS"
+  },
+
+  "backend": {
+    "files": [
+      {
+        "path": "server/index.js",
+        "lines": "~4400",
+        "purpose": "Main API server with auth, drops, products, orders, admin endpoints",
+        "status": "COMPLEX - NEEDS REFACTORING"
+      },
+      {
+        "path": "server/config.js",
+        "lines": "200",
+        "purpose": "Configuration and environment setup",
+        "status": "DUPLICATE OF index.js - CONSOLIDATION NEEDED"
+      },
+      {
+        "path": "server/validation.js",
+        "lines": "80",
+        "purpose": "Zod schema validation for drops, products, orders, campaigns",
+        "status": "GOOD - COMPREHENSIVE SCHEMAS"
+      },
+      {
+        "path": "server/auth.js",
+        "lines": "150",
+        "purpose": "Duplicate authentication endpoints (also in index.js)",
+        "status": "REDUNDANT - CAN BE REMOVED"
+      },
+      {
+        "path": "server/campaigns.js",
+        "lines": "250",
+        "purpose": "Campaign submission and review logic",
+        "status": "SEPARATE CONCERN - GOOD ARCHITECTURE"
+      },
+      {
+        "path": "server/pinataAuth.js",
+        "lines": "120",
+        "purpose": "Pinata IPFS authentication strategy selection",
+        "status": "GOOD - FLEXIBLE AUTH"
+      }
+    ],
+
+    "issues": [
+      {
+        "severity": "CRITICAL",
+        "title": "Massive Monolithic server/index.js",
+        "description": "server/index.js contains ~4400 lines with mixed concerns: auth, drops, products, orders, admin, pinata, media proxy, contracts",
+        "lines": [1, 4400],
+        "impact": "Hard to maintain, test, and debug. Difficult to locate bugs. Poor separation of concerns.",
+        "examples": [
+          "Line 1859-1962: Drop CRUD operations",
+          "Line 2336-2974: Product CRUD operations",
+          "Line 3012-3435: Order operations",
+          "Line 3958-4014: Pinata file upload"
+        ]
+      },
+      {
+        "severity": "CRITICAL",
+        "title": "Duplicate Configuration",
+        "description": "server/config.js duplicates environment variable loading and constants already in server/index.js. The loadEnvFile function is defined twice.",
+        "lines": ["server/config.js:1-80", "server/index.js:100-180"],
+        "impact": "Maintenance nightmare. Changes to one file won't propagate to another. Source of truth unclear.",
+        "recommendation": "Delete server/config.js and consolidate all config into a dedicated server/lib/config.js module"
+      },
+      {
+        "severity": "CRITICAL",
+        "title": "Extremely Loose RLS Policies",
+        "description": "RLS policies use WITH CHECK (true) for public write access, allowing any authenticated user to insert/update ANY data",
+        "lines": ["SUPABASE_SCHEMA.sql:188-234"],
+        "policies": {
+          "artists": "CREATE POLICY 'artists_read_all' ON artists FOR SELECT USING (true) - ANYONE CAN READ",
+          "artists_write": "CREATE POLICY 'artists_write_all' ON artists FOR INSERT WITH CHECK (true) - ANYONE CAN CREATE",
+          "artists_update": "CREATE POLICY 'artists_update_all' ON artists FOR UPDATE USING (true) - ANYONE CAN MODIFY ANY ARTIST",
+          "drops": "CREATE POLICY 'drops_write_authenticated' ON drops FOR INSERT WITH CHECK (true) - NO ARTIST VALIDATION",
+          "drops_update": "CREATE POLICY 'drops_update_authenticated' FOR UPDATE USING (true) - ANYONE CAN UPDATE ANY DROP",
+          "products": "CREATE POLICY 'products_write_authenticated' WITH CHECK (true) - NO CREATOR VALIDATION",
+          "orders": "CREATE POLICY 'orders_read_all' FOR SELECT USING (true) - ANYONE CAN READ ALL ORDERS",
+          "orders_write": "CREATE POLICY 'orders_write_all' FOR INSERT WITH CHECK (true) - ANYONE CAN CREATE ORDERS FOR ANYONE"
+        },
+        "impact": "SEVERE SECURITY VULNERABILITY: Users can modify other users' data, read sensitive order information, create fraudulent orders",
+        "recommendation": "Implement proper row-level security:\n- Artists can only read/modify their own records\n- Drops can only be created/modified by artist_id matching current user\n- Products can only be modified by creator_wallet matching current user\n- Orders should only be readable by buyer and merchant"
+      },
+      {
+        "severity": "HIGH",
+        "title": "Missing Input Validation in API Endpoints",
+        "description": "Many endpoints do not validate headers, body structure, or expected types before processing",
+        "lines": [
+          "server/index.js:1762-1814 (POST /artists/profile)",
+          "server/index.js:1859-1894 (POST /drops)",
+          "server/index.js:2336-2381 (POST /products)"
+        ],
+        "examples": [
+          "Line 1762: req.body.wallet not validated before query",
+          "Line 1859: drop.title not validated despite schema existing",
+          "Line 2336: No userId/creatorWallet validation on product creation"
+        ],
+        "impact": "Injection attacks, malformed data in database, crashes from undefined access",
+        "recommendation": "Apply validateInput(schema, req.body) to all POST/PATCH endpoints. Add middleware for validation."
+      },
+      {
+        "severity": "CRITICAL",
+        "title": "Private Keys in Environment Variables Not Validated at Runtime",
+        "description": "DEPLOYER_PRIVATE_KEY is loaded but not validated that it's a valid 256-bit hex string until used",
+        "lines": [
+          "server/index.js:210-219 (ENV loading)",
+          "server/index.js:434-439 (getCampaignSigner)"
+        ],
+        "impact": "If DEPLOYER_PRIVATE_KEY is misconfigured (wrong format, too short), errors only appear when transactions are attempted, not at startup",
+        "recommendation": "Validate all private keys at server startup with isValidPrivateKey(). Throw immediately if invalid."
+      },
+      {
+        "severity": "HIGH",
+        "title": "Error Messages May Leak Sensitive Information",
+        "description": "Error responses include raw database error messages which may expose schema details",
+        "lines": [
+          "server/index.js:385, 425, 738, 751, 767",
+          "All catch blocks returning error.message directly"
+        ],
+        "example": "Line 385: throw new Error(`Unable to verify artist contract metadata columns: ${error.message}`)",
+        "impact": "Information disclosure: attackers can enumerate column names, table structure, auth mechanisms",
+        "recommendation": "Log raw errors server-side, return generic client messages: 'Unable to process request. Contact support.'"
+      },
+      {
+        "severity": "MEDIUM",
+        "title": "Auth Endpoints Have Duplicate Routes",
+        "description": "Both /auth/* and /api/auth/* routes serve identical handlers",
+        "lines": [1694, 1695, 1750, 1751, 1753, 1758],
+        "examples": [
+          "Lines 1694-1695: POST /auth/challenge and POST /api/auth/challenge (identical)",
+          "Lines 1750-1751: POST /auth/verify and POST /api/auth/verify (identical)"
+        ],
+        "impact": "Confusing API surface, maintenance burden, potential versioning mismatches",
+        "recommendation": "Pick one route pattern. Remove duplicates. Standardize on /api/* pattern."
+      },
+      {
+        "severity": "MEDIUM",
+        "title": "Rate Limiting Config Not Environment-Driven",
+        "description": "Rate limits are hardcoded in code, not configurable via environment",
+        "lines": ["server/index.js: authChallengeLimiter, authVerifyLimiter definitions"],
+        "impact": "Cannot adjust rate limits in production without code changes and redeploy",
+        "recommendation": "Move rate limit settings to environment variables (AUTH_CHALLENGE_RATE_LIMIT_WINDOW_MS, AUTH_CHALLENGE_RATE_LIMIT_MAX_REQUESTS)"
+      },
+      {
+        "severity": "MEDIUM",
+        "title": "Missing Request Size Limits on JSON Endpoints",
+        "description": "express.json() is applied globally without size limit specification",
+        "lines": ["server/index.js: app.use(express.json())"],
+        "impact": "Potential DoS attacks with massive JSON payloads",
+        "recommendation": "Add size limit: app.use(express.json({ limit: '10mb' }))"
+      }
+    ],
+
+    "recommendations": [
+      {
+        "priority": "CRITICAL",
+        "action": "Refactor server/index.js into modules",
+        "steps": [
+          "Create server/lib/auth.js - Authentication endpoints",
+          "Create server/lib/drops.js - Drop CRUD operations",
+          "Create server/lib/products.js - Product CRUD operations",
+          "Create server/lib/orders.js - Order CRUD operations",
+          "Create server/lib/admin.js - Admin operations",
+          "Create server/lib/media.js - Media proxy and Pinata operations",
+          "Create server/lib/config.js - Unified configuration",
+          "Update server/index.js to import and register routers"
+        ],
+        "effort": "HIGH",
+        "benefitSize": "Maintainability, testability, debugging"
+      },
+      {
+        "priority": "CRITICAL",
+        "action": "Implement Row-Level Security (RLS) properly",
+        "steps": [
+          "Replace 'WITH CHECK (true)' with actual user/wallet validation",
+          "Artists table: auth.uid() = artist.id or wallet matching current_user",
+          "Drops table: artist_id matching current user's artist record",
+          "Products table: creator_wallet matching current_user.wallet",
+          "Orders table: buyer_wallet = current_user.wallet OR seller verification",
+          "Test all edge cases: cross-user access, privilege escalation, data leakage"
+        ],
+        "effort": "HIGH",
+        "benefitSize": "Security, data integrity, multi-tenancy"
+      },
+      {
+        "priority": "HIGH",
+        "action": "Implement comprehensive API validation middleware",
+        "steps": [
+          "Create validateRequest middleware factory",
+          "Apply to all POST/PATCH endpoints",
+          "Use existing Zod schemas from server/validation.js",
+          "Return 400 Bad Request with field-level error details",
+          "Add request logging middleware"
+        ],
+        "effort": "MEDIUM",
+        "benefitSize": "Security, data quality"
+      }
+    ]
+  },
+
+  "frontend": {
+    "files": [
+      {
+        "path": "src/lib/db.ts",
+        "lines": "1500+",
+        "functions": 50,
+        "status": "ISSUES: Type safety, error handling, API request duplication"
+      },
+      {
+        "path": "src/lib/secureAuth.ts",
+        "lines": "250",
+        "purpose": "Wallet authentication with challenge-response",
+        "status": "GOOD - Well implemented"
+      },
+      {
+        "path": "src/lib/runtimeSession.ts",
+        "lines": "150",
+        "purpose": "Client-side session state management",
+        "status": "GOOD - Proper isolation (window object + sessionStorage)"
+      },
+      {
+        "path": "src/lib/supabaseStore.ts",
+        "lines": "850",
+        "functions": 40,
+        "status": "COMPLEX - Metadata enrichment, needs optimization"
+      },
+      {
+        "path": "src/components/ArtistStudioPage.tsx",
+        "lines": "600+",
+        "status": "MONOLITHIC - Multiple concerns (editor, campaign, studio)"
+      },
+      {
+        "path": "src/components/CheckoutPage.tsx",
+        "lines": "400+",
+        "status": "COMPLEX - Amount validation, payment handling"
+      }
+    ],
+
+    "issues": [
+      {
+        "severity": "HIGH",
+        "title": "Disabled TypeScript Strict Mode",
+        "description": "tsconfig.json explicitly disables critical type safety checks",
+        "lines": ["tsconfig.json: noImplicitAny=false, strictNullChecks=false, noUnusedParameters=false"],
+        "impact": "~200+ instances of 'any' type throughout codebase. No null-safety. Silent bugs from undefined access.",
+        "examples": [
+          "src/lib/db.ts:1 - eslint-disable @typescript-eslint/no-explicit-any (entire file)",
+          "src/lib/supabaseStore.ts:1 - same disable comment",
+          "Multiple 'error: any' catches without type narrowing"
+        ],
+        "recommendation": "Enable strict mode gradually: strictNullChecks=true, noImplicitAny=true"
+      },
+      {
+        "severity": "CRITICAL",
+        "title": "Massive Type-Unsafe db.ts File",
+        "description": "src/lib/db.ts is 1500+ lines with 50+ functions, all with 'any' type parameters",
+        "lines": ["src/lib/db.ts: entire file"],
+        "functions": [
+          "Line 445: secureApiRequest<T>() - properly generic but calling code uses 'any'",
+          "Line 527: catch(error: any) - no type narrowing",
+          "Line 1348: addToWhitelist(entry: any) - no validation of entry structure",
+          "Line 1356: updateWhitelistEntry(id: string, updates: any) - untyped updates"
+        ],
+        "impact": "Silent errors passing wrong data types to API. Impossible to catch bugs at compile time.",
+        "recommendation": "Replace all 'any' with proper types from db.ts types section. Create types for API payloads."
+      },
+      {
+        "severity": "HIGH",
+        "title": "Unvalidated User Input in Payment Flows",
+        "description": "CheckoutPage and payment-related code don't validate user input before sending to backend",
+        "lines": [
+          "src/pages/CheckoutPage.tsx: email, phone, address not validated",
+          "src/lib/checkout.ts: detectCheckoutCountry() based on IP - no fallback if detection fails"
+        ],
+        "examples": [
+          "Line 29-36: email, phone, address, postalCode set with setState() without validation",
+          "Line 99-105: Sent to backend without type checking"
+        ],
+        "impact": "Invalid shipping data, corrupted orders, fraud potential",
+        "recommendation": "Add Zod validation: validate email regex, phone format per country, address max length"
+      },
+      {
+        "severity": "HIGH",
+        "title": "Missing Error Boundaries in Complex Components",
+        "description": "Large pages don't have ErrorBoundary wrappers. One component crash crashes entire page.",
+        "components": [
+          "ArtistStudioPage.tsx",
+          "DropDetailPage.tsx",
+          "ProfilePage.tsx",
+          "CheckoutPage.tsx"
+        ],
+        "impact": "White screen of death on any error. No graceful degradation.",
+        "recommendation": "Wrap pages with ErrorBoundary. Add try-catch in useEffect hooks with setError state."
+      },
+      {
+        "severity": "MEDIUM",
+        "title": "Inconsistent Error Handling Patterns",
+        "description": "Error handling varies wildly across frontend code",
+        "examples": [
+          "Some components: throw errors (crash)",
+          "Others: setError() state (graceful)",
+          "Some: console.error() only (silent fail)",
+          "Analytics errors silently caught, user never knows"
+        ],
+        "impact": "Unpredictable app behavior. Hard to debug user issues.",
+        "recommendation": "Standardize: implement ErrorManager service. All errors go through: log + setError state + telemetry"
+      },
+      {
+        "severity": "MEDIUM",
+        "title": "API Request Duplication in db.ts",
+        "description": "Multiple similar API calls with nearly identical error handling",
+        "examples": [
+          "getArtistProfile() at line 548 - uses secureApiRequest",
+          "saveArtistProfile() at line 573 - same pattern",
+          "getArtistDrops() at line 601 - repeats same pattern",
+          "Pattern repeats 40+ times with minimal variation"
+        ],
+        "impact": "Code bloat (~1500 lines could be ~500). Hard to change shared logic.",
+        "recommendation": "Create generic API wrapper: apiGet<T>(), apiPost<T>(), that handle auth, errors, types"
+      },
+      {
+        "severity": "MEDIUM",
+        "title": "React Hook Dependencies Not Validated",
+        "description": "Multiple useEffect hooks potentially missing dependencies",
+        "examples": [
+          "DropDetailPage.tsx lines 193-234: useEffect depends on 'drop' but uses dropId - may call API multiple times",
+          "ArtistStudioPage.tsx: useCallback without proper dependencies may capture stale closures",
+          "ProfilePage.tsx: multiple useEffect hooks updating same state - potential race conditions"
+        ],
+        "impact": "Unnecessary re-renders, memory leaks, stale data displayed to users",
+        "recommendation": "Run eslint react-hooks plugin. Review all useEffect/useCallback dependencies. Add exhaustive-deps rule."
+      },
+      {
+        "severity": "MEDIUM",
+        "title": "Hardcoded Magic Numbers Throughout",
+        "description": "Constants like timeouts, limits, thresholds scattered in code",
+        "examples": [
+          "secureAuth.ts line 11: AUTH_REQUEST_TIMEOUT_MS = 15000",
+          "secureAuth.ts line 12: SIGNATURE_TIMEOUT_MS = 45000",
+          "validation.ts line 8: validateFileUpload() allows max 10*1024*1024 bytes",
+          "checkout.ts: hardcoded country detection logic"
+        ],
+        "impact": "Hard to adjust for different environments. Maintenance nightmare.",
+        "recommendation": "Create src/lib/constants.ts with all magic numbers. Import and reuse."
+      }
+    ],
+
+    "recommendations": [
+      {
+        "priority": "CRITICAL",
+        "action": "Enable TypeScript strict mode gradually",
+        "steps": [
+          "Set noImplicitAny: true",
+          "Fix all 'any' types: replace with actual types",
+          "Set strictNullChecks: true",
+          "Add type narrowing with 'is' checks for error handling",
+          "Set noUnusedLocals: true, noUnusedParameters: true"
+        ],
+        "effort": "MEDIUM",
+        "benefitSize": "Massive bug prevention at compile time"
+      },
+      {
+        "priority": "CRITICAL",
+        "action": "Refactor db.ts into domain-specific modules",
+        "steps": [
+          "Create src/lib/api/artists.ts - artist queries",
+          "Create src/lib/api/drops.ts - drop queries",
+          "Create src/lib/api/products.ts - product queries",
+          "Create src/lib/api/orders.ts - order queries",
+          "Create src/lib/api/client.ts - shared HTTP client",
+          "Use proper types for each domain"
+        ],
+        "effort": "HIGH",
+        "benefitSize": "Maintainability, type safety, reusability"
+      },
+      {
+        "priority": "HIGH",
+        "action": "Implement centralized error handling",
+        "steps": [
+          "Create src/lib/errorManager.ts",
+          "Define error types: NotFoundError, ValidationError, NetworkError, etc.",
+          "Add global error handler component",
+          "Update all API calls to throw typed errors",
+          "Add error telemetry for monitoring"
+        ],
+        "effort": "MEDIUM",
+        "benefitSize": "Better UX, actionable error messages, debugging"
+      }
+    ]
+  },
+
+  "database": {
+    "schema": {
+      "tables": 20,
+      "indexes": 45,
+      "rls_policies": 80,
+      "triggers": 15,
+      "functions": 12
+    },
+
+    "issues": [
+      {
+        "severity": "CRITICAL",
+        "title": "Overly Permissive RLS Policies - MAJOR SECURITY FLAW",
+        "description": "All core tables (artists, drops, products, orders, whitelist) have RLS policies that allow any authenticated user full access",
+        "affected_tables": {
+          "artists": {
+            "issue": "WITH CHECK (true) on all operations",
+            "problem": "Anyone can read/write/modify ANY artist's data",
+            "lines": "SUPABASE_SCHEMA.sql:188-192"
+          },
+          "drops": {
+            "issue": "Artist_id not checked against current user",
+            "problem": "Can modify other artists' drops. No ownership validation.",
+            "lines": "SUPABASE_SCHEMA.sql:196-200"
+          },
+          "products": {
+            "issue": "creator_wallet not checked",
+            "problem": "Can modify other creators' products. No origin validation.",
+            "lines": "SUPABASE_SCHEMA.sql:204-208"
+          },
+          "orders": {
+            "issue": "No buyer/seller check",
+            "problem": "Authenticated user can read ALL orders containing payment info, buyer addresses, etc.",
+            "lines": "SUPABASE_SCHEMA.sql:212-216"
+          },
+          "whitelist": {
+            "issue": "Overly permissive for non-admin",
+            "problem": "Anyone can read entire whitelist, see who's approved",
+            "lines": "SUPABASE_SCHEMA.sql:220"
+          }
+        },
+        "impact": "DATA BREACH: Users can access other users' sensitive data. FRAUD: Can manipulate orders. ACCOUNT TAKEOVER: Can modify other artist profiles.",
+        "research_links": ["https://supabase.com/docs/guides/auth/row-level-security"]
+      },
+      {
+        "severity": "HIGH",
+        "title": "Missing Unique Constraints on Key Fields",
+        "description": "No UNIQUE constraints on business-critical fields",
+        "missing_constraints": {
+          "artists.wallet": "Multiple artist records can have same wallet (duplicates)",
+          "products.contract_listing_id": "Product IDs not guaranteed unique per contract",
+          "orders.tx_hash": "Same transaction could create multiple orders (double-spend)"
+        },
+        "impact": "Data integrity violations, duplicate records, potential duplicate charges",
+        "lines": ["SUPABASE_SCHEMA.sql: artists table definition", "products table", "orders table"]
+      },
+      {
+        "severity": "MEDIUM",
+        "title": "Missing Foreign Key Constraints",
+        "description": "artist_id, product_id, creative_release_id referenced without FK constraints",
+        "examples": [
+          "drops table references artists(id) without FK",
+          "products references creative_releases(id) without FK",
+          "orders references products(id) without FK"
+        ],
+        "impact": "Orphaned records. Cascading deletes not enforced. Data consistency issues.",
+        "recommendation": "Add ALTER TABLE ... ADD CONSTRAINT ... FOREIGN KEY"
+      },
+      {
+        "severity": "MEDIUM",
+        "title": "Missing Indexes on Filter Columns",
+        "description": "Some frequently-filtered columns lack indexes",
+        "missing_indexes": {
+          "orders.status": "Likely slow queries for 'pending', 'completed' filtering",
+          "products.product_type": "No index for physical/digital filtering",
+          "artists.role": "No index for searching by role"
+        },
+        "impact": "Slow queries at scale. O(n) table scans instead of O(log n) index lookups.",
+        "recommendation": "Add indexes: CREATE INDEX idx_orders_status ON orders(status) WHERE status IN ('pending', 'completed')"
+      },
+      {
+        "severity": "MEDIUM",
+        "title": "Composite Indexes Not Optimized",
+        "description": "Some composite indexes may not match query patterns",
+        "examples": [
+          "Line 932: idx_subscriptions_artist_subscriber - but queries may filter by subscriber first",
+          "Line 1037: idx_drops_artist_id_status - but most queries filter by status alone"
+        ],
+        "impact": "Index not used, fallback to full table scan",
+        "recommendation": "Analyze query patterns. Reorder index columns to match WHERE clause order."
+      },
+      {
+        "severity": "MEDIUM",
+        "title": "No Soft Delete Strategy",
+        "description": "When drops/products/artists are 'deleted', they're actually deleted from database",
+        "tables_affected": [
+          "drops (has 'status' field but actual DELETE not prevented)",
+          "products (same issue)",
+          "artists (no audit trail of deletions)"
+        ],
+        "impact": "Loss of historical data. Can't track deleted drops for auditing. External references break.",
+        "recommendation": "Add 'deleted_at' timestamp column. Convert DELETE to UPDATE deleted_at = NOW(). Filter queries with WHERE deleted_at IS NULL"
+      },
+      {
+        "severity": "LOW",
+        "title": "Index Redundancy",
+        "description": "Some indexes appear to be created multiple times with different names",
+        "examples": [
+          "idx_subscriptions_artist_subscriber created both at line 932 and 937 (slightly different definition)",
+          "idx_artists_shares_contract created both at line 288 and 389"
+        ],
+        "impact": "Extra storage, slower INSERT/UPDATE/DELETE, confusing schema",
+        "recommendation": "Remove duplicate indexes. Keep only one per unique set of columns."
+      }
+    ],
+
+    "recommendations": [
+      {
+        "priority": "CRITICAL",
+        "action": "Redesign RLS policies with proper security model",
+        "policy_changes": {
+          "artists": "auth.uid() = artist.id OR (is_admin AND current_setting('app.user_role') = 'admin')",
+          "drops": "artist_id = (SELECT id FROM artists WHERE wallet = current_user_wallet)",
+          "products": "creator_wallet = current_user_wallet",
+          "orders": "buyer_wallet = current_user_wallet OR creator_wallet = current_user_wallet",
+          "whitelist": "Only admins can read/write"
+        },
+        "steps": [
+          "Update SUPABASE_SCHEMA.sql with proper RLS logic",
+          "Add helper functions for role checking",
+          "Test with different user scenarios",
+          "Verify no data leakage between users"
+        ],
+        "effort": "MEDIUM",
+        "critical": true
+      },
+      {
+        "priority": "CRITICAL",
+        "action": "Add UNIQUE and FOREIGN KEY constraints",
+        "steps": [
+          "ALTER TABLE artists ADD UNIQUE(wallet)",
+          "ALTER TABLE orders ADD UNIQUE(tx_hash)",
+          "ALTER TABLE products ADD FOREIGN KEY (creative_release_id) REFERENCES creative_releases(id) ON DELETE CASCADE",
+          "ALTER TABLE drops ADD FOREIGN KEY (artist_id) REFERENCES artists(id)",
+          "Test with constraint violations to ensure proper error messages"
+        ],
+        "effort": "LOW",
+        "critical": true
+      }
+    ]
+  },
+
+  "redundancies": [
+    {
+      "type": "Configuration Duplication",
+      "files": ["server/index.js", "server/config.js"],
+      "description": "Environment loading and configuration duplicated across files",
+      "impact": "Maintenance nightmare, potential version skew",
+      "fix": "Consolidate into single server/lib/config.js"
+    },
+    {
+      "type": "API Endpoint Duplication",
+      "endpoints": [
+        "/auth/challenge + /api/auth/challenge",
+        "/auth/verify + /api/auth/verify",
+        "/pinata/file + /api/pinata/file",
+        "/orders + /api/orders"
+      ],
+      "description": "All endpoints registered twice with identical handlers",
+      "impact": "Confusing API surface, maintenance burden, potential versioning issues",
+      "fix": "Remove /api/* duplicates, standardize on /api/* (RESTful convention)"
+    },
+    {
+      "type": "Code Duplication in db.ts",
+      "examples": [
+        "40+ functions with nearly identical pattern: select() -> catch() -> return error",
+        "All secureApiRequest calls wrapped identically",
+        "Error logging/handling duplicated"
+      ],
+      "impact": "1500 line file could be 500. Hard to change shared logic.",
+      "fix": "Create generic API client wrapper functions"
+    },
+    {
+      "type": "Campaign Submission Logic Duplication",
+      "files": ["server/campaigns.js", "server/index.js"],
+      "description": "Campaign submission handling defined in multiple places",
+      "impact": "Changes to one location not propagated",
+      "fix": "Move all campaign logic to server/campaigns.js, import in server/index.js"
+    },
+    {
+      "type": "Auth Endpoints Duplication",
+      "files": ["server/auth.js", "server/index.js"],
+      "description": "Challenge and verify endpoints defined in both files",
+      "impact": "Routes registered twice, potential conflicts",
+      "fix": "Choose one location (server/lib/auth.js), register once in index.js"
+    }
+  ],
+
+  "performance": {
+    "issues": [
+      {
+        "severity": "HIGH",
+        "category": "Bundle Size",
+        "title": "Large Client Bundle from Multiple Dependencies",
+        "description": "Frontend imports many heavyweight libraries without code splitting",
+        "libraries_of_concern": [
+          "@reown/appkit - Large wallet connectivity library",
+          "ethers - 800KB+ library loaded eagerly",
+          "react-pdf - Only used in collection view, not code-split"
+        ],
+        "evidence": "vite.config.ts mentions 'chunk size warnings'",
+        "impact": "Slow page load on mobile. Large JS to parse/execute.",
+        "recommendations": [
+          "Code-split heavy routes: lazy(() => import('...')) for artist studio, checkout",
+          "Use dynamic imports for contract ABIs, only load when needed",
+          "Lazy-load ethers: import ethers from 'ethers/lib/index.esm' with dynamic chunks"
+        ]
+      },
+      {
+        "severity": "MEDIUM",
+        "category": "Database Query Performance",
+        "title": "N+1 Query Patterns in supabaseStore.ts",
+        "description": "Multiple loops with queries inside each iteration",
+        "examples": [
+          "enrichDropsMediaFromMetadata() at line 357 - fetches metadata for each drop individually",
+          "enrichArtistsPortfolioEntries() at line 361 - may fetch portfolio items one-by-one",
+          "attachArtistsToDrops() at line 435 - loads artists in loop instead of batch"
+        ],
+        "impact": "If 100 drops displayed, API makes 100+ requests instead of 1-2 batch requests",
+        "recommendations": [
+          "Use Promise.all() for parallel requests with batchSize limiting",
+          "Implement data loader pattern (batching + caching)",
+          "Prefetch/include related data in initial query with select('..., artists(...)')  from Supabase"
+        ]
+      },
+      {
+        "severity": "MEDIUM",
+        "category": "Component Performance",
+        "title": "Large Components Without Memoization",
+        "description": "Complex pages re-render unnecessarily on parent updates",
+        "examples": [
+          "ProfilePage.tsx (600+ lines) - no memo, all children re-render on any state change",
+          "ArtistStudioPage.tsx - renders full content even when only one tab visible",
+          "DropDetailPage.tsx - fetches linked release data on every render"
+        ],
+        "impact": "Laggy UI, unnecessary API calls, slow interactions",
+        "recommendations": [
+          "Wrap large components with React.memo()",
+          "Extract tab content into separate memoized components",
+          "Use useMemo() for expensive derived state"
+        ]
+      },
+      {
+        "severity": "MEDIUM",
+        "category": "API Caching",
+        "title": "No Response Caching Strategy",
+        "description": "Frontend refetches same data repeatedly (artists, drops, products)",
+        "impact": "Wasted bandwidth, slower app, more database load",
+        "examples": [
+          "Visiting ProfilePage refetches artist profile even if loaded 1 second ago",
+          "Switching between drops fetches all drops again",
+          "No Cache-Control headers on GET endpoints"
+        ],
+        "recommendations": [
+          "Add staleTime/cacheTime to React Query queries",
+          "Implement Cache-Control: public, max-age=300 on backend for public data",
+          "Cache artist profiles for 5 minutes client-side"
+        ]
+      },
+      {
+        "severity": "LOW",
+        "category": "Blockchain Calls",
+        "title": "Synchronous Contract Reads in UI Render",
+        "description": "Some components may trigger contract reads during render",
+        "impact": "Blocks UI rendering until blockchain responds",
+        "recommendation": "Ensure all contract reads are in useEffect, not during render. Show loading state."
+      }
+    ],
+
+    "optimizations": [
+      {
+        "priority": "HIGH",
+        "title": "Implement React Query/TanStack Query patterns",
+        "current": "Scattered fetch logic in useState/useEffect",
+        "target": "Centralized caching, auto-refetching, background updates",
+        "effort": "MEDIUM",
+        "gain": "30-50% API request reduction"
+      },
+      {
+        "priority": "HIGH",
+        "title": "Code-split heavy routes",
+        "current": "All routes loaded upfront",
+        "target": "Lazy load checkoutPage, artist studio, admin sections",
+        "effort": "LOW",
+        "gain": "Initial bundle -40%, faster first paint"
+      },
+      {
+        "priority": "MEDIUM",
+        "title": "Batch metadata fetches",
+        "current": "One fetch per item (N+1)",
+        "target": "Fetch all metadata in single Promise.all()",
+        "effort": "MEDIUM",
+        "gain": "90% fewer API calls for heavy pages"
+      },
+      {
+        "priority": "MEDIUM",
+        "title": "Implement image optimization",
+        "current": "IPFS images loaded directly, no resizing/compression",
+        "target": "Use image CDN with resize transforms. Serve WebP.",
+        "effort": "MEDIUM",
+        "gain": "50-70% smaller images, faster load"
+      }
+    ]
+  },
+
+  "security": {
+    "issues": [
+      {
+        "severity": "CRITICAL",
+        "cve": "SQI-001",
+        "title": "Row-Level Security (RLS) Not Enforced",
+        "description": "All RLS policies use WITH CHECK (true), allowing any authenticated user full access to all data",
+        "affected_tables": ["artists", "drops", "products", "orders", "whitelist"],
+        "attack_vector": "Authenticated attacker can:\n1. Read all user orders with payment info\n2. Modify other artists' profiles\n3. Steal/modify other users' drops\n4. Manipulate orders\n5. View all whitelist entries",
+        "cvss": "9.1 CRITICAL",
+        "proof_of_concept": "1. Log in as any user\n2. Execute: SELECT * FROM orders; -- returns ALL orders\n3. Execute: UPDATE artists SET wallet='attacker' WHERE id='target';\n4. Execute: INSERT INTO drops (artist_id, title, ...) VALUES (OTHER_ARTIST_ID, ...);",
+        "impact": "Complete data breach, account takeover, fraud",
+        "remediation": "See database.recommendations[0]"
+      },
+      {
+        "severity": "CRITICAL",
+        "cve": "AUTH-001",
+        "title": "No CSRF Protection on State-Changing Operations",
+        "description": "POST endpoints don't validate CSRF tokens or SameSite cookies",
+        "endpoints": [
+          "/auth/verify",
+          "/artists/profile",
+          "/drops",
+          "/products",
+          "/orders"
+        ],
+        "attack": "Attacker creates malicious website with: <form action='https://testpop.com/orders' method=POST> ... </form>\nWhen victim visits while logged in, order is silently placed.",
+        "impact": "Unauthorized state changes on victim's behalf",
+        "fix": "Add CSRF token validation: express-csrf middleware"
+      },
+      {
+        "severity": "CRITICAL",
+        "cve": "AUTH-002",
+        "title": "Private Keys Logged in Error Messages",
+        "description": "DEPLOYER_PRIVATE_KEY may appear in error logs if transaction fails",
+        "location": "server/index.js lines containing DEPLOYER_PRIVATE_KEY",
+        "risk": "If logs are exposed (ELK, CloudWatch, Sentry), private key is compromised",
+        "fix": "Never log private key. Use redact function: `redact('DEPLOYER_PRIVATE_KEY', secret)`"
+      },
+      {
+        "severity": "HIGH",
+        "cve": "INJ-001",
+        "title": "No Input Sanitization on String Fields",
+        "description": "String inputs (title, description, name) not sanitized before storage",
+        "endpoints": [
+          "POST /drops - title, description",
+          "POST /products - name, description",
+          "POST /artists/profile - bio"
+        ],
+        "risk": "XSS if data rendered without escaping. Injection if used in queries.",
+        "example": "POST /drops {title: '<img src=x onerror=alert(1)>'}\nWhen rendered: alert(1) executes",
+        "fix": "Use parameterized queries (Supabase does this). Escape output in React (React.createElement escapes by default)."
+      },
+      {
+        "severity": "HIGH",
+        "cve": "AUTH-003",
+        "title": "JWT Token Expiration Too Long",
+        "description": "JWT tokens issued but expiration time not found in code review",
+        "location": "server/index.js line 905: jwt.sign(payload, appJwtSecret, ...)",
+        "risk": "If token leaked, stolen token valid forever (or very long time)",
+        "check": "Verify expiresIn is set to reasonable value (15m, 1h max)",
+        "fix": "Set expiresIn: '15m' in jwt.sign() options"
+      },
+      {
+        "severity": "HIGH",
+        "cve": "CRYPTO-001",
+        "title": "Weak Nonce/Challenge Generation May Exist",
+        "description": "Challenge nonce generation stored in database but implementation not reviewed",
+        "location": "server/index.js /auth/challenge endpoint",
+        "risk": "If nonce is predictable, signature replay attacks possible",
+        "check": "Verify nonce uses crypto.randomBytes() not Math.random()",
+        "fix": "import { randomBytes } from 'crypto'; const nonce = randomBytes(32).toString('hex');"
+      },
+      {
+        "severity": "MEDIUM",
+        "cve": "DOC-001",
+        "title": "Missing Rate Limiting on Public Endpoints",
+        "description": "/health endpoint has no rate limit",
+        "endpoints": [
+          "GET /health (rate limit exists but not configured)",
+          "GET /debug/dist-status (no rate limit)"
+        ],
+        "risk": "Attackers can scan server availability without limit",
+        "impact": "Server enumeration, reconnaissance",
+        "fix": "Apply rate limiter: app.use(limiter) to all public endpoints"
+      },
+      {
+        "severity": "MEDIUM",
+        "cve": "DATA-001",
+        "title": "Sensitive Data in URLs",
+        "description": "Drop/product IDs in URLs may be sequential or predictable",
+        "endpoints": [
+          "GET /drops/:id",
+          "GET /products/:id",
+          "GET /creative-releases/:id"
+        ],
+        "risk": "Attackers can enumerate all drops/products by incrementing ID",
+        "impact": "Information disclosure of unreleased/draft drops",
+        "fix": "Use UUIDs instead of integer IDs for public URLs"
+      },
+      {
+        "severity": "MEDIUM",
+        "cve": "CORS-001",
+        "title": "CORS Configuration May Be Too Permissive",
+        "description": "FRONTEND_ORIGIN environment variable includes multiple origins",
+        "code": "FRONTEND_ORIGIN = 'http://localhost:5173,https://testpop-one.vercel.app'",
+        "risk": "If attacker controls one origin, can make requests on behalf of users",
+        "check": "Verify credentials: false is set if allowing multiple origins",
+        "fix": "Use explicit origin whitelist. If credentials: true, single origin only."
+      },
+      {
+        "severity": "MEDIUM",
+        "cve": "FILE-001",
+        "title": "File Upload Validation May Be Bypassable",
+        "description": "MIME type checked on upload.single('file') but not validated server-side",
+        "code": "server/index.js line 260-276: allowed MIME types hardcoded",
+        "risk": "Attacker uploads executable disguised as image",
+        "impact": "Arbitrary file upload to IPFS",
+        "fix": "Add server-side magic byte validation using file-type library"
+      },
+      {
+        "severity": "MEDIUM",
+        "cve": "LOG-001",
+        "title": "Sensitive Information Logged",
+        "description": "Error messages may contain user data, transaction hashes, contract addresses",
+        "locations": [
+          "server/index.js: error.message logged directly in responses",
+          "Client: console.log(error) in catch blocks"
+        ],
+        "impact": "Log injection, information disclosure",
+        "fix": "Use structured logging with redaction of sensitive fields"
+      }
+    ],
+
+    "fixes": [
+      {
+        "cve": "SQI-001",
+        "priority": "CRITICAL",
+        "action": "Implement Row-Level Security",
+        "steps": [
+          "1. Update SUPABASE_SCHEMA.sql with proper RLS policies",
+          "2. Create auth context tables to track current user",
+          "3. Use current_user_id() in RLS expressions",
+          "4. Test with multiple user accounts to verify isolation"
+        ],
+        "effort": "MEDIUM",
+        "timeline": "URGENT - Do before production"
+      },
+      {
+        "cve": "AUTH-001",
+        "priority": "CRITICAL",
+        "action": "Add CSRF Token Protection",
+        "steps": [
+          "1. npm install csrf express-session",
+          "2. Add session middleware",
+          "3. Create CSRF token on each page load",
+          "4. Validate token on POST/PATCH/DELETE",
+          "5. Return 403 if invalid"
+        ],
+        "effort": "MEDIUM",
+        "timeline": "URGENT - Do before production"
+      },
+      {
+        "cve": "AUTH-002",
+        "priority": "CRITICAL",
+        "action": "Stop Logging Private Keys",
+        "steps": [
+          "1. Search codebase for console.log(DEPLOYER_PRIVATE_KEY)",
+          "2. Create redaction function: redact(key, secret, showChars=4)",
+          "3. Never log secrets. Only log addresses.",
+          "4. Update Sentry config to strip secrets from error reports"
+        ],
+        "effort": "LOW",
+        "timeline": "IMMEDIATE"
+      }
+    ]
+  },
+
+  "type_safety": {
+    "issues": [
+      {
+        "severity": "CRITICAL",
+        "title": "TypeScript Strict Mode Disabled",
+        "metrics": {
+          "noImplicitAny": "false - ~200+ any types",
+          "strictNullChecks": "false - No null checking",
+          "noUnusedParameters": "false - Dead code not detected",
+          "noUnusedLocals": "false - Unused variables not caught"
+        },
+        "impact": "Defers all type checking to runtime. Errors caught in production, not development.",
+        "files_affected": [
+          "src/lib/db.ts",
+          "src/lib/supabaseStore.ts",
+          "src/lib/artistStore.ts",
+          "All components using 'any' type"
+        ]
+      },
+      {
+        "severity": "HIGH",
+        "title": "Untyped Error Catches",
+        "pattern": "catch(error: any) { ... error.message }",
+        "occurrences": 30+,
+        "risk": "Assumes error is Error object. May crash if error is string/null/undefined.",
+        "example": "src/lib/db.ts line 527: catch(error: any) => error.message could throw 'Cannot read message of null'"
+      },
+      {
+        "severity": "HIGH",
+        "title": "Function Parameters Typed as 'any'",
+        "functions": [
+          "addToWhitelist(entry: any)",
+          "updateWhitelistEntry(id: string, updates: any)",
+          "getApiAuthToken(): string but returns getRuntimeApiToken()"
+        ],
+        "risk": "No compile-time validation of function arguments"
+      },
+      {
+        "severity": "MEDIUM",
+        "title": "Generic Type Parameters Not Enforced",
+        "example": "secureApiRequest<T>() properly generic but calling code uses 'any'",
+        "risk": "Response type not validated before use"
+      },
+      {
+        "severity": "MEDIUM",
+        "title": "Inconsistent Type Definitions",
+        "issues": [
+          "Artist type in db.ts vs artistStore.ts may differ",
+          "Drop type has optional fields but code assumes they exist",
+          "Product type missing fields that appear in database"
+        ]
+      }
+    ]
+  },
+
+  "error_handling": {
+    "issues": [
+      {
+        "severity": "HIGH",
+        "title": "No Global Error Boundary",
+        "impact": "Single component error crashes entire app",
+        "solution": "Wrap App with ErrorBoundary component"
+      },
+      {
+        "severity": "HIGH",
+        "title": "Silent API Failures",
+        "locations": [
+          "supabaseStore.ts line 442: catch(error: any) { ... } - no user notification",
+          "artistStore.ts line 329: catch blocks without setError"
+        ],
+        "impact": "User sees stale data without knowing API failed"
+      },
+      {
+        "severity": "MEDIUM",
+        "title": "Inconsistent Error Messages",
+        "patterns": [
+          "Some errors: 'Failed to load drops'",
+          "Others: raw database error messages",
+          "Some: no error message at all"
+        ],
+        "impact": "Confusing UX, hard to debug"
+      },
+      {
+        "severity": "MEDIUM",
+        "title": "Missing Timeout Handling",
+        "issue": "Long-running requests (upload, contract calls) may timeout without user feedback",
+        "solution": "Add AbortController timeout. Show progress. Allow retry."
+      }
+    ]
+  },
+
+  "summary": {
+    "project_name": "POPUP Platform",
+    "assessment_date": "2026-04-04",
+    "overall_health": "CRITICAL - Production deployment not recommended without fixes",
+
+    "key_findings": {
+      "critical_issues": 5,
+      "high_priority": 15,
+      "medium_priority": 20,
+      "low_priority": 8
+    },
+
+    "critical_blockers": [
+      "Row-Level Security (RLS) policies allow any user full access to all data",
+      "No CSRF protection on state-changing operations",
+      "Monolithic 4400-line server/index.js file",
+      "Config duplication across multiple files",
+      "TypeScript strict mode disabled with 200+ 'any' types"
+    ],
+
+    "before_production": [
+      "✅ Fix RLS policies to enforce data isolation per user",
+      "✅ Add CSRF token validation",
+      "✅ Refactor server/index.js into separate modules",
+      "✅ Enable TypeScript strict mode",
+      "✅ Implement proper error handling and recovery",
+      "✅ Add input validation to all API endpoints",
+      "✅ Add database UNIQUE and FOREIGN KEY constraints",
+      "✅ Implement rate limiting on all endpoints",
+      "✅ Add logging redaction for sensitive data",
+      "✅ Security audit of smart contracts"
+    ],
+
+    "phases": {
+      "phase_1_security_critical": {
+        "timeline": "1-2 weeks",
+        "items": [
+          "Fix RLS policies",
+          "Add CSRF protection",
+          "Fix private key logging",
+          "Implement input validation"
+        ]
+      },
+      "phase_2_code_quality": {
+        "timeline": "2-3 weeks",
+        "items": [
+          "Refactor server/index.js",
+          "Remove config duplication",
+          "Enable TypeScript strict mode",
+          "Consolidate routes"
+        ]
+      },
+      "phase_3_performance": {
+        "timeline": "2 weeks",
+        "items": [
+          "Code-split large routes",
+          "Optimize database queries",
+          "Implement React Query patterns",
+          "Add image optimization"
+        ]
+      },
+      "phase_4_observability": {
+        "timeline": "1 week",
+        "items": [
+          "Add structured logging",
+          "Implement error tracking (Sentry)",
+          "Add monitoring/alerts",
+          "Performance monitoring"
+        ]
+      }
+    },
+
+    "estimated_effort": {
+      "critical_fixes": "3-4 weeks",
+      "code_refactoring": "2-3 weeks",
+      "testing_qa": "2 weeks",
+      "total_before_production": "7-9 weeks"
+    },
+
+    "recommendations_priority_order": [
+      {
+        "rank": 1,
+        "action": "Fix RLS policies",
+        "why": "Data breach risk",
+        "when": "IMMEDIATE"
+      },
+      {
+        "rank": 2,
+        "action": "Add CSRF protection",
+        "why": "Account compromise risk",
+        "when": "IMMEDIATE"
+      },
+      {
+        "rank": 3,
+        "action": "Refactor server/index.js",
+        "why": "Maintainability, testing",
+        "when": "Within 2 weeks"
+      },
+      {
+        "rank": 4,
+        "action": "Enable TypeScript strict mode",
+        "why": "Bug prevention",
+        "when": "Within 2 weeks"
+      },
+      {
+        "rank": 5,
+        "action": "Remove config duplication",
+        "why": "Maintenance",
+        "when": "Within 3 weeks"
+      }
+    ]
+  }
+}
