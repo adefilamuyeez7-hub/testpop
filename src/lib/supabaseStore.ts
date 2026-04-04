@@ -555,6 +555,292 @@ async function fetchPublicArtistsFromSupabase(artistId?: string) {
   return artistId ? (enriched[0] ?? null) : enriched;
 }
 
+function isReleaseBackedProduct(product: Record<string, any> | null | undefined) {
+  return Boolean(product?.creative_release_id);
+}
+
+function isStandaloneMarketplaceProduct(product: Record<string, any> | null | undefined) {
+  return !isReleaseBackedProduct(product);
+}
+
+function sortDropsByNewest<T extends Record<string, any>>(drops: T[]) {
+  return [...(drops || [])].sort((left, right) => {
+    const leftTime = new Date(left.updated_at || left.created_at || 0).getTime();
+    const rightTime = new Date(right.updated_at || right.created_at || 0).getTime();
+    return rightTime - leftTime;
+  });
+}
+
+async function fetchCreativeReleasesByIdsFromSupabase(releaseIds: Array<string | null | undefined>) {
+  const uniqueReleaseIds = Array.from(
+    new Set(releaseIds.filter((releaseId): releaseId is string => Boolean(releaseId)))
+  );
+
+  if (uniqueReleaseIds.length === 0) {
+    return new Map<string, Record<string, any>>();
+  }
+
+  const { data, error } = await supabase
+    .from("creative_releases")
+    .select(
+      [
+        "id",
+        "artist_id",
+        "title",
+        "description",
+        "release_type",
+        "status",
+        "price_eth",
+        "supply",
+        "sold",
+        "art_metadata_uri",
+        "cover_image_uri",
+        "contract_kind",
+        "contract_address",
+        "contract_listing_id",
+        "contract_drop_id",
+        "metadata",
+        "published_at",
+        "created_at",
+        "updated_at",
+      ].join(", ")
+    )
+    .in("id", uniqueReleaseIds);
+
+  if (error) {
+    throw error;
+  }
+
+  return new Map((data || []).map((release) => [release.id, release]));
+}
+
+async function fetchReleaseLinkedProductsForDropSurface(options: { artistId?: string; productId?: string } = {}) {
+  if (productColumnsMode === "legacy") {
+    return [];
+  }
+
+  let query = supabase
+    .from("products")
+    .select(getPublicProductSelectClause())
+    .in("status", [...PUBLIC_PRODUCT_STATUSES])
+    .not("creative_release_id", "is", null)
+    .order("created_at", { ascending: false });
+
+  if (options.artistId) {
+    query = query.eq("artist_id", options.artistId);
+  }
+
+  if (options.productId) {
+    query = query.eq("id", options.productId);
+  }
+
+  const { data, error } = await query;
+  updateProductSchemaMode(error);
+
+  if (error && productColumnsMode === "legacy") {
+    return [];
+  }
+
+  if (error) {
+    throw error;
+  }
+
+  const uniqueProducts = new Map<string, Record<string, any>>();
+  for (const product of data || []) {
+    const releaseId = product.creative_release_id || product.id;
+    if (!uniqueProducts.has(releaseId)) {
+      uniqueProducts.set(releaseId, product);
+    }
+  }
+
+  return Array.from(uniqueProducts.values());
+}
+
+function buildReleaseBackedSyntheticDrop(
+  product: Record<string, any>,
+  release: Record<string, any> | null | undefined
+) {
+  const productMetadata =
+    product.metadata && typeof product.metadata === "object" && !Array.isArray(product.metadata)
+      ? product.metadata
+      : {};
+  const releaseMetadata =
+    release?.metadata && typeof release.metadata === "object" && !Array.isArray(release.metadata)
+      ? release.metadata
+      : {};
+
+  return withDropDefaults({
+    id: product.id,
+    artist_id: product.artist_id || release?.artist_id || null,
+    creative_release_id: product.creative_release_id || release?.id || null,
+    title: release?.title || product.name || "Untitled Release",
+    description: release?.description || product.description || "",
+    price_eth: product.price_eth ?? release?.price_eth ?? 0,
+    supply: product.stock ?? release?.supply ?? 1,
+    sold: product.sold ?? release?.sold ?? 0,
+    image_url:
+      product.image_url ||
+      (typeof release?.cover_image_uri === "string" && release.cover_image_uri
+        ? ipfsToHttp(release.cover_image_uri)
+        : null),
+    image_ipfs_uri: product.image_ipfs_uri || release?.cover_image_uri || null,
+    metadata_ipfs_uri: product.metadata_uri || release?.art_metadata_uri || null,
+    preview_uri: product.preview_uri || release?.cover_image_uri || null,
+    delivery_uri:
+      product.delivery_uri ||
+      (typeof releaseMetadata.delivery_uri === "string" ? releaseMetadata.delivery_uri : null),
+    asset_type: product.asset_type || "image",
+    is_gated: Boolean(product.is_gated),
+    status: release?.status || product.status || "published",
+    type: "drop",
+    contract_address: release?.contract_address || null,
+    contract_drop_id:
+      release?.contract_drop_id !== null && release?.contract_drop_id !== undefined
+        ? Number(release.contract_drop_id)
+        : null,
+    contract_kind: release?.contract_kind || product.contract_kind || "creativeReleaseEscrow",
+    created_at: release?.published_at || product.created_at || release?.created_at || null,
+    updated_at: product.updated_at || release?.updated_at || null,
+    metadata: {
+      ...releaseMetadata,
+      ...productMetadata,
+      source_kind: "release_product",
+      source_product_id: product.id,
+    },
+    source_kind: "release_product",
+    source_product_id: product.id,
+    linked_product: product,
+    creative_release: release || null,
+  });
+}
+
+async function appendReleaseBackedDrops<T extends Record<string, any>>(
+  drops: T[],
+  options: { artistId?: string } = {}
+) {
+  const baseDrops = [...(drops || [])];
+
+  let releaseProducts: Record<string, any>[] = [];
+  try {
+    releaseProducts = await fetchReleaseLinkedProductsForDropSurface({ artistId: options.artistId });
+  } catch (error: any) {
+    console.warn("Failed to fetch release-linked products for drop surface:", error?.message || error);
+    return sortDropsByNewest(baseDrops);
+  }
+
+  if (releaseProducts.length === 0) {
+    return sortDropsByNewest(baseDrops);
+  }
+
+  const existingReleaseIds = new Set(
+    baseDrops
+      .map((drop) => drop.creative_release_id)
+      .filter((releaseId): releaseId is string => Boolean(releaseId))
+  );
+
+  const missingReleaseProducts = releaseProducts.filter((product) => {
+    const releaseId = product.creative_release_id;
+    return releaseId ? !existingReleaseIds.has(releaseId) : false;
+  });
+
+  if (missingReleaseProducts.length === 0) {
+    return sortDropsByNewest(baseDrops);
+  }
+
+  let releaseMap = new Map<string, Record<string, any>>();
+  try {
+    releaseMap = await fetchCreativeReleasesByIdsFromSupabase(
+      missingReleaseProducts.map((product) => product.creative_release_id)
+    );
+  } catch (error: any) {
+    console.warn("Failed to fetch creative releases for synthetic drops:", error?.message || error);
+  }
+
+  let syntheticDrops = missingReleaseProducts.map((product) =>
+    buildReleaseBackedSyntheticDrop(product, releaseMap.get(product.creative_release_id) || null)
+  );
+
+  syntheticDrops = await attachArtistsToDrops(syntheticDrops);
+  syntheticDrops = await enrichDropsMediaFromMetadata(syntheticDrops);
+
+  return sortDropsByNewest([...baseDrops, ...syntheticDrops]) as T[];
+}
+
+async function fetchSyntheticDropByProductId(productId: string) {
+  if (!productId) {
+    return null;
+  }
+
+  let product: Record<string, any> | null = null;
+  try {
+    product = await fetchProductByIdFromSupabase(productId);
+  } catch (error: any) {
+    console.warn("Failed to fetch product-backed drop:", error?.message || error);
+    return null;
+  }
+
+  if (!isReleaseBackedProduct(product)) {
+    return null;
+  }
+
+  let release: Record<string, any> | null = null;
+  try {
+    const releaseMap = await fetchCreativeReleasesByIdsFromSupabase([product?.creative_release_id]);
+    release = releaseMap.get(product?.creative_release_id) || null;
+  } catch (error: any) {
+    console.warn("Failed to fetch creative release for product-backed drop:", error?.message || error);
+  }
+
+  let [syntheticDrop] = await attachArtistsToDrops([
+    buildReleaseBackedSyntheticDrop(product, release),
+  ]);
+  syntheticDrop = await enrichDropMediaFromMetadata(syntheticDrop);
+  return syntheticDrop;
+}
+
+export async function searchPublicCatalogFromSupabase(query: string) {
+  const normalizedQuery = query.trim().toLowerCase();
+  if (!normalizedQuery) {
+    return { artists: [], drops: [], products: [] };
+  }
+
+  const [artists, drops, products] = await Promise.all([
+    fetchPublicArtistsFromSupabase(),
+    fetchLiveDropsFromSupabase(),
+    fetchPublishedProductsFromSupabase(),
+  ]);
+
+  return {
+    artists: (artists || [])
+      .filter((artist) =>
+        [artist.name, artist.handle, artist.tag]
+          .filter(Boolean)
+          .some((value) => String(value).toLowerCase().includes(normalizedQuery))
+      )
+      .slice(0, 4),
+    drops: (drops || [])
+      .filter((drop) =>
+        [
+          drop.title,
+          drop.type,
+          drop.asset_type,
+          drop.artists && !Array.isArray(drop.artists) ? drop.artists.name : "",
+        ]
+          .filter(Boolean)
+          .some((value) => String(value).toLowerCase().includes(normalizedQuery))
+      )
+      .slice(0, 4),
+    products: (products || [])
+      .filter((product) => isStandaloneMarketplaceProduct(product))
+      .filter((product) =>
+        [product.name, product.description, product.category]
+          .filter(Boolean)
+          .some((value) => String(value).toLowerCase().includes(normalizedQuery))
+      )
+      .slice(0, 4),
+  };
+}
+
 function shouldUseFullDropColumns() {
   return dropsColumnsMode !== "legacy";
 }
@@ -569,6 +855,7 @@ function updateDropSchemaModes(error: { message?: string } | null | undefined) {
   }
 
   if (
+    isMissingColumnError(error, "drops", "creative_release_id") ||
     isMissingColumnError(error, "drops", "preview_uri") ||
     isMissingColumnError(error, "drops", "is_gated") ||
     isMissingColumnError(error, "drops", "delivery_uri") ||
@@ -587,7 +874,6 @@ function getLiveDropsSelectClause() {
   const columns = [
     "id",
     "artist_id",
-    "creative_release_id",
     "title",
     "price_eth",
     "image_url",
@@ -604,8 +890,9 @@ function getLiveDropsSelectClause() {
   ];
 
   if (shouldUseFullDropColumns()) {
-    columns.splice(7, 0, "preview_uri", "asset_type");
-    columns.splice(14, 0, "delivery_uri", "is_gated");
+    columns.splice(2, 0, "creative_release_id");
+    columns.splice(8, 0, "preview_uri", "asset_type");
+    columns.splice(15, 0, "delivery_uri", "is_gated");
     columns.push("contract_kind");
   }
 
@@ -626,7 +913,6 @@ function getDropDetailSelectClause() {
   const columns = [
     "id",
     "artist_id",
-    "creative_release_id",
     "title",
     "description",
     "price_eth",
@@ -644,6 +930,7 @@ function getDropDetailSelectClause() {
   ];
 
   if (shouldUseFullDropColumns()) {
+    columns.splice(2, 0, "creative_release_id");
     columns.splice(10, 0, "preview_uri", "asset_type");
     columns.splice(15, 0, "delivery_uri", "is_gated");
     columns.push("contract_kind");
@@ -845,8 +1132,10 @@ export async function fetchAllDropsFromSupabase() {
       throw error;
     }
 
-    console.log(`✅ Fetched ${data?.length || 0} drops from Supabase`);
-    return data || [];
+    const attached = await attachArtistsToDrops(data || []);
+    const merged = await appendReleaseBackedDrops(attached);
+    console.log(`✅ Fetched ${merged.length || 0} drops from Supabase`);
+    return merged;
   } catch (error: any) {
     console.error("❌ fetchAllDropsFromSupabase failed:", error.message);
     throw error;
@@ -888,7 +1177,8 @@ export async function fetchLiveDropsFromSupabase() {
     }
 
     const enriched = await enrichDropsMediaFromMetadata(data || []);
-    const filtered = filterNonExpiredLiveDrops(enriched);
+    const merged = await appendReleaseBackedDrops(enriched);
+    const filtered = filterNonExpiredLiveDrops(merged);
     console.log(`✅ Fetched ${filtered.length || 0} live drops from Supabase`);
     return filtered;
   } catch (error: any) {
@@ -934,7 +1224,11 @@ export async function fetchDropByIdFromSupabase(dropId: string) {
       throw error;
     }
 
-    return data ? await enrichDropMediaFromMetadata(data) : null;
+    if (data) {
+      return await enrichDropMediaFromMetadata(data);
+    }
+
+    return await fetchSyntheticDropByProductId(dropId);
   } catch (error: any) {
     console.error("❌ fetchDropByIdFromSupabase failed:", error.message);
     throw error;
@@ -978,8 +1272,9 @@ export async function fetchDropsByArtistFromSupabase(artistId: string) {
     }
 
     const enriched = await enrichDropsMediaFromMetadata(data || []);
-    console.log(`✅ Fetched ${enriched.length || 0} drops for artist`);
-    return enriched;
+    const merged = await appendReleaseBackedDrops(enriched, { artistId });
+    console.log(`✅ Fetched ${merged.length || 0} drops for artist`);
+    return merged;
   } catch (error: any) {
     console.error("❌ fetchDropsByArtistFromSupabase failed:", error.message);
     throw error;

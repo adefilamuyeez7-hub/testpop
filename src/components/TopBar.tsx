@@ -2,13 +2,9 @@ import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { Search, X, Loader2 } from "lucide-react";
 import { useLocation, useNavigate } from "react-router-dom";
 import logo from "@/assets/logo.png";
-import { supabase } from "@/lib/db";
 import { resolveMediaUrl } from "@/lib/pinata";
 import { resolveDropCoverImage } from "@/lib/mediaPreview";
-import {
-  LIVE_DROP_STATUSES,
-  PUBLIC_PRODUCT_STATUSES,
-} from "@/lib/catalogVisibility";
+import { searchPublicCatalogFromSupabase } from "@/lib/supabaseStore";
 import { appShellNavItems, isAppShellNavActive } from "./appShellNav";
 import { NavLink } from "./NavLink";
 import ThemeToggle from "./ThemeToggle";
@@ -51,31 +47,7 @@ function SearchPanel({ onClose }: { onClose: () => void }) {
     const timeout = setTimeout(async () => {
       setLoading(true);
       try {
-        const [artistRes, dropRes, productRes] = await Promise.all([
-          supabase
-            .from("artists")
-            .select("id, name, tag, avatar_url")
-            .ilike("name", `%${query}%`)
-            .limit(4),
-          supabase
-            .from("drops")
-            .select("id, title, price_eth, image_url, image_ipfs_uri, preview_uri, delivery_uri, asset_type, status")
-            .ilike("title", `%${query}%`)
-            .in("status", [...LIVE_DROP_STATUSES])
-            .limit(4),
-          supabase
-            .from("products")
-            .select("id, name, price_eth, image_url, image_ipfs_uri")
-            .or(`name.ilike.%${query}%,description.ilike.%${query}%`)
-            .in("status", [...PUBLIC_PRODUCT_STATUSES])
-            .limit(4),
-        ]);
-
-        setResults({
-          artists: artistRes.data || [],
-          drops: dropRes.data || [],
-          products: productRes.data || [],
-        });
+        setResults(await searchPublicCatalogFromSupabase(query));
       } catch (error) {
         console.error(error);
       } finally {

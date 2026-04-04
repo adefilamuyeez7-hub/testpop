@@ -733,7 +733,21 @@ export async function getCreativeRelease(releaseId: string): Promise<CreativeRel
       return await response.json();
     }
 
-    return null;
+    if (!supabaseUrl || !supabaseAnonKey) {
+      return null;
+    }
+
+    const { data, error } = await supabase
+      .from("creative_releases")
+      .select("*")
+      .eq("id", releaseId)
+      .maybeSingle();
+
+    if (error) {
+      throw error;
+    }
+
+    return data || null;
   } catch (error: any) {
     console.error("getCreativeRelease failed:", error.message);
     return null;

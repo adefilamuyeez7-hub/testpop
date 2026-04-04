@@ -21,7 +21,7 @@ import {
   syncArtistWhitelist,
 } from "@/lib/whitelist";
 import { getAnalyticsSnapshot, getRecentVisitSeries } from "@/lib/analyticsStore";
-import { getAllArtists, getAllDrops, resolveArtistForWallet } from "@/lib/artistStore";
+import { resolveArtistForWallet } from "@/lib/artistStore";
 import { validateProductForm, validateFileUpload, isValidWalletAddress, sanitizeString } from "@/lib/validation";
 import {
   createProduct as dbCreateProduct,
@@ -88,6 +88,23 @@ type WhitelistEntryWithContract = WhitelistEntry & {
 
 type DropSummary = {
   id: string;
+};
+
+type AnalyticsDrop = {
+  id: string;
+  title?: string | null;
+  artist_id?: string | null;
+  artists?: {
+    id?: string | null;
+    name?: string | null;
+  } | null;
+  type?: string | null;
+  sold?: number | string | null;
+  bought?: number | string | null;
+  price_eth?: number | string | null;
+  priceEth?: number | string | null;
+  current_bid_eth?: number | string | null;
+  currentBidEth?: number | string | null;
 };
 
 function mapAdminArtistsToWhitelist(
@@ -1212,17 +1229,29 @@ const AdminPage = () => {
       ? (currentWindow > 0 ? 100 : 0)
       : ((currentWindow - previousWindow) / previousWindow) * 100;
 
-    const artists = getAllArtists();
-    const drops = getAllDrops();
-    const artistById = new Map(artists.map((artist) => [artist.id, artist]));
+    const drops: AnalyticsDrop[] = Array.isArray(supabaseDrops) ? (supabaseDrops as AnalyticsDrop[]) : [];
+    const artistById = new Map<string, NonNullable<AnalyticsDrop["artists"]>>();
+    drops.forEach((drop) => {
+      if (drop.artists?.id) {
+        artistById.set(drop.artists.id, drop.artists);
+      }
+    });
     const dropRevenue = new Map<string, number>();
 
     drops.forEach((drop) => {
+      const artistId = drop.artist_id || drop.artists?.id || null;
+      if (!artistId) {
+        return;
+      }
+
+      const normalizedType = String(drop.type || "drop").toLowerCase();
+      const dropPrice = Number(drop.current_bid_eth ?? drop.currentBidEth ?? drop.price_eth ?? drop.priceEth ?? 0);
       const gross =
-        drop.type === "Drop"
-          ? Number(drop.priceEth || 0) * Number(drop.bought ?? 0)
-          : Number(drop.currentBidEth ?? drop.priceEth ?? 0);
-      dropRevenue.set(drop.artistId, (dropRevenue.get(drop.artistId) ?? 0) + gross);
+        normalizedType === "auction"
+          ? dropPrice
+          : dropPrice * Number(drop.sold ?? drop.bought ?? 0);
+
+      dropRevenue.set(artistId, (dropRevenue.get(artistId) ?? 0) + gross);
     });
 
     const topArtistEntry = Array.from(dropRevenue.entries()).sort((a, b) => b[1] - a[1])[0];
@@ -1236,7 +1265,7 @@ const AdminPage = () => {
 
     const topViewedDropEntry = Object.entries(snapshot.dropViews).sort((a, b) => b[1] - a[1])[0];
     const topViewedArt = topViewedDropEntry
-      ? { drop: (supabaseDrops as DropSummary[]).find((drop) => drop.id === topViewedDropEntry[0]) ?? null, views: topViewedDropEntry[1] }
+      ? { drop: drops.find((drop: DropSummary) => drop.id === topViewedDropEntry[0]) ?? null, views: topViewedDropEntry[1] }
       : null;
 
     return {

@@ -677,6 +677,7 @@ const Index = () => {
     adminFeaturedSlides.length > 0
       ? adminFeaturedSlides[featuredCarouselIndex % adminFeaturedSlides.length]
       : null;
+  const showLegacyFeaturedDeck = currentCard < 0;
 
   const nextFeaturedSlide = () => {
     if (!adminFeaturedSlides.length) return;
@@ -1233,7 +1234,7 @@ const Index = () => {
           </>
         )}
 
-        {false && (
+        {showLegacyFeaturedDeck && (
           <>
           Art drops, POAP campaigns & IP investment — all on-chain.
       {/* Live Drops — 2-card carousel */}

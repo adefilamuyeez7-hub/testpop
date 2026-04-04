@@ -79,7 +79,7 @@ const DropDetailPage = () => {
       previewUri: dropRecord.preview_uri || undefined,
       contractAddress: dropRecord.contract_address || null,
       contractDropId: dropRecord.contract_drop_id !== null && dropRecord.contract_drop_id !== undefined ? Number(dropRecord.contract_drop_id) : null,
-      contractKind: normalizedContractKind as "artDrop" | "poapCampaign" | "poapCampaignV2" | null,
+      contractKind: normalizedContractKind as "artDrop" | "poapCampaign" | "poapCampaignV2" | "creativeReleaseEscrow" | null,
       metadata: (dropRecord.metadata as Record<string, unknown> | undefined) || {},
       poap: false,
       poapNote: "",
@@ -98,6 +98,10 @@ const DropDetailPage = () => {
       : null;
   const resolvedLinkedRelease = linkedRelease || inlineLinkedRelease;
   const resolvedLinkedProduct = linkedProduct || inlineLinkedProduct;
+  const isReleaseBackedDrop =
+    dropRecord?.source_kind === "release_product" ||
+    drop?.contractKind === "creativeReleaseEscrow" ||
+    (drop?.creativeReleaseId && Boolean(resolvedLinkedProduct?.id) && !drop?.contractDropId);
   const mediaSrc = drop ? ipfsToHttp(drop.deliveryUri || drop.imageUri || drop.image || "") : "";
   const posterSrc = drop ? ipfsToHttp(drop.image || drop.previewUri || "") : "";
   const linkedReleaseCoverSrc = resolvedLinkedRelease?.cover_image_uri ? ipfsToHttp(resolvedLinkedRelease.cover_image_uri) : "";
@@ -351,17 +355,34 @@ const DropDetailPage = () => {
           </div>
         )}
 
-        <Suspense
-          fallback={
-            <div className="p-4 rounded-2xl bg-card shadow-card">
-              <div className="flex items-center justify-center h-24">
-                <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-              </div>
+        {isReleaseBackedDrop ? (
+          <div className="p-4 rounded-2xl bg-card shadow-card space-y-3">
+            <div>
+              <p className="text-xs text-muted-foreground">Release checkout</p>
+              <p className="mt-1 text-sm text-foreground">
+                This drop is the public discovery view for a linked release. Open the release checkout to buy the edition and access fulfillment details.
+              </p>
             </div>
-          }
-        >
-          <DropPrimaryActionCard drop={drop} onCollectSuccess={handleCollectSuccess} />
-        </Suspense>
+            <Button
+              onClick={() => navigate(`/products/${resolvedLinkedProduct?.id || drop.id}`)}
+              className="w-full rounded-full gradient-primary text-primary-foreground font-semibold h-11"
+            >
+              Open Release Checkout
+            </Button>
+          </div>
+        ) : (
+          <Suspense
+            fallback={
+              <div className="p-4 rounded-2xl bg-card shadow-card">
+                <div className="flex items-center justify-center h-24">
+                  <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+                </div>
+              </div>
+            }
+          >
+            <DropPrimaryActionCard drop={drop} onCollectSuccess={handleCollectSuccess} />
+          </Suspense>
+        )}
 
         {drop.poap && (
           <div className="p-3 rounded-xl bg-accent border border-border flex items-start gap-2">

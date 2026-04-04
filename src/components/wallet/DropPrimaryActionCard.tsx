@@ -24,7 +24,7 @@ type DropActionData = {
   endsIn: string;
   contractAddress: string | null;
   contractDropId?: number | null;
-  contractKind?: "artDrop" | "poapCampaign" | "poapCampaignV2" | null;
+  contractKind?: "artDrop" | "poapCampaign" | "poapCampaignV2" | "creativeReleaseEscrow" | null;
   assetType: string;
   previewUri?: string;
   deliveryUri?: string;
