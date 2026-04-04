@@ -4,6 +4,7 @@ import { formatEther } from "viem";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { cn } from "@/lib/utils";
 import {
   getCampaignSubmissions,
   submitCampaignContent,
@@ -150,8 +151,10 @@ export function CampaignActionPanel({
   const [entryQuantity, setEntryQuantity] = useState("1");
   const [contentUrl, setContentUrl] = useState("");
   const [contentCaption, setContentCaption] = useState("");
-  const [submissionLoading, setSubmissionLoading] = useState(false);
+  const [loadingSubmissions, setLoadingSubmissions] = useState(false);
+  const [submittingContent, setSubmittingContent] = useState(false);
   const [unlocking, setUnlocking] = useState(false);
+  const [activeEntryView, setActiveEntryView] = useState<"eth" | "content">("eth");
   const [userSubmissions, setUserSubmissions] = useState<
     Awaited<ReturnType<typeof getCampaignSubmissions>>
   >([]);
@@ -199,20 +202,34 @@ export function CampaignActionPanel({
   const canSubmitContent = supportsContentEntries && status === "live";
   const canBuyEntries = supportsEthEntries && status === "live" && hasContractCampaignId;
   const canRedeem = status === "redeemable" && hasContractCampaignId;
+  const shouldShowEntrySlider = supportsEthEntries && supportsContentEntries;
+
+  useEffect(() => {
+    if (shouldShowEntrySlider) return;
+
+    if (supportsContentEntries && !supportsEthEntries) {
+      setActiveEntryView("content");
+      return;
+    }
+
+    setActiveEntryView("eth");
+  }, [shouldShowEntrySlider, supportsContentEntries, supportsEthEntries]);
 
   useEffect(() => {
     if (!address || !dropId) {
+      setLoadingSubmissions(false);
       setUserSubmissions([]);
       return;
     }
 
     let cancelled = false;
     if (!getRuntimeApiToken()) {
+      setLoadingSubmissions(false);
       setUserSubmissions([]);
       return;
     }
 
-    setSubmissionLoading(true);
+    setLoadingSubmissions(true);
     getCampaignSubmissions(dropId, "mine")
       .then((submissions) => {
         if (!cancelled) {
@@ -226,7 +243,7 @@ export function CampaignActionPanel({
       })
       .finally(() => {
         if (!cancelled) {
-          setSubmissionLoading(false);
+          setLoadingSubmissions(false);
         }
       });
 
@@ -315,7 +332,7 @@ export function CampaignActionPanel({
       return;
     }
 
-    setSubmissionLoading(true);
+    setSubmittingContent(true);
     try {
       await establishSecureSession(address);
       await submitCampaignContent({
@@ -331,7 +348,7 @@ export function CampaignActionPanel({
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Unable to submit campaign content.");
     } finally {
-      setSubmissionLoading(false);
+      setSubmittingContent(false);
     }
   };
 
@@ -439,7 +456,43 @@ export function CampaignActionPanel({
         </div>
       </div>
 
-      {supportsEthEntries && (
+      {shouldShowEntrySlider && (
+        <div className="rounded-2xl border border-border bg-secondary/25 p-1">
+          <div className="relative grid grid-cols-2">
+            <div
+              aria-hidden="true"
+              className={cn(
+                "absolute inset-y-0 w-1/2 rounded-[calc(theme(borderRadius.xl)-2px)] bg-background shadow-sm transition-transform duration-200",
+                activeEntryView === "content" ? "translate-x-full" : "translate-x-0"
+              )}
+            />
+            <button
+              type="button"
+              onClick={() => setActiveEntryView("eth")}
+              className={cn(
+                "relative z-10 rounded-xl px-3 py-2 text-left transition-colors",
+                activeEntryView === "eth" ? "text-foreground" : "text-muted-foreground"
+              )}
+            >
+              <span className="block text-sm font-semibold">ETH entry</span>
+              <span className="block text-[11px]">{ticketPriceEth} ETH per credit</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveEntryView("content")}
+              className={cn(
+                "relative z-10 rounded-xl px-3 py-2 text-left transition-colors",
+                activeEntryView === "content" ? "text-foreground" : "text-muted-foreground"
+              )}
+            >
+              <span className="block text-sm font-semibold">Content entry</span>
+              <span className="block text-[11px]">Artist-reviewed submission</span>
+            </button>
+          </div>
+        </div>
+      )}
+
+      {supportsEthEntries && activeEntryView === "eth" && (
         <div className="rounded-xl border border-border p-3 space-y-2">
           <p className="text-sm font-semibold text-foreground">Buy ETH participation</p>
           <p className="text-xs text-muted-foreground">
@@ -479,7 +532,7 @@ export function CampaignActionPanel({
         </div>
       )}
 
-      {supportsContentEntries && (
+      {supportsContentEntries && activeEntryView === "content" && (
         <div className="rounded-xl border border-border p-3 space-y-2">
           <p className="text-sm font-semibold text-foreground">Submit content</p>
           <p className="text-xs text-muted-foreground">
@@ -532,11 +585,11 @@ export function CampaignActionPanel({
 
           <Button
             onClick={handleSubmitContent}
-            disabled={submissionLoading || !hasApiSession || !canSubmitContent}
+            disabled={submittingContent || !hasApiSession || !canSubmitContent}
             variant="outline"
             className="w-full rounded-xl"
           >
-            {submissionLoading ? (
+            {submittingContent ? (
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
             ) : (
               <Send className="mr-2 h-4 w-4" />
@@ -544,10 +597,14 @@ export function CampaignActionPanel({
             Submit for approval
           </Button>
 
+          {loadingSubmissions && hasApiSession && (
+            <p className="text-xs text-muted-foreground">Loading your submission history...</p>
+          )}
+
           {(pendingSubmissions > 0 || approvedSubmissions > 0 || rejectedSubmissions > 0) && (
             <div className="rounded-xl border border-border bg-secondary/20 p-3 text-xs text-muted-foreground space-y-2">
               <p>
-                {pendingSubmissions} pending · {approvedSubmissions} approved · {rejectedSubmissions} rejected
+                {pendingSubmissions} pending | {approvedSubmissions} approved | {rejectedSubmissions} rejected
               </p>
               <div className="space-y-2">
                 {userSubmissions.slice(0, 3).map((submission) => (
