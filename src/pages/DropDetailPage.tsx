@@ -46,10 +46,13 @@ function resolveDropAssetType(dropRecord: {
   image_url?: string | null;
 }): AssetType {
   const storedType = (dropRecord.asset_type || "").trim().toLowerCase() as AssetType | "";
-  if (storedType && storedType !== "digital") {
-    return storedType;
+  
+  // If stored type is a valid non-generic type, use it (FIXED: Check for valid types, not just non-"digital")
+  if (storedType && !["digital", "image", "unknown", ""].includes(storedType)) {
+    return storedType as AssetType;
   }
 
+  // Try to infer type from URIs (FIXED: More thorough candidate list)
   const candidates = [
     dropRecord.delivery_uri,
     dropRecord.preview_uri,
@@ -60,12 +63,17 @@ function resolveDropAssetType(dropRecord: {
   for (const candidate of candidates) {
     if (!candidate?.trim()) continue;
     const inferredType = detectAssetTypeFromUri(candidate);
-    if (inferredType === "pdf" || inferredType === "epub") {
+    if (inferredType && inferredType !== "image" && inferredType !== "unknown") {
       return inferredType;
     }
   }
 
-  return storedType || "image";
+  // If stored type is set (even if generic), use it
+  if (storedType) {
+    return storedType as AssetType;
+  }
+  
+  return "image";
 }
 
 function formatDetailValue(value: unknown): string {
@@ -178,14 +186,55 @@ const DropDetailPage = () => {
     dropRecord?.source_kind === "catalog_product" ||
     drop?.contractKind === "creativeReleaseEscrow" ||
     Boolean(resolvedLinkedProduct?.id);
-  const mediaSrc = drop ? ipfsToHttp(drop.deliveryUri || drop.imageUri || drop.image || "") : "";
+  // FIXED #1: Better fallback sources for mediaSrc
+  const mediaSrc = useMemo(() => {
+    if (!drop) return "";
+    const sources = [
+      drop.deliveryUri,
+      drop.imageUri, 
+      drop.image,
+      drop.previewUri, // Add fallback for preview
+    ];
+    const selected = sources.find(s => s?.trim());
+    const resolved = ipfsToHttp(selected || "");
+    
+    // Debug logging
+    if (drop.assetType === "pdf" && !resolved) {
+      console.warn("[PDF] No media source found for drop:", {
+        id: drop.id,
+        title: drop.title,
+        assetType: drop.assetType,
+        deliveryUri: drop.deliveryUri,
+        imageUri: drop.imageUri,
+        image: drop.image,
+        previewUri: drop.previewUri,
+      });
+    }
+    
+    return resolved;
+  }, [drop]);
+
   const posterSrc = drop ? ipfsToHttp(drop.image || drop.previewUri || "") : "";
   const linkedReleaseCoverSrc = resolvedLinkedRelease?.cover_image_uri ? ipfsToHttp(resolvedLinkedRelease.cover_image_uri) : "";
   const linkedProductImageSrc = resolvedLinkedProduct
     ? resolveMediaUrl(resolvedLinkedProduct.image_url, resolvedLinkedProduct.image_ipfs_uri)
     : "";
   const coverSrc = drop ? ipfsToHttp(drop.image || "") || linkedProductImageSrc || linkedReleaseCoverSrc : "";
-  const showInlinePdfReader = Boolean(drop && drop.assetType === "pdf" && mediaSrc && !drop.isGated);
+  
+  // FIXED #3: Better logging for inline PDF reader determination
+  const showInlinePdfReader = useMemo(() => {
+    const show = Boolean(drop && drop.assetType === "pdf" && mediaSrc && !drop.isGated);
+    if (drop?.assetType === "pdf") {
+      console.debug("[PDF] Inline reader decision:", {
+        dropId: drop.id,
+        assetType: drop.assetType,
+        hasMediaSrc: !!mediaSrc,
+        isGated: drop.isGated,
+        showInlinePdf: show,
+      });
+    }
+    return show;
+  }, [drop, mediaSrc]);
   const mediaFrameClass = showInlinePdfReader
     ? "min-h-[34rem] overflow-hidden bg-secondary"
     : "aspect-square overflow-hidden bg-secondary";
