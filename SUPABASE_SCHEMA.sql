@@ -233,13 +233,13 @@ CREATE POLICY "analytics_read_all" ON analytics FOR SELECT USING (true);
 
 -- Add contract_address column to artists table
 ALTER TABLE artists 
-ADD COLUMN contract_address VARCHAR(255) UNIQUE,
-ADD COLUMN contract_deployment_tx VARCHAR(255),
-ADD COLUMN contract_deployed_at TIMESTAMP WITH TIME ZONE;
+ADD COLUMN IF NOT EXISTS contract_address VARCHAR(255) UNIQUE,
+ADD COLUMN IF NOT EXISTS contract_deployment_tx VARCHAR(255),
+ADD COLUMN IF NOT EXISTS contract_deployed_at TIMESTAMP WITH TIME ZONE;
 
 -- Create index for faster contract address lookups
-CREATE INDEX idx_artists_contract_address ON artists(contract_address);
-CREATE INDEX idx_artists_deployment_status ON artists(contract_deployed_at DESC);
+CREATE INDEX IF NOT EXISTS idx_artists_contract_address ON artists(contract_address);
+CREATE INDEX IF NOT EXISTS idx_artists_deployment_status ON artists(contract_deployed_at DESC);
 
 -- Add comment describing the new columns
 COMMENT ON COLUMN artists.contract_address IS 'The ArtDrop contract address deployed for this artist via ArtDropFactory';
@@ -249,9 +249,9 @@ COMMENT ON COLUMN artists.contract_deployed_at IS 'Timestamp when the contract w
 -- Update drops table to reference artist contract directly
 -- (Optional: useful for optimization, each drop knows its contract immediately)
 ALTER TABLE drops 
-ADD COLUMN artist_contract_address VARCHAR(255);
+ADD COLUMN IF NOT EXISTS artist_contract_address VARCHAR(255);
 
-CREATE INDEX idx_drops_artist_contract ON drops(artist_contract_address);
+CREATE INDEX IF NOT EXISTS idx_drops_artist_contract ON drops(artist_contract_address);
 
 COMMENT ON COLUMN drops.artist_contract_address IS 'The artist contract address where this drop was deployed';
 
@@ -262,14 +262,14 @@ COMMENT ON COLUMN drops.artist_contract_address IS 'The artist contract address 
 -- Extends artist profiles to support optional fundraising via ArtistSharesToken
 
 ALTER TABLE artists 
-ADD COLUMN shares_enabled BOOLEAN DEFAULT false,
-ADD COLUMN shares_contract_address VARCHAR(255) UNIQUE,
-ADD COLUMN shares_contract_tx VARCHAR(255),
-ADD COLUMN shares_campaign_active BOOLEAN DEFAULT false;
+ADD COLUMN IF NOT EXISTS shares_enabled BOOLEAN DEFAULT false,
+ADD COLUMN IF NOT EXISTS shares_contract_address VARCHAR(255) UNIQUE,
+ADD COLUMN IF NOT EXISTS shares_contract_tx VARCHAR(255),
+ADD COLUMN IF NOT EXISTS shares_campaign_active BOOLEAN DEFAULT false;
 
 -- Create index for fast shares lookups
-CREATE INDEX idx_artists_shares_contract ON artists(shares_contract_address);
-CREATE INDEX idx_artists_shares_campaign ON artists(shares_campaign_active);
+CREATE INDEX IF NOT EXISTS idx_artists_shares_contract ON artists(shares_contract_address);
+CREATE INDEX IF NOT EXISTS idx_artists_shares_campaign ON artists(shares_campaign_active);
 
 -- Comment describing the new columns
 COMMENT ON COLUMN artists.shares_enabled IS 'Whether this artist has enabled the fundraising shares system';
@@ -592,16 +592,19 @@ DROP POLICY IF EXISTS "analytics_read_write_all" ON analytics;
 -- ─────────────────────────────────────────────────────────────────────────────────
 
 -- Anyone authenticated can READ public artist information (for discovery)
+DROP POLICY IF EXISTS "artists_read_public" ON artists;
 CREATE POLICY "artists_read_public" ON artists
 FOR SELECT
 USING (auth.role() = 'authenticated');
 
 -- Artists can only UPDATE their own profile
+DROP POLICY IF EXISTS "artists_update_own_profile" ON artists;
 CREATE POLICY "artists_update_own_profile" ON artists
 FOR UPDATE
 USING (wallet = auth.jwt() ->> 'sub');
 
 -- Artists can INSERT their own profile (first time)
+DROP POLICY IF EXISTS "artists_insert_own_profile" ON artists;
 CREATE POLICY "artists_insert_own_profile" ON artists
 FOR INSERT
 WITH CHECK (wallet = auth.jwt() ->> 'sub');
@@ -611,11 +614,13 @@ WITH CHECK (wallet = auth.jwt() ->> 'sub');
 -- ─────────────────────────────────────────────────────────────────────────────────
 
 -- Anyone can READ published drops (status != 'draft')
+DROP POLICY IF EXISTS "drops_read_published" ON drops;
 CREATE POLICY "drops_read_published" ON drops
 FOR SELECT
 USING (status != 'draft');
 
 -- Artists can READ their own draft drops
+DROP POLICY IF EXISTS "drops_read_own_draft" ON drops;
 CREATE POLICY "drops_read_own_draft" ON drops
 FOR SELECT
 USING (
@@ -628,6 +633,7 @@ USING (
 );
 
 -- Artists can CREATE drops for themselves only
+DROP POLICY IF EXISTS "drops_create_own" ON drops;
 CREATE POLICY "drops_create_own" ON drops
 FOR INSERT
 WITH CHECK (
@@ -639,6 +645,7 @@ WITH CHECK (
 );
 
 -- Artists can UPDATE only their own drops
+DROP POLICY IF EXISTS "drops_update_own" ON drops;
 CREATE POLICY "drops_update_own" ON drops
 FOR UPDATE
 USING (
@@ -650,6 +657,7 @@ USING (
 );
 
 -- Artists can DELETE only their own drops
+DROP POLICY IF EXISTS "drops_delete_own" ON drops;
 CREATE POLICY "drops_delete_own" ON drops
 FOR DELETE
 USING (

@@ -1667,11 +1667,18 @@ app.get("/debug/dist-status", (req, res) => {
 const authChallengeImpl = async (req, res) => {
   try {
     const wallet = normalizeWallet(req.body?.wallet);
+    if (!wallet) {
+      return res.status(400).json({ error: "Wallet address is required" });
+    }
+
     if (!ethers.isAddress(wallet)) {
       return res.status(400).json({ error: "Invalid wallet address" });
     }
 
-    await cleanupExpiredNonces();
+    cleanupExpiredNonces().catch((cleanupError) => {
+      console.warn("Nonce cleanup failed (continuing):", cleanupError?.message || cleanupError);
+    });
+
     const { nonce, issuedAt } = await issueNonce(wallet);
     const message = makeChallengeMessage(wallet, nonce);
 
@@ -1697,7 +1704,9 @@ const authVerifyImpl = async (req, res) => {
       return res.status(400).json({ error: "Wallet, signature, and nonce are required" });
     }
 
-    await cleanupExpiredNonces();
+    await cleanupExpiredNonces().catch((cleanupError) => {
+      console.warn("Nonce cleanup failed before verification:", cleanupError?.message || cleanupError);
+    });
     const nonceRecord = await getValidNonceRecord(wallet, nonce);
 
     const message = makeChallengeMessage(wallet, nonceRecord.nonce);
