@@ -1,5 +1,5 @@
 -- Generated bootstrap schema
--- Generated at 2026-04-03T16:13:47.207Z
+-- Generated at 2026-04-04T10:42:27.081Z
 -- Source: supabase/migrations/*.sql in lexical order
 -- Apply this entire file to a fresh Supabase project to bootstrap the current app schema.
 -- ============================================================================
@@ -178,6 +178,8 @@ DROP POLICY IF EXISTS "orders_write_all" ON orders;
 DROP POLICY IF EXISTS "orders_update_all" ON orders;
 DROP POLICY IF EXISTS "whitelist_read_all" ON whitelist;
 DROP POLICY IF EXISTS "whitelist_write_all" ON whitelist;
+DROP POLICY IF EXISTS "whitelist_write_admin_only" ON whitelist;
+DROP POLICY IF EXISTS "whitelist_update_admin_only" ON whitelist;
 DROP POLICY IF EXISTS "analytics_insert_all" ON analytics;
 DROP POLICY IF EXISTS "analytics_read_all" ON analytics;
 
@@ -204,10 +206,12 @@ CREATE POLICY "orders_update_all" ON orders FOR UPDATE USING (true);
 -- Whitelist: admin-only write access, public read
 CREATE POLICY "whitelist_read_all" ON whitelist FOR SELECT USING (true);
 CREATE POLICY "whitelist_write_admin_only" ON whitelist FOR INSERT WITH CHECK (
-  (auth.jwt() ->> 'wallet_address')::text = '0x3d9A4F8E9bE795c7e82Da4FEd21cDD0D5234513E'
+  lower(coalesce(auth.jwt() ->> 'sub', '')) = lower('0x04dE2EE1cF5A46539d1dbED0eC8f2A541Ac5412C')
+  OR lower(coalesce(auth.jwt() ->> 'wallet_address', '')) = lower('0x04dE2EE1cF5A46539d1dbED0eC8f2A541Ac5412C')
 );
 CREATE POLICY "whitelist_update_admin_only" ON whitelist FOR UPDATE USING (
-  (auth.jwt() ->> 'wallet_address')::text = '0x3d9A4F8E9bE795c7e82Da4FEd21cDD0D5234513E'
+  lower(coalesce(auth.jwt() ->> 'sub', '')) = lower('0x04dE2EE1cF5A46539d1dbED0eC8f2A541Ac5412C')
+  OR lower(coalesce(auth.jwt() ->> 'wallet_address', '')) = lower('0x04dE2EE1cF5A46539d1dbED0eC8f2A541Ac5412C')
 );
 
 -- Analytics: public insert (app tracks user behavior)
@@ -571,6 +575,7 @@ DROP POLICY IF EXISTS "whitelist_insert_admin_only" ON whitelist;
 DROP POLICY IF EXISTS "whitelist_update_admin_only" ON whitelist;
 DROP POLICY IF EXISTS "whitelist_delete_admin_only" ON whitelist;
 DROP POLICY IF EXISTS "whitelist_write_all" ON whitelist;
+DROP POLICY IF EXISTS "whitelist_write_admin_only" ON whitelist;
 
 -- Analytics policies
 DROP POLICY IF EXISTS "analytics_insert_all" ON analytics;
@@ -735,17 +740,26 @@ USING (true);
 -- Only admin wallet can INSERT
 CREATE POLICY "whitelist_insert_admin_only" ON whitelist
 FOR INSERT
-WITH CHECK (auth.jwt() ->> 'sub' = '0x3d9A4F8E9bE795c7e82Da4FEd21cDD0D5234513E');
+WITH CHECK (
+  lower(coalesce(auth.jwt() ->> 'sub', '')) = lower('0x04dE2EE1cF5A46539d1dbED0eC8f2A541Ac5412C')
+  OR lower(coalesce(auth.jwt() ->> 'wallet_address', '')) = lower('0x04dE2EE1cF5A46539d1dbED0eC8f2A541Ac5412C')
+);
 
 -- Only admin wallet can UPDATE
 CREATE POLICY "whitelist_update_admin_only" ON whitelist
 FOR UPDATE
-USING (auth.jwt() ->> 'sub' = '0x3d9A4F8E9bE795c7e82Da4FEd21cDD0D5234513E');
+USING (
+  lower(coalesce(auth.jwt() ->> 'sub', '')) = lower('0x04dE2EE1cF5A46539d1dbED0eC8f2A541Ac5412C')
+  OR lower(coalesce(auth.jwt() ->> 'wallet_address', '')) = lower('0x04dE2EE1cF5A46539d1dbED0eC8f2A541Ac5412C')
+);
 
 -- Only admin wallet can DELETE
 CREATE POLICY "whitelist_delete_admin_only" ON whitelist
 FOR DELETE
-USING (auth.jwt() ->> 'sub' = '0x3d9A4F8E9bE795c7e82Da4FEd21cDD0D5234513E');
+USING (
+  lower(coalesce(auth.jwt() ->> 'sub', '')) = lower('0x04dE2EE1cF5A46539d1dbED0eC8f2A541Ac5412C')
+  OR lower(coalesce(auth.jwt() ->> 'wallet_address', '')) = lower('0x04dE2EE1cF5A46539d1dbED0eC8f2A541Ac5412C')
+);
 
 -- ─────────────────────────────────────────────────────────────────────────────────
 -- ANALYTICS TABLE - Controlled access
@@ -841,7 +855,10 @@ ALTER TABLE audit_logs ENABLE ROW LEVEL SECURITY;
 -- Audit logs - admin only can read
 CREATE POLICY "audit_logs_read_admin_only" ON audit_logs
 FOR SELECT
-USING (auth.jwt() ->> 'sub' = '0x3d9A4F8E9bE795c7e82Da4FEd21cDD0D5234513E');
+USING (
+  lower(coalesce(auth.jwt() ->> 'sub', '')) = lower('0x04dE2EE1cF5A46539d1dbED0eC8f2A541Ac5412C')
+  OR lower(coalesce(auth.jwt() ->> 'wallet_address', '')) = lower('0x04dE2EE1cF5A46539d1dbED0eC8f2A541Ac5412C')
+);
 
 -- ═══════════════════════════════════════════════════════════════════════════════
 -- MIGRATION NOTES
@@ -1219,13 +1236,19 @@ ON admin_audit_log(created_at DESC);
 ALTER TABLE IF EXISTS whitelist 
 ADD COLUMN IF NOT EXISTS rejection_reason TEXT DEFAULT NULL;
 
--- Grant audit log view access to service role
+-- Restrict audit log access to the configured admin wallet
 ALTER TABLE admin_audit_log ENABLE ROW LEVEL SECURITY;
 
-CREATE POLICY "Admin can view all audit logs"
+DROP POLICY IF EXISTS "Admin can view all audit logs" ON admin_audit_log;
+DROP POLICY IF EXISTS "admin_audit_log_read_admin_only" ON admin_audit_log;
+
+CREATE POLICY "admin_audit_log_read_admin_only"
 ON admin_audit_log
 FOR SELECT
-USING (auth.uid() IS NOT NULL);
+USING (
+  lower(coalesce(auth.jwt() ->> 'sub', '')) = lower('0x04dE2EE1cF5A46539d1dbED0eC8f2A541Ac5412C')
+  OR lower(coalesce(auth.jwt() ->> 'wallet_address', '')) = lower('0x04dE2EE1cF5A46539d1dbED0eC8f2A541Ac5412C')
+);
 
 -- ============================================================================
 -- Migration: 20260330_create_nonces_table.sql
@@ -2833,10 +2856,40 @@ FOR EACH ROW
 EXECUTE FUNCTION grant_order_item_entitlements();
 
 -- ============================================================================
+-- Migration: 20260403_align_public_catalog_visibility.sql
+-- ============================================================================
+-- Align public catalog visibility with legacy status rows
+-- Date: April 3, 2026
+
+DROP POLICY IF EXISTS "products_read_published" ON products;
+
+CREATE POLICY "products_read_published" ON products
+FOR SELECT
+USING (status IN ('published', 'active'));
+
+DROP INDEX IF EXISTS idx_products_published;
+
+CREATE INDEX IF NOT EXISTS idx_products_published
+ON products(status, created_at DESC)
+WHERE status IN ('published', 'active');
+
+DROP INDEX IF EXISTS idx_drops_active;
+
+CREATE INDEX IF NOT EXISTS idx_drops_active
+ON drops(artist_id, status, ends_at DESC)
+WHERE status IN ('live', 'active', 'published');
+
+-- ============================================================================
 -- Migration: 20260403_creative_release_unification.sql
 -- ============================================================================
--- Adds creative_releases as the canonical parent model for new creator-published
--- sellable work while keeping legacy drops/products readable during migration.
+-- ============================================================================
+-- Migration: 20260403_creative_release_unification.sql
+-- Description:
+--   * Adds creative_releases as the canonical parent model for new sellable work
+--   * Links legacy drops/products/orders into the new release domain additively
+--   * Adds escrow-friendly order approval and payout tracking fields
+--   * Expands admin audit log checks for release and payout operations
+-- ============================================================================
 
 CREATE TABLE IF NOT EXISTS creative_releases (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -2987,30 +3040,6 @@ CHECK (
 );
 
 -- ============================================================================
--- Migration: 20260403_align_public_catalog_visibility.sql
--- ============================================================================
--- Align public catalog visibility with legacy status rows
--- Date: April 3, 2026
-
-DROP POLICY IF EXISTS "products_read_published" ON products;
-
-CREATE POLICY "products_read_published" ON products
-FOR SELECT
-USING (status IN ('published', 'active'));
-
-DROP INDEX IF EXISTS idx_products_published;
-
-CREATE INDEX IF NOT EXISTS idx_products_published
-ON products(status, created_at DESC)
-WHERE status IN ('published', 'active');
-
-DROP INDEX IF EXISTS idx_drops_active;
-
-CREATE INDEX IF NOT EXISTS idx_drops_active
-ON drops(artist_id, status, ends_at DESC)
-WHERE status IN ('live', 'active', 'published');
-
--- ============================================================================
 -- Migration: 20260403_fix_subscription_expiry_index.sql
 -- ============================================================================
 -- Fix subscription expiry index so it can be created on Postgres/Supabase
@@ -3047,5 +3076,78 @@ DO $$
 BEGIN
   IF to_regclass('public.admin_audit_log') IS NOT NULL THEN
     EXECUTE 'CREATE INDEX IF NOT EXISTS idx_audit_log_admin_wallet_created_at ON admin_audit_log(admin_wallet, created_at DESC)';
+  END IF;
+END $$;
+
+-- ============================================================================
+-- Migration: 20260404_rotate_admin_wallet_and_harden_admin_policies.sql
+-- ============================================================================
+-- Migration: Rotate admin wallet policies and harden legacy audit-log access
+-- Description:
+--   * Updates admin-gated whitelist and audit-log policies for existing databases
+--   * Supports both `sub` and legacy `wallet_address` JWT claims
+--   * Normalizes wallet casing so lowercase JWTs still match the configured admin
+
+DO $$
+BEGIN
+  IF to_regclass('public.whitelist') IS NOT NULL THEN
+    EXECUTE 'DROP POLICY IF EXISTS "whitelist_write_admin_only" ON public.whitelist';
+    EXECUTE 'DROP POLICY IF EXISTS "whitelist_insert_admin_only" ON public.whitelist';
+    EXECUTE 'DROP POLICY IF EXISTS "whitelist_update_admin_only" ON public.whitelist';
+    EXECUTE 'DROP POLICY IF EXISTS "whitelist_delete_admin_only" ON public.whitelist';
+
+    EXECUTE $policy$
+      CREATE POLICY "whitelist_insert_admin_only" ON public.whitelist
+      FOR INSERT
+      WITH CHECK (
+        lower(coalesce(auth.jwt() ->> 'sub', '')) = lower('0x04dE2EE1cF5A46539d1dbED0eC8f2A541Ac5412C')
+        OR lower(coalesce(auth.jwt() ->> 'wallet_address', '')) = lower('0x04dE2EE1cF5A46539d1dbED0eC8f2A541Ac5412C')
+      )
+    $policy$;
+
+    EXECUTE $policy$
+      CREATE POLICY "whitelist_update_admin_only" ON public.whitelist
+      FOR UPDATE
+      USING (
+        lower(coalesce(auth.jwt() ->> 'sub', '')) = lower('0x04dE2EE1cF5A46539d1dbED0eC8f2A541Ac5412C')
+        OR lower(coalesce(auth.jwt() ->> 'wallet_address', '')) = lower('0x04dE2EE1cF5A46539d1dbED0eC8f2A541Ac5412C')
+      )
+    $policy$;
+
+    EXECUTE $policy$
+      CREATE POLICY "whitelist_delete_admin_only" ON public.whitelist
+      FOR DELETE
+      USING (
+        lower(coalesce(auth.jwt() ->> 'sub', '')) = lower('0x04dE2EE1cF5A46539d1dbED0eC8f2A541Ac5412C')
+        OR lower(coalesce(auth.jwt() ->> 'wallet_address', '')) = lower('0x04dE2EE1cF5A46539d1dbED0eC8f2A541Ac5412C')
+      )
+    $policy$;
+  END IF;
+
+  IF to_regclass('public.audit_logs') IS NOT NULL THEN
+    EXECUTE 'DROP POLICY IF EXISTS "audit_logs_read_admin_only" ON public.audit_logs';
+
+    EXECUTE $policy$
+      CREATE POLICY "audit_logs_read_admin_only" ON public.audit_logs
+      FOR SELECT
+      USING (
+        lower(coalesce(auth.jwt() ->> 'sub', '')) = lower('0x04dE2EE1cF5A46539d1dbED0eC8f2A541Ac5412C')
+        OR lower(coalesce(auth.jwt() ->> 'wallet_address', '')) = lower('0x04dE2EE1cF5A46539d1dbED0eC8f2A541Ac5412C')
+      )
+    $policy$;
+  END IF;
+
+  IF to_regclass('public.admin_audit_log') IS NOT NULL THEN
+    EXECUTE 'DROP POLICY IF EXISTS "Admin can view all audit logs" ON public.admin_audit_log';
+    EXECUTE 'DROP POLICY IF EXISTS "admin_audit_log_read_admin_only" ON public.admin_audit_log';
+
+    EXECUTE $policy$
+      CREATE POLICY "admin_audit_log_read_admin_only" ON public.admin_audit_log
+      FOR SELECT
+      USING (
+        lower(coalesce(auth.jwt() ->> 'sub', '')) = lower('0x04dE2EE1cF5A46539d1dbED0eC8f2A541Ac5412C')
+        OR lower(coalesce(auth.jwt() ->> 'wallet_address', '')) = lower('0x04dE2EE1cF5A46539d1dbED0eC8f2A541Ac5412C')
+      )
+    $policy$;
   END IF;
 END $$;

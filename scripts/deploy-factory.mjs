@@ -42,7 +42,11 @@ async function main() {
   console.log(`🌐 Network: Base Sepolia (${RPC_URL})\n`);
 
   // Get founder wallet
-  const founderWallet = deployer.address; // Use deployer as founder for now
+  const founderWallet =
+    process.env.FOUNDER_WALLET?.trim() ||
+    process.env.VITE_FOUNDER_WALLET?.trim() ||
+    process.env.VITE_ADMIN_WALLET?.trim() ||
+    deployer.address;
   console.log(`👑 Founder wallet: ${founderWallet}\n`);
 
   try {

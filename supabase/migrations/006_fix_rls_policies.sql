@@ -41,6 +41,7 @@ DROP POLICY IF EXISTS "whitelist_insert_admin_only" ON whitelist;
 DROP POLICY IF EXISTS "whitelist_update_admin_only" ON whitelist;
 DROP POLICY IF EXISTS "whitelist_delete_admin_only" ON whitelist;
 DROP POLICY IF EXISTS "whitelist_write_all" ON whitelist;
+DROP POLICY IF EXISTS "whitelist_write_admin_only" ON whitelist;
 
 -- Analytics policies
 DROP POLICY IF EXISTS "analytics_insert_all" ON analytics;
@@ -205,17 +206,26 @@ USING (true);
 -- Only admin wallet can INSERT
 CREATE POLICY "whitelist_insert_admin_only" ON whitelist
 FOR INSERT
-WITH CHECK (auth.jwt() ->> 'sub' = '0x3d9A4F8E9bE795c7e82Da4FEd21cDD0D5234513E');
+WITH CHECK (
+  lower(coalesce(auth.jwt() ->> 'sub', '')) = lower('0x04dE2EE1cF5A46539d1dbED0eC8f2A541Ac5412C')
+  OR lower(coalesce(auth.jwt() ->> 'wallet_address', '')) = lower('0x04dE2EE1cF5A46539d1dbED0eC8f2A541Ac5412C')
+);
 
 -- Only admin wallet can UPDATE
 CREATE POLICY "whitelist_update_admin_only" ON whitelist
 FOR UPDATE
-USING (auth.jwt() ->> 'sub' = '0x3d9A4F8E9bE795c7e82Da4FEd21cDD0D5234513E');
+USING (
+  lower(coalesce(auth.jwt() ->> 'sub', '')) = lower('0x04dE2EE1cF5A46539d1dbED0eC8f2A541Ac5412C')
+  OR lower(coalesce(auth.jwt() ->> 'wallet_address', '')) = lower('0x04dE2EE1cF5A46539d1dbED0eC8f2A541Ac5412C')
+);
 
 -- Only admin wallet can DELETE
 CREATE POLICY "whitelist_delete_admin_only" ON whitelist
 FOR DELETE
-USING (auth.jwt() ->> 'sub' = '0x3d9A4F8E9bE795c7e82Da4FEd21cDD0D5234513E');
+USING (
+  lower(coalesce(auth.jwt() ->> 'sub', '')) = lower('0x04dE2EE1cF5A46539d1dbED0eC8f2A541Ac5412C')
+  OR lower(coalesce(auth.jwt() ->> 'wallet_address', '')) = lower('0x04dE2EE1cF5A46539d1dbED0eC8f2A541Ac5412C')
+);
 
 -- ─────────────────────────────────────────────────────────────────────────────────
 -- ANALYTICS TABLE - Controlled access
@@ -311,7 +321,10 @@ ALTER TABLE audit_logs ENABLE ROW LEVEL SECURITY;
 -- Audit logs - admin only can read
 CREATE POLICY "audit_logs_read_admin_only" ON audit_logs
 FOR SELECT
-USING (auth.jwt() ->> 'sub' = '0x3d9A4F8E9bE795c7e82Da4FEd21cDD0D5234513E');
+USING (
+  lower(coalesce(auth.jwt() ->> 'sub', '')) = lower('0x04dE2EE1cF5A46539d1dbED0eC8f2A541Ac5412C')
+  OR lower(coalesce(auth.jwt() ->> 'wallet_address', '')) = lower('0x04dE2EE1cF5A46539d1dbED0eC8f2A541Ac5412C')
+);
 
 -- ═══════════════════════════════════════════════════════════════════════════════
 -- MIGRATION NOTES

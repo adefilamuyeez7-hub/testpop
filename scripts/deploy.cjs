@@ -3,6 +3,11 @@ const fs = require("fs");
 
 async function main() {
   const [deployer] = await ethers.getSigners();
+  const adminWallet =
+    process.env.VITE_ADMIN_WALLET ||
+    process.env.VITE_FOUNDER_WALLET ||
+    process.env.FOUNDER_WALLET ||
+    deployer.address;
 
   console.log("Deploying contracts with the account:", deployer.address);
   console.log("Account balance:", (await deployer.provider.getBalance(deployer.address)).toString());
@@ -29,10 +34,18 @@ async function main() {
 
   console.log("ProductStore deployed to:", productStoreAddress);
 
+  const CreativeReleaseEscrow = await ethers.getContractFactory("CreativeReleaseEscrow");
+  const creativeReleaseEscrow = await CreativeReleaseEscrow.deploy(adminWallet);
+  await creativeReleaseEscrow.waitForDeployment();
+  const creativeReleaseEscrowAddress = await creativeReleaseEscrow.getAddress();
+
+  console.log("CreativeReleaseEscrow deployed to:", creativeReleaseEscrowAddress);
+
   const addresses = {
     ArtDrop: artDropAddress,
     POAPCampaign: poapCampaignAddress,
     ProductStore: productStoreAddress,
+    CreativeReleaseEscrow: creativeReleaseEscrowAddress,
   };
 
   fs.writeFileSync("deployed-addresses.json", JSON.stringify(addresses, null, 2));

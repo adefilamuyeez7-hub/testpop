@@ -70,7 +70,11 @@ async function main() {
 
     // Deploy Factory
     console.log('📦 Deploying ArtDropFactory...');
-    const founderWallet = deployer.address;
+    const founderWallet =
+      process.env.FOUNDER_WALLET?.trim() ||
+      process.env.VITE_FOUNDER_WALLET?.trim() ||
+      process.env.VITE_ADMIN_WALLET?.trim() ||
+      deployer.address;
     
     const factoryFactory = new ethers.ContractFactory(
       factoryArtifact.abi,

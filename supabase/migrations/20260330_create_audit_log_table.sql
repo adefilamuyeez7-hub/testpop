@@ -35,10 +35,16 @@ ON admin_audit_log(created_at DESC);
 ALTER TABLE IF EXISTS whitelist 
 ADD COLUMN IF NOT EXISTS rejection_reason TEXT DEFAULT NULL;
 
--- Grant audit log view access to service role
+-- Restrict audit log access to the configured admin wallet
 ALTER TABLE admin_audit_log ENABLE ROW LEVEL SECURITY;
 
-CREATE POLICY "Admin can view all audit logs"
+DROP POLICY IF EXISTS "Admin can view all audit logs" ON admin_audit_log;
+DROP POLICY IF EXISTS "admin_audit_log_read_admin_only" ON admin_audit_log;
+
+CREATE POLICY "admin_audit_log_read_admin_only"
 ON admin_audit_log
 FOR SELECT
-USING (auth.uid() IS NOT NULL);
+USING (
+  lower(coalesce(auth.jwt() ->> 'sub', '')) = lower('0x04dE2EE1cF5A46539d1dbED0eC8f2A541Ac5412C')
+  OR lower(coalesce(auth.jwt() ->> 'wallet_address', '')) = lower('0x04dE2EE1cF5A46539d1dbED0eC8f2A541Ac5412C')
+);

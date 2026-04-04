@@ -171,6 +171,8 @@ DROP POLICY IF EXISTS "orders_write_all" ON orders;
 DROP POLICY IF EXISTS "orders_update_all" ON orders;
 DROP POLICY IF EXISTS "whitelist_read_all" ON whitelist;
 DROP POLICY IF EXISTS "whitelist_write_all" ON whitelist;
+DROP POLICY IF EXISTS "whitelist_write_admin_only" ON whitelist;
+DROP POLICY IF EXISTS "whitelist_update_admin_only" ON whitelist;
 DROP POLICY IF EXISTS "analytics_insert_all" ON analytics;
 DROP POLICY IF EXISTS "analytics_read_all" ON analytics;
 
@@ -197,10 +199,12 @@ CREATE POLICY "orders_update_all" ON orders FOR UPDATE USING (true);
 -- Whitelist: admin-only write access, public read
 CREATE POLICY "whitelist_read_all" ON whitelist FOR SELECT USING (true);
 CREATE POLICY "whitelist_write_admin_only" ON whitelist FOR INSERT WITH CHECK (
-  (auth.jwt() ->> 'wallet_address')::text = '0x3d9A4F8E9bE795c7e82Da4FEd21cDD0D5234513E'
+  lower(coalesce(auth.jwt() ->> 'sub', '')) = lower('0x04dE2EE1cF5A46539d1dbED0eC8f2A541Ac5412C')
+  OR lower(coalesce(auth.jwt() ->> 'wallet_address', '')) = lower('0x04dE2EE1cF5A46539d1dbED0eC8f2A541Ac5412C')
 );
 CREATE POLICY "whitelist_update_admin_only" ON whitelist FOR UPDATE USING (
-  (auth.jwt() ->> 'wallet_address')::text = '0x3d9A4F8E9bE795c7e82Da4FEd21cDD0D5234513E'
+  lower(coalesce(auth.jwt() ->> 'sub', '')) = lower('0x04dE2EE1cF5A46539d1dbED0eC8f2A541Ac5412C')
+  OR lower(coalesce(auth.jwt() ->> 'wallet_address', '')) = lower('0x04dE2EE1cF5A46539d1dbED0eC8f2A541Ac5412C')
 );
 
 -- Analytics: public insert (app tracks user behavior)

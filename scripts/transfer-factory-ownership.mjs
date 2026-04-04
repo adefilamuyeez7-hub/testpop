@@ -4,7 +4,7 @@ import { ethers } from "ethers";
 
 const DEFAULT_RPC_URL = "https://sepolia.base.org";
 const DEFAULT_FACTORY_ADDRESS = "0xFd58d0f5F0423201Edb756d0f44D667106fc5705";
-const DEFAULT_NEW_OWNER = "0x3d9A4F8E9bE795c7e82Da4FEd21cDD0D5234513E";
+const DEFAULT_NEW_OWNER = "0x04dE2EE1cF5A46539d1dbED0eC8f2A541Ac5412C";
 
 const FACTORY_ABI = [
   "function owner() view returns (address)",

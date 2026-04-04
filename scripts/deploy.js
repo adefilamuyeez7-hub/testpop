@@ -7,6 +7,11 @@ async function main() {
   console.log("\n=== DEPLOYMENT START ===\n");
 
   const [deployer] = await ethers.getSigners();
+  const adminWallet =
+    process.env.VITE_ADMIN_WALLET ||
+    process.env.VITE_FOUNDER_WALLET ||
+    process.env.FOUNDER_WALLET ||
+    deployer.address;
   console.log(`Deploying from: ${deployer.address}\n`);
 
   const deployments = {};
@@ -30,6 +35,13 @@ async function main() {
   await productStore.waitForDeployment();
   deployments.ProductStore = await productStore.getAddress();
   console.log(`ProductStore: ${deployments.ProductStore}\n`);
+
+  console.log("Deploying CreativeReleaseEscrow...");
+  const CreativeReleaseEscrow = await ethers.getContractFactory("CreativeReleaseEscrow");
+  const creativeReleaseEscrow = await CreativeReleaseEscrow.deploy(adminWallet);
+  await creativeReleaseEscrow.waitForDeployment();
+  deployments.CreativeReleaseEscrow = await creativeReleaseEscrow.getAddress();
+  console.log(`CreativeReleaseEscrow: ${deployments.CreativeReleaseEscrow}\n`);
 
   // 📁 Save all deployments
   const deploymentDir = "./deployments";
