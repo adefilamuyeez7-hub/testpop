@@ -18,6 +18,7 @@ import { resolveDropCoverImage } from "@/lib/mediaPreview";
 import { resolvePortfolioImage } from "@/lib/portfolio";
 import { getRuntimeApiToken } from "@/lib/runtimeSession";
 import { normalizePublicDropStatus } from "@/lib/catalogVisibility";
+import { resolveDropDetailPath } from "@/lib/dropBehavior";
 import {
   createIPInvestment,
   getIPCampaigns,
@@ -104,6 +105,18 @@ const ArtistProfilePage = () => {
       status: normalizePublicDropStatus(drop.status),
       type: (drop.type || "drop").toLowerCase() as "drop" | "auction" | "campaign",
       endsAt: drop.ends_at || null,
+      detailPath: resolveDropDetailPath({
+        id: drop.id,
+        linked_product:
+          drop.linked_product && typeof drop.linked_product === "object" && !Array.isArray(drop.linked_product)
+            ? (drop.linked_product as { id?: string | null })
+            : null,
+        source_kind: typeof drop.source_kind === "string" ? drop.source_kind : null,
+        metadata:
+          drop.metadata && typeof drop.metadata === "object" && !Array.isArray(drop.metadata)
+            ? (drop.metadata as Record<string, unknown>)
+            : null,
+      }),
       image:
         resolveDropCoverImage({
           assetType: (drop.asset_type || "image") as "image" | "video" | "audio" | "pdf" | "epub" | "merchandise" | "digital",
@@ -613,7 +626,7 @@ const ArtistProfilePage = () => {
                     ) : (
                       <div className="space-y-3">
                         {visibleDrops.map((drop, index) => (
-                          <Link key={drop.id} to={`/drops/${drop.id}`} className={`overflow-hidden rounded-[1.4rem] border border-[#edf2f7] bg-white shadow-[0_10px_24px_rgba(15,23,42,0.05)] ${index === 0 ? "block" : "flex items-center gap-3 p-3"}`}>
+                          <Link key={drop.id} to={drop.detailPath} className={`overflow-hidden rounded-[1.4rem] border border-[#edf2f7] bg-white shadow-[0_10px_24px_rgba(15,23,42,0.05)] ${index === 0 ? "block" : "flex items-center gap-3 p-3"}`}>
                             {index === 0 ? (
                               <div className="relative h-60 overflow-hidden">
                                 <img src={drop.image} alt={drop.title} className="h-full w-full object-cover" />
@@ -919,7 +932,7 @@ const ArtistProfilePage = () => {
                     ) : (
                       <>
                         {featuredDrop && (
-                          <Link to={`/drops/${featuredDrop.id}`} className="group block overflow-hidden rounded-[1.8rem] bg-[#eaf3ff] p-3 shadow-[0_22px_45px_rgba(37,99,235,0.08)]">
+                          <Link to={featuredDrop.detailPath} className="group block overflow-hidden rounded-[1.8rem] bg-[#eaf3ff] p-3 shadow-[0_22px_45px_rgba(37,99,235,0.08)]">
                             <div className="relative overflow-hidden rounded-[1.4rem]">
                               <img src={featuredDrop.image} alt={featuredDrop.title} className="h-[260px] w-full object-cover transition-transform duration-500 group-hover:scale-105 sm:h-[340px]" />
                               <div className="absolute inset-0 bg-gradient-to-t from-black/50 via-black/10 to-transparent" />
@@ -941,7 +954,7 @@ const ArtistProfilePage = () => {
 
                         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                           {visibleDrops.map((drop) => (
-                            <Link key={drop.id} to={`/drops/${drop.id}`} className="overflow-hidden rounded-2xl bg-card shadow-card">
+                            <Link key={drop.id} to={drop.detailPath} className="overflow-hidden rounded-2xl bg-card shadow-card">
                               <div className="aspect-square overflow-hidden">
                                 <img src={drop.image} alt={drop.title} className="h-full w-full object-cover" />
                               </div>

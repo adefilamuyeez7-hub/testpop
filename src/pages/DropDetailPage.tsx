@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useMemo, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { Navigate, useNavigate, useParams } from "react-router-dom";
 import { Loader2, ArrowLeft, Clock, Award, Link as LinkIcon, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
@@ -23,7 +23,7 @@ import {
   type ProductAsset,
 } from "@/lib/db";
 import { detectAssetTypeFromUri } from "@/lib/assetTypes";
-import { resolveDropBehavior } from "@/lib/dropBehavior";
+import { resolveDropBehavior, resolveDropDetailPath } from "@/lib/dropBehavior";
 
 const DropPrimaryActionCard = lazy(() => import("@/components/wallet/DropPrimaryActionCard"));
 
@@ -178,6 +178,9 @@ const DropDetailPage = () => {
   const resolvedLinkedProduct = linkedProduct || inlineLinkedProduct;
   const linkedProductMetadata = toRecord(resolvedLinkedProduct?.metadata);
   const dropMetadata = toRecord(dropRecord?.metadata);
+  const sourceKind =
+    (typeof dropRecord?.source_kind === "string" ? dropRecord.source_kind : null) ||
+    (typeof dropMetadata?.source_kind === "string" ? dropMetadata.source_kind : null);
   const releaseType =
     resolvedLinkedRelease?.release_type ||
     resolvedLinkedProduct?.product_type ||
@@ -190,12 +193,20 @@ const DropDetailPage = () => {
             drop,
             linkedProduct: resolvedLinkedProduct,
             linkedRelease: resolvedLinkedRelease,
-            sourceKind:
-              (typeof dropRecord?.source_kind === "string" ? dropRecord.source_kind : null) ||
-              (typeof dropMetadata?.source_kind === "string" ? dropMetadata.source_kind : null),
+            sourceKind,
           })
         : null,
-    [drop, dropMetadata?.source_kind, dropRecord?.source_kind, resolvedLinkedProduct, resolvedLinkedRelease]
+    [drop, dropMetadata?.source_kind, resolvedLinkedProduct, resolvedLinkedRelease, sourceKind]
+  );
+  const detailPath = useMemo(
+    () =>
+      resolveDropDetailPath({
+        id: drop?.id || id,
+        linked_product: resolvedLinkedProduct,
+        source_kind: sourceKind,
+        metadata: dropMetadata,
+      }),
+    [drop?.id, dropMetadata, id, resolvedLinkedProduct, sourceKind]
   );
   // FIXED #1: Better fallback sources for mediaSrc
   const mediaSrc = useMemo(() => {
@@ -371,6 +382,26 @@ const DropDetailPage = () => {
         </Button>
       </div>
     );
+  }
+
+  const shouldOpenReleasePage = resolvedBehavior?.mode === "checkout";
+  const isWaitingForLinkedReleasePage =
+    shouldOpenReleasePage &&
+    !resolvedLinkedProduct?.id &&
+    Boolean(dropRecord?.creative_release_id) &&
+    linkedDetailsLoading;
+
+  if (isWaitingForLinkedReleasePage) {
+    return (
+      <div className="px-4 py-10 text-center space-y-4">
+        <Loader2 className="h-8 w-8 animate-spin mx-auto text-primary" />
+        <p className="text-sm text-muted-foreground">Opening release page...</p>
+      </div>
+    );
+  }
+
+  if (shouldOpenReleasePage && detailPath.startsWith("/products/")) {
+    return <Navigate to={detailPath} replace />;
   }
 
   const handleCollectSuccess = ({ ownerWallet, mintedTokenId }: { ownerWallet: string; mintedTokenId: number | null }) => {
@@ -587,10 +618,7 @@ const DropDetailPage = () => {
             linkedProduct={resolvedLinkedProduct}
             linkedRelease={resolvedLinkedRelease}
             isCommerceLoading={linkedDetailsLoading}
-            sourceKind={
-              (typeof dropRecord?.source_kind === "string" ? dropRecord.source_kind : null) ||
-              (typeof dropMetadata?.source_kind === "string" ? dropMetadata.source_kind : null)
-            }
+            sourceKind={sourceKind}
             onCollectSuccess={handleCollectSuccess}
           />
         </Suspense>

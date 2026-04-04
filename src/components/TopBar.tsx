@@ -4,6 +4,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 import logo from "@/assets/logo.png";
 import { resolveMediaUrl } from "@/lib/pinata";
 import { resolveDropCoverImage } from "@/lib/mediaPreview";
+import { resolveDropDetailPath } from "@/lib/dropBehavior";
 import { searchPublicCatalogFromSupabase } from "@/lib/supabaseStore";
 import { appShellNavItems, isAppShellNavActive } from "./appShellNav";
 import { NavLink } from "./NavLink";
@@ -21,6 +22,9 @@ type SearchResults = {
     image_ipfs_uri?: string | null;
     preview_uri?: string | null;
     delivery_uri?: string | null;
+    source_kind?: string | null;
+    linked_product?: { id?: string | null } | null;
+    metadata?: Record<string, unknown> | null;
     asset_type?: "image" | "video" | "audio" | "pdf" | "epub" | "merchandise" | "digital" | null;
     status?: string | null;
   }>;
@@ -127,7 +131,7 @@ function SearchPanel({ onClose }: { onClose: () => void }) {
                 <button
                   key={drop.id}
                   onClick={() => {
-                    navigate(`/drops/${drop.id}`);
+                    navigate(resolveDropDetailPath(drop));
                     onClose();
                   }}
                   className="w-full flex items-center gap-3 p-3 rounded-xl hover:bg-secondary transition-colors text-left"
@@ -171,7 +175,7 @@ function SearchPanel({ onClose }: { onClose: () => void }) {
                 <button
                   key={product.id}
                   onClick={() => {
-                    navigate(`/drops/${product.id}`);
+                    navigate(`/products/${product.id}`);
                     onClose();
                   }}
                   className="w-full flex items-center gap-3 p-3 rounded-xl hover:bg-secondary transition-colors text-left"

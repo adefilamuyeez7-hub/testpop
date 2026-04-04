@@ -9,6 +9,7 @@ import { type AssetType } from "@/lib/assetTypes";
 import { resolveMediaUrl } from "@/lib/pinata";
 import { resolveDropCoverImage } from "@/lib/mediaPreview";
 import { normalizePublicDropStatus } from "@/lib/catalogVisibility";
+import { resolveDropDetailPath } from "@/lib/dropBehavior";
 import {
   getFeaturedCreatorsUpdateEventName,
   loadFeaturedCreatorSlides,
@@ -69,7 +70,7 @@ const DropsPage = () => {
           : null;
       const linkedProduct =
         drop.linked_product && typeof drop.linked_product === "object" && !Array.isArray(drop.linked_product)
-          ? (drop.linked_product as { product_type?: string | null })
+          ? (drop.linked_product as { id?: string | null; product_type?: string | null })
           : null;
       const metadata =
         drop.metadata && typeof drop.metadata === "object" && !Array.isArray(drop.metadata)
@@ -98,6 +99,12 @@ const DropsPage = () => {
           : "--",
         assetType: (drop.asset_type || "image") as AssetType,
         releaseType,
+        detailPath: resolveDropDetailPath({
+          id: drop.id,
+          linked_product: linkedProduct,
+          source_kind: typeof drop.source_kind === "string" ? drop.source_kind : null,
+          metadata,
+        }),
       };
     });
   }, [supabaseDrops]);
@@ -236,7 +243,7 @@ const DropsPage = () => {
                               navigate(activeFeaturedSlide.profilePath);
                             } else if (featuredDesktopDrop) {
                               recordDropView(featuredDesktopDrop.id);
-                              navigate(`/drops/${featuredDesktopDrop.id}`);
+                              navigate(featuredDesktopDrop.detailPath);
                             }
                           }}
                           className="h-11 rounded-full bg-[#1d4ed8] px-6 text-white hover:bg-[#1e40af]"
@@ -293,7 +300,7 @@ const DropsPage = () => {
                         onClick={() => {
                           if (featuredDesktopDrop) {
                             recordDropView(featuredDesktopDrop.id);
-                            navigate(`/drops/${featuredDesktopDrop.id}`);
+                            navigate(featuredDesktopDrop.detailPath);
                           }
                         }}
                         className="h-11 rounded-full bg-[#1d4ed8] px-6 text-white hover:bg-[#1e40af]"
@@ -316,7 +323,7 @@ const DropsPage = () => {
                         {curatedDrops.slice(1, 3).map((drop) => (
                           <Link
                             key={`desktop-drop-hero-${drop.id}`}
-                            to={`/drops/${drop.id}`}
+                            to={drop.detailPath}
                             onClick={() => recordDropView(drop.id)}
                             className="overflow-hidden rounded-[1.4rem] bg-white/65 p-2 shadow-sm transition-transform hover:-translate-y-1 dark:bg-slate-950/55"
                           >
@@ -382,7 +389,7 @@ const DropsPage = () => {
                   {curatedDrops.map((drop) => (
                     <Link
                       key={drop.id}
-                      to={`/drops/${drop.id}`}
+                      to={drop.detailPath}
                       onClick={() => recordDropView(drop.id)}
                       className="overflow-hidden rounded-[1.7rem] bg-white shadow-[0_18px_45px_rgba(37,99,235,0.08)] ring-1 ring-[#dbe7ff] transition-transform hover:-translate-y-1 dark:bg-slate-950/80 dark:ring-white/10"
                     >
@@ -562,7 +569,7 @@ const DropsPage = () => {
               {mobileVisibleDrops.map((drop, index) => (
                 <Link
                   key={drop.id}
-                  to={`/drops/${drop.id}`}
+                  to={drop.detailPath}
                   onClick={() => recordDropView(drop.id)}
                   className="group min-w-[16.5rem] flex-shrink-0 animate-fade-in overflow-hidden rounded-[1.9rem] bg-white/92 shadow-[0_18px_36px_rgba(37,99,235,0.12)] ring-1 ring-[#bfdbfe] dark:bg-slate-950/75 dark:ring-white/10"
                   style={{ animationDelay: `${index * 70}ms` }}

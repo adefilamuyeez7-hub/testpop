@@ -32,6 +32,13 @@ export type ResolvedDropBehavior = {
   isOnchainReady: boolean;
 };
 
+type DropDetailRouteInput = {
+  id?: string | null;
+  linked_product?: { id?: string | null } | null;
+  source_kind?: string | null;
+  metadata?: Record<string, unknown> | null;
+};
+
 function hasPositiveNumber(value: unknown) {
   return typeof value === "number" && Number.isFinite(value) && value > 0;
 }
@@ -58,6 +65,33 @@ function readMetadataNumber(metadata: Record<string, unknown> | null | undefined
   }
 
   return null;
+}
+
+function isReleaseBackedSourceKind(value?: string | null) {
+  return value === "release_product" || value === "catalog_product";
+}
+
+export function resolveDropDetailPath(drop: DropDetailRouteInput) {
+  const dropId = typeof drop.id === "string" ? drop.id : "";
+  if (!dropId) {
+    return "/drops";
+  }
+
+  const linkedProductId =
+    drop.linked_product && typeof drop.linked_product.id === "string" ? drop.linked_product.id : "";
+  if (linkedProductId) {
+    return `/products/${linkedProductId}`;
+  }
+
+  const metadataSourceKind =
+    drop.metadata && typeof drop.metadata.source_kind === "string" ? drop.metadata.source_kind : null;
+  const sourceKind = drop.source_kind || metadataSourceKind;
+
+  if (isReleaseBackedSourceKind(sourceKind)) {
+    return `/products/${dropId}`;
+  }
+
+  return `/drops/${dropId}`;
 }
 
 export function resolveDropBehavior(params: {
