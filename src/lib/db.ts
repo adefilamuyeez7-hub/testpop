@@ -1187,7 +1187,7 @@ export async function getIPCampaigns(
     if (options.artistId) params.set("artist_id", options.artistId);
     if (options.status) params.set("status", options.status);
 
-    if (getApiAuthToken()) {
+    if (secureApiBaseUrl) {
       const queryString = params.toString();
       return await secureApiRequest<IPCampaign[]>(
         `/ip-campaigns${queryString ? `?${queryString}` : ""}`,

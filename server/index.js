@@ -973,6 +973,37 @@ function authRequired(req, res, next) {
   }
 }
 
+function authOptional(req, _res, next) {
+  try {
+    const header = req.headers.authorization || "";
+    const [, token] = header.match(/^Bearer\s+(.+)$/i) || [];
+
+    if (!token) {
+      req.auth = null;
+      return next();
+    }
+
+    const decoded = jwt.verify(token, appJwtSecret, {
+      algorithms: ["HS256"],
+      issuer: "popup-api",
+      audience: "popup-client",
+    });
+
+    const wallet = normalizeWallet(decoded.wallet || "");
+    req.auth = wallet
+      ? {
+          wallet,
+          role: decoded.role || "collector",
+        }
+      : null;
+
+    return next();
+  } catch (_error) {
+    req.auth = null;
+    return next();
+  }
+}
+
 function adminRequired(req, res, next) {
   if (req.auth?.role !== "admin") {
     return res.status(403).json({ error: "Admin access required" });
@@ -3431,9 +3462,16 @@ app.delete("/whitelist/:id", authRequired, adminRequired, async (req, res) => {
 // ║ PINATA FILE UPLOAD ROUTES - Registered at both /path and /api/path        ║
 // ╚═══════════════════════════════════════════════════════════════════════════╝
 
-registerRoute("get", "/ip-campaigns", authRequired, async (req, res) => {
+function isPublicIPCampaign(campaign = {}) {
+  return (
+    ["listed", "unlisted"].includes(String(campaign.visibility || "")) &&
+    ["active", "funded", "settled", "closed"].includes(String(campaign.status || ""))
+  );
+}
+
+registerRoute("get", "/ip-campaigns", authOptional, async (req, res) => {
   try {
-    const isAdmin = req.auth.role === "admin";
+    const isAdmin = req.auth?.role === "admin";
     const requestedArtistId =
       typeof req.query.artist_id === "string" && req.query.artist_id.trim()
         ? req.query.artist_id.trim()
@@ -3443,7 +3481,14 @@ registerRoute("get", "/ip-campaigns", authRequired, async (req, res) => {
         ? req.query.status.trim()
         : null;
 
-    const ownedArtist = await getArtistRecordByWallet(req.auth.wallet);
+    const ownedArtist = req.auth?.wallet
+      ? await getArtistRecordByWallet(req.auth.wallet)
+      : null;
+    const isOwnerScopedRequest = Boolean(
+      requestedArtistId &&
+      ownedArtist?.id &&
+      requestedArtistId === ownedArtist.id
+    );
     let query = supabase
       .from("ip_campaigns")
       .select("*, artists(id, wallet, name, handle)")
@@ -3451,8 +3496,11 @@ registerRoute("get", "/ip-campaigns", authRequired, async (req, res) => {
 
     if (requestedArtistId) {
       query = query.eq("artist_id", requestedArtistId);
-    } else if (!isAdmin && ownedArtist?.id) {
-      query = query.eq("artist_id", ownedArtist.id);
+      if (!isAdmin && !isOwnerScopedRequest) {
+        query = query
+          .in("visibility", ["listed", "unlisted"])
+          .in("status", ["active", "funded", "settled", "closed"]);
+      }
     } else if (!isAdmin) {
       query = query
         .in("visibility", ["listed", "unlisted"])
@@ -3468,8 +3516,8 @@ registerRoute("get", "/ip-campaigns", authRequired, async (req, res) => {
 
     const filtered = (data || []).filter((campaign) => {
       if (isAdmin) return true;
-      if (ownedArtist?.id && campaign.artist_id === ownedArtist.id) return true;
-      return ["active", "funded", "settled", "closed"].includes(String(campaign.status || ""));
+      if (isOwnerScopedRequest) return true;
+      return isPublicIPCampaign(campaign);
     });
 
     return res.json(filtered);

@@ -1,5 +1,5 @@
 import { Navigate } from "react-router-dom";
 
-const WalletMarketplaceRoute = () => <Navigate to="/drops" replace />;
+const WalletMarketplaceRoute = () => <Navigate to="/products" replace />;
 
 export default WalletMarketplaceRoute;
