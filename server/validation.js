@@ -2,6 +2,7 @@ import { z } from "zod";
 
 // Drop validation schema
 export const dropUpdateSchema = z.object({
+  creative_release_id: z.string().uuid().optional(),
   title: z.string().min(1).max(200).optional(),
   description: z.string().max(2000).optional(),
   price_eth: z.number().min(0).optional(),

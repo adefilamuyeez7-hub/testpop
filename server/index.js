@@ -52,6 +52,7 @@ const LEGACY_DROP_COLUMNS = new Set([
 ]);
 
 const DROP_UPDATE_COLUMNS = new Set([
+  "creative_release_id",
   "title",
   "description",
   "price_eth",

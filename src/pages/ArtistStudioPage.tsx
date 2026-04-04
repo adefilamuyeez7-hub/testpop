@@ -788,6 +788,42 @@ const CreateDropSheet = ({
           throw new Error("Failed to create the linked product row.");
         }
 
+        const createdDrop = await dbCreateDrop({
+          artist_id: persistedArtist.id,
+          creative_release_id: releaseRecord.id,
+          title: form.title,
+          description: form.description,
+          price_eth: Number(form.price),
+          supply: Number(form.supply),
+          sold: 0,
+          image_url: ipfsToHttp(uploadResult.imageUri),
+          image_ipfs_uri: uploadResult.imageUri,
+          metadata_ipfs_uri: uploadResult.metadataUri,
+          preview_uri: uploadResult.imageUri,
+          delivery_uri: uploadResult.deliveryUri,
+          asset_type: "image",
+          is_gated: Boolean(uploadResult.deliveryUri),
+          status: "published",
+          type: "drop",
+          contract_address: CREATIVE_RELEASE_ESCROW_ADDRESS,
+          contract_kind: "creativeReleaseEscrow",
+          metadata: {
+            source_kind: "release_product",
+            source_product_id: createdProduct.id,
+            creative_release_id: releaseRecord.id,
+            release_type: releaseType,
+            product_type: releaseType,
+            content_kind: contentKind,
+            delivery_uri: uploadResult.deliveryUri,
+            physical_details_jsonb: physicalDetails,
+            shipping_profile_jsonb: shippingProfile,
+          },
+        });
+
+        if (!createdDrop?.id) {
+          throw new Error("Hybrid release minted, but the linked drop record could not be saved.");
+        }
+
         const productAssetsPayload = [
           {
             product_id: createdProduct.id,
@@ -829,8 +865,8 @@ const CreateDropSheet = ({
 
         toast.success(
           releaseType === "hybrid"
-            ? "Hybrid release minted, linked to the product catalog, and published."
-            : "Physical release minted and published."
+            ? "Hybrid release minted, saved to drops, linked to the product catalog, and published."
+            : "Physical release minted, saved to drops, and published."
         );
         await Promise.all([
           queryClient.invalidateQueries({ queryKey: ["products"] }),
@@ -3111,4 +3147,3 @@ const ArtistStudioPage = ({ embedded = false }: ArtistStudioPageProps) => {
 };
 
 export default ArtistStudioPage;
-

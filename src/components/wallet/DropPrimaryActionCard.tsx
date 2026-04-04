@@ -33,6 +33,7 @@ type DropActionData = {
   previewUri?: string;
   deliveryUri?: string;
   image: string;
+  metadata?: Record<string, unknown>;
 };
 
 type DropPrimaryActionCardProps = {
@@ -391,8 +392,10 @@ function DropPrimaryActionCardInner({
         <CampaignActionPanel
           dropId={drop.id}
           fallbackTitle={drop.title}
+          fallbackPriceEth={drop.priceEth}
           contractCampaignId={drop.contractDropId}
           contractAddress={drop.contractAddress}
+          campaignMetadata={drop.metadata}
         />
       ) : (
         <div className="rounded-xl border border-warning/60 bg-warning/10 p-3 text-warning text-xs flex items-center gap-2">
