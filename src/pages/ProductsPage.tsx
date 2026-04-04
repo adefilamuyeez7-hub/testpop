@@ -9,7 +9,7 @@ import { useProductStore } from "@/stores/productStore";
 import { useCartStore } from "@/stores/cartStore";
 import { useSupabasePublishedProducts } from "@/hooks/useSupabase";
 import { resolveMediaUrl } from "@/lib/pinata";
-import { extractContractProductId, extractProductMetadataUri } from "@/lib/productMetadata";
+import { resolveContractProductId, resolveProductMetadataUri } from "@/lib/productMetadata";
 
 function mapSupabaseProductToStoreProduct(p: any) {
   return {
@@ -22,8 +22,8 @@ function mapSupabaseProductToStoreProduct(p: any) {
     stock: p.stock || 0,
     sold: p.sold || 0,
     category: p.category || "Other",
-    contractProductId: extractContractProductId(p.metadata),
-    metadataUri: extractProductMetadataUri(p.metadata),
+    contractProductId: resolveContractProductId(p.metadata, p.contract_product_id),
+    metadataUri: resolveProductMetadataUri(p.metadata, p.metadata_uri),
   };
 }
 

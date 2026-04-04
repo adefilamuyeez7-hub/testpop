@@ -8,8 +8,31 @@ const publicClient = createPublicClient({
   transport: http(ACTIVE_CHAIN.rpcUrls.default.http[0]),
 });
 
+export interface OnchainProductRecord {
+  id: bigint;
+  creator: `0x${string}`;
+  metadataURI: string;
+  price: bigint;
+  stock: bigint;
+  sold: bigint;
+  royaltyPercent: bigint;
+  active: boolean;
+  createdAt: number;
+}
+
 export async function waitForProductStoreReceipt(hash: `0x${string}`) {
   return publicClient.waitForTransactionReceipt({ hash });
+}
+
+export async function getOnchainProduct(contractProductId: number): Promise<OnchainProductRecord> {
+  const product = await publicClient.readContract({
+    address: PRODUCT_STORE_ADDRESS,
+    abi: PRODUCT_STORE_ABI,
+    functionName: "getProduct",
+    args: [BigInt(contractProductId)],
+  });
+
+  return product as OnchainProductRecord;
 }
 
 export function parseProductCreatedId(receipt: Awaited<ReturnType<typeof waitForProductStoreReceipt>>) {

@@ -11,7 +11,7 @@ import { useCartStore } from "@/stores/cartStore";
 import { formatEther } from "viem";
 import { toast } from "sonner";
 import { createOrder as dbCreateOrder } from "@/lib/db";
-import { buyOnchainProduct } from "@/lib/productStoreChain";
+import { buyOnchainProduct, getOnchainProduct } from "@/lib/productStoreChain";
 import {
   CHECKOUT_COUNTRIES,
   detectCheckoutCountry,
@@ -83,6 +83,28 @@ export function CheckoutPage() {
         }
 
         setCheckoutProgress(`Purchasing ${item.name} onchain...`);
+        const onchainProduct = await getOnchainProduct(item.contractProductId);
+        if (!onchainProduct.active) {
+          throw new Error(`"${item.name}" is no longer active onchain.`);
+        }
+
+        if (onchainProduct.stock > 0n) {
+          const remaining = onchainProduct.stock - onchainProduct.sold;
+          if (remaining <= 0n) {
+            throw new Error(`"${item.name}" is sold out onchain. Remove it from your cart and try again.`);
+          }
+
+          if (BigInt(item.quantity) > remaining) {
+            throw new Error(
+              `Only ${remaining.toString()} "${item.name}" left onchain. Reduce the quantity in your cart and try again.`
+            );
+          }
+        }
+
+        if (BigInt(item.price) !== onchainProduct.price) {
+          throw new Error(`"${item.name}" changed price onchain. Refresh the cart and review the new total before retrying.`);
+        }
+
         const orderMetadata = JSON.stringify({
           email,
           phone: formattedPhone,
@@ -100,7 +122,7 @@ export function CheckoutPage() {
         const purchase = await buyOnchainProduct({
           contractProductId: item.contractProductId,
           quantity: item.quantity,
-          unitPriceWei: BigInt(item.price),
+          unitPriceWei: onchainProduct.price,
           orderMetadata,
           account: address as `0x${string}`,
         });

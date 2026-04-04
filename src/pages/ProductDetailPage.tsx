@@ -11,7 +11,7 @@ import { formatEther } from "viem";
 import { toast } from "sonner";
 import { useSupabaseProductById } from "@/hooks/useSupabase";
 import { resolveMediaUrl } from "@/lib/pinata";
-import { extractContractProductId, extractProductMetadataUri } from "@/lib/productMetadata";
+import { resolveContractProductId, resolveProductMetadataUri } from "@/lib/productMetadata";
 
 export function ProductDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -40,8 +40,8 @@ export function ProductDetailPage() {
       stock: supabaseProduct.stock || 0,
       sold: supabaseProduct.sold || 0,
       category: supabaseProduct.category || "Other",
-      contractProductId: extractContractProductId(supabaseProduct.metadata),
-      metadataUri: extractProductMetadataUri(supabaseProduct.metadata),
+      contractProductId: resolveContractProductId(supabaseProduct.metadata, supabaseProduct.contract_product_id),
+      metadataUri: resolveProductMetadataUri(supabaseProduct.metadata, supabaseProduct.metadata_uri),
     };
   }, [id, selectedProduct, supabaseProduct]);
 

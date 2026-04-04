@@ -34,7 +34,7 @@ import {
   type IPCampaign,
 } from "@/lib/db";
 import { createOnchainProduct } from "@/lib/productStoreChain";
-import { extractContractProductId, extractProductMetadataUri, mergeProductMetadata } from "@/lib/productMetadata";
+import { mergeProductMetadata, resolveContractProductId, resolveProductMetadataUri } from "@/lib/productMetadata";
 import { toAdminProductStatus } from "@/lib/catalogVisibility";
 import { useSupabaseAllProducts, useSupabaseAllDrops } from "@/hooks/useSupabase";
 import { useAdminArtists, useApproveArtist, useRejectArtist } from "@/lib/adminApi";
@@ -840,8 +840,8 @@ const AdminPage = () => {
         description: p.description || "",
         image: p.image_url || "",
         imageUri: p.image_ipfs_uri || "",
-        metadataUri: extractProductMetadataUri(p.metadata),
-        contractProductId: extractContractProductId(p.metadata),
+        metadataUri: resolveProductMetadataUri(p.metadata, p.metadata_uri),
+        contractProductId: resolveContractProductId(p.metadata, p.contract_product_id),
         metadata: p.metadata ?? null,
       }));
       setProducts(mappedProducts);
@@ -1418,8 +1418,8 @@ const AdminPage = () => {
                       description: created.description,
                       image: created.image_url,
                       imageUri: created.image_ipfs_uri,
-                      metadataUri: extractProductMetadataUri(created.metadata),
-                      contractProductId: extractContractProductId(created.metadata),
+                      metadataUri: resolveProductMetadataUri(created.metadata, created.metadata_uri),
+                      contractProductId: resolveContractProductId(created.metadata, created.contract_product_id),
                       metadata: created.metadata ?? null,
                     })
                   : p;

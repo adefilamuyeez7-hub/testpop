@@ -416,9 +416,10 @@ function normalizeTxHash(txHash) {
   return /^0x[a-fA-F0-9]{64}$/.test(value) ? value : null;
 }
 
-function extractContractProductId(metadata) {
-  const rawValue =
-    metadata && typeof metadata === "object" ? metadata.contract_product_id : null;
+function extractContractProductId(metadata, explicitValue = null) {
+  const rawValue = explicitValue ?? (
+    metadata && typeof metadata === "object" ? metadata.contract_product_id : null
+  );
   const parsed =
     typeof rawValue === "number"
       ? rawValue
@@ -442,7 +443,7 @@ async function loadCheckoutProducts(productIds) {
 
   const { data, error } = await supabase
     .from("products")
-    .select("id, name, price_eth, stock, sold, status, product_type, asset_type, preview_uri, delivery_uri, image_url, image_ipfs_uri, is_gated, creator_wallet, metadata")
+    .select("id, name, price_eth, stock, sold, status, product_type, asset_type, preview_uri, delivery_uri, image_url, image_ipfs_uri, is_gated, creator_wallet, metadata, contract_product_id")
     .in("id", uniqueIds);
 
   if (error) {
@@ -489,7 +490,7 @@ async function verifyProductPurchaseTx({ txHash, buyerWallet, normalizedItems, p
       throw new Error("One or more checkout products could not be found");
     }
 
-    const contractProductId = extractContractProductId(product.metadata);
+    const contractProductId = extractContractProductId(product.metadata, product.contract_product_id);
     if (contractProductId === null) {
       throw new Error(`${product.name || "A product"} is missing its contract product ID`);
     }
