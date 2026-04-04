@@ -138,7 +138,7 @@ export function OrderHistoryPage() {
         <Card>
           <CardContent className="pt-12 pb-12 text-center">
             <p className="text-muted-foreground mb-4">You haven't placed any orders yet</p>
-            <Button onClick={() => navigate("/products")}>Shop Now</Button>
+            <Button onClick={() => navigate("/products")}>Browse Marketplace</Button>
           </CardContent>
         </Card>
       )}

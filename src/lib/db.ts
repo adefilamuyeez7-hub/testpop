@@ -49,6 +49,7 @@ export interface Drop {
   contract_address?: string;
   contract_drop_id?: number;
   contract_kind?: string;
+  creative_release_id?: string | null;
   revenue?: number;
   ends_at?: string;
   metadata?: Record<string, unknown>;
@@ -817,6 +818,29 @@ export async function getCreatorProducts(creatorWallet: string) {
   }
 }
 
+export async function getProductsByCreativeRelease(creativeReleaseId: string) {
+  try {
+    if (!creativeReleaseId || !supabaseUrl || !supabaseAnonKey) return [];
+
+    const { data, error } = await supabase
+      .from("products")
+      .select("*")
+      .eq("creative_release_id", creativeReleaseId)
+      .in("status", [...PUBLIC_PRODUCT_STATUSES])
+      .order("created_at", { ascending: false });
+
+    if (error) {
+      console.error("Error fetching products by creative release:", error.message);
+      throw error;
+    }
+
+    return data || [];
+  } catch (error: any) {
+    console.error("getProductsByCreativeRelease failed:", error.message);
+    return [];
+  }
+}
+
 export async function createProduct(product: Partial<Product>): Promise<Product | null> {
   console.log(`💾 Creating product: ${product.name}`);
   return secureApiRequest<Product | null>("/products", {
@@ -1158,7 +1182,14 @@ export async function getIPCampaigns(
 
     let query = supabase
       .from("ip_campaigns")
-      .select("*")
+      .select(`
+        *,
+        artists (
+          id,
+          name,
+          handle
+        )
+      `)
       .in("visibility", ["listed", "unlisted"])
       .in("status", ["active", "funded", "settled", "closed"])
       .order("created_at", { ascending: false });

@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { useEffect, useMemo, useState } from "react";
 import { Package, Search, ShoppingCart, Sparkles } from "lucide-react";
+import { useAccount } from "wagmi";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useNavigate } from "react-router-dom";
@@ -10,6 +11,14 @@ import { useCartStore } from "@/stores/cartStore";
 import { useSupabasePublishedProducts } from "@/hooks/useSupabase";
 import { resolveMediaUrl } from "@/lib/pinata";
 import { resolveContractProductId, resolveProductMetadataUri } from "@/lib/productMetadata";
+import {
+  getIPCampaigns,
+  getInvestorPositions,
+  getRoyaltyDistributions,
+  type IPCampaign,
+  type RoyaltyDistribution,
+} from "@/lib/db";
+import { getRuntimeApiToken } from "@/lib/runtimeSession";
 
 function mapSupabaseProductToStoreProduct(p: any) {
   return {
@@ -31,17 +40,30 @@ function mapSupabaseProductToStoreProduct(p: any) {
   };
 }
 
+function formatEthAmount(value: number) {
+  if (!Number.isFinite(value) || value <= 0) {
+    return "0.00";
+  }
+  return value >= 10 ? value.toFixed(1) : value.toFixed(2);
+}
+
 export function ProductsPage() {
   const navigate = useNavigate();
+  const { address } = useAccount();
   const setProducts = useProductStore((state) => state.setProducts);
   const totalCartItems = useCartStore((state) =>
     state.items.reduce((total, item) => total + item.quantity, 0)
   );
   const { data: supabaseProducts, loading, error } = useSupabasePublishedProducts();
+  const hasApiSession = Boolean(getRuntimeApiToken());
 
   const [searchQuery, setSearchQuery] = useState("");
   const [sortOrder, setSortOrder] = useState("newest");
   const [category, setCategory] = useState("all");
+  const [campaigns, setCampaigns] = useState<IPCampaign[]>([]);
+  const [campaignsLoading, setCampaignsLoading] = useState(false);
+  const [investorPositions, setInvestorPositions] = useState<Record<string, number>>({});
+  const [royaltyDistributions, setRoyaltyDistributions] = useState<RoyaltyDistribution[]>([]);
 
   useEffect(() => {
     if (supabaseProducts && supabaseProducts.length > 0) {
@@ -51,6 +73,70 @@ export function ProductsPage() {
 
     setProducts([]);
   }, [supabaseProducts, setProducts]);
+
+  useEffect(() => {
+    let isMounted = true;
+    setCampaignsLoading(true);
+
+    getIPCampaigns()
+      .then((data) => {
+        if (isMounted) {
+          setCampaigns(data || []);
+        }
+      })
+      .catch((campaignError) => {
+        console.error("Failed to load marketplace campaigns:", campaignError);
+        if (isMounted) {
+          setCampaigns([]);
+        }
+      })
+      .finally(() => {
+        if (isMounted) {
+          setCampaignsLoading(false);
+        }
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!address || !hasApiSession) {
+      setInvestorPositions({});
+      setRoyaltyDistributions([]);
+      return;
+    }
+
+    let isMounted = true;
+
+    Promise.all([
+      getInvestorPositions(address),
+      getRoyaltyDistributions(address),
+    ])
+      .then(([positions, distributions]) => {
+        if (!isMounted) return;
+
+        const nextPositions = (positions || []).reduce<Record<string, number>>((acc, position) => {
+          acc[position.campaign_id] = (acc[position.campaign_id] || 0) + Number(position.units_purchased || 0);
+          return acc;
+        }, {});
+
+        setInvestorPositions(nextPositions);
+        setRoyaltyDistributions(distributions || []);
+      })
+      .catch((positionsError) => {
+        console.error("Failed to load investor marketplace data:", positionsError);
+        if (isMounted) {
+          setInvestorPositions({});
+          setRoyaltyDistributions([]);
+        }
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [address, hasApiSession]);
 
   const categoryOptions = useMemo(() => {
     const categories = new Set(
@@ -89,6 +175,18 @@ export function ProductsPage() {
   const desktopCategories = categoryOptions.filter((option) => option !== "all");
   const heroDesktopProduct = filteredByCategory[0] ?? null;
   const heroDesktopTiles = filteredByCategory.slice(1, 3);
+  const featuredCampaigns = useMemo(
+    () => campaigns.filter((campaign) => ["active", "funded", "settled", "closed"].includes(campaign.status || "")).slice(0, 3),
+    [campaigns],
+  );
+  const totalRevenueDistributed = useMemo(
+    () => royaltyDistributions.reduce((sum, distribution) => sum + Number(distribution.net_amount_eth || 0), 0),
+    [royaltyDistributions],
+  );
+  const totalOwnedUnits = useMemo(
+    () => Object.values(investorPositions).reduce((sum, units) => sum + units, 0),
+    [investorPositions],
+  );
 
   return (
     <div className="min-h-screen bg-background">
@@ -97,8 +195,8 @@ export function ProductsPage() {
           <div className="rounded-[1.8rem] bg-white/92 p-6">
             <div className="flex items-center gap-4 border-b border-black/6 pb-5">
               <div>
-                <h1 className="text-2xl font-black tracking-tight text-foreground">SHOP</h1>
-                <p className="text-sm text-muted-foreground">Discover your favorite creative goods</p>
+                <h1 className="text-2xl font-black tracking-tight text-foreground">MARKETPLACE</h1>
+                <p className="text-sm text-muted-foreground">Discover collectible releases, investment rights, and revenue-ready creative goods.</p>
               </div>
 
               <div className="relative ml-6 max-w-xl flex-1">
@@ -158,7 +256,7 @@ export function ProductsPage() {
                     }`}
                   >
                     <span>{option}</span>
-                    <span className="text-xs text-muted-foreground">Shop</span>
+                    <span className="text-xs text-muted-foreground">Market</span>
                   </button>
                 ))}
               </aside>
@@ -169,12 +267,12 @@ export function ProductsPage() {
                   <div className="absolute bottom-4 right-6 h-24 w-24 rounded-full bg-blue-500/20 blur-2xl" />
                   <div className="relative grid gap-6 lg:grid-cols-[1.2fr_0.8fr] lg:items-center">
                     <div className="space-y-4">
-                      <p className="text-xs uppercase tracking-[0.28em] text-foreground/60">Desktop Shop</p>
+                      <p className="text-xs uppercase tracking-[0.28em] text-foreground/60">Desktop Marketplace</p>
                       <h2 className="max-w-2xl text-4xl font-black leading-tight text-foreground">
-                        New arrivals from digital creators and collectible product drops
+                        Primary releases, relist-ready rights, and artist-backed investment access
                       </h2>
                       <p className="max-w-xl text-sm leading-7 text-foreground/70">
-                        Explore curated merchandise, digital goods, and creative products from artists building inside POPUP.
+                        Explore curated products alongside campaign positions that can keep earning through revenue distributions as the release ecosystem grows.
                       </p>
                       <Button
                         onClick={() => {
@@ -184,7 +282,7 @@ export function ProductsPage() {
                         }}
                         className="h-11 rounded-full bg-[#1d4ed8] px-6 text-white hover:bg-[#1e40af]"
                       >
-                        Shop now
+                        Explore marketplace
                       </Button>
                     </div>
 
@@ -215,8 +313,8 @@ export function ProductsPage() {
 
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="text-xs uppercase tracking-[0.28em] text-muted-foreground">Shop</p>
-                    <h3 className="mt-2 text-3xl font-black text-foreground">New arrivals</h3>
+                    <p className="text-xs uppercase tracking-[0.28em] text-muted-foreground">Marketplace</p>
+                    <h3 className="mt-2 text-3xl font-black text-foreground">Primary listings</h3>
                   </div>
                   <p className="text-sm text-muted-foreground">
                     {filteredByCategory.length} product{filteredByCategory.length !== 1 ? "s" : ""} found
@@ -226,27 +324,108 @@ export function ProductsPage() {
                 <div className="grid gap-3 md:grid-cols-3">
                   <div className="rounded-[1.4rem] border border-[#dbeafe] bg-white/90 px-4 py-4">
                     <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[#1d4ed8]">Marketplace</p>
-                    <p className="mt-2 text-lg font-semibold text-foreground">Desktop-ready shopping</p>
-                    <p className="mt-1 text-sm text-muted-foreground">Browse products, open cart, and jump straight into order tracking.</p>
+                    <p className="mt-2 text-lg font-semibold text-foreground">Primary + rights discovery</p>
+                    <p className="mt-1 text-sm text-muted-foreground">Browse product drops, investment listings, and revenue-share context in one place.</p>
                   </div>
                   <button
                     type="button"
                     onClick={() => navigate("/cart")}
                     className="rounded-[1.4rem] border border-[#dbeafe] bg-white/90 px-4 py-4 text-left transition-colors hover:bg-[#f8fbff]"
                   >
-                    <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[#1d4ed8]">Cart</p>
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[#1d4ed8]">Checkout</p>
                     <p className="mt-2 text-lg font-semibold text-foreground">{totalCartItems} item{totalCartItems !== 1 ? "s" : ""} ready</p>
-                    <p className="mt-1 text-sm text-muted-foreground">Review quantities and continue to checkout.</p>
+                    <p className="mt-1 text-sm text-muted-foreground">Review quantities and move from discovery into checkout without leaving the marketplace.</p>
                   </button>
                   <button
                     type="button"
                     onClick={() => navigate("/orders")}
                     className="rounded-[1.4rem] border border-[#dbeafe] bg-white/90 px-4 py-4 text-left transition-colors hover:bg-[#f8fbff]"
                   >
-                    <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[#1d4ed8]">Orders</p>
-                    <p className="mt-2 text-lg font-semibold text-foreground">Track purchases</p>
-                    <p className="mt-1 text-sm text-muted-foreground">Check delivery status and revisit completed orders.</p>
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[#1d4ed8]">Revenue</p>
+                    <p className="mt-2 text-lg font-semibold text-foreground">{formatEthAmount(totalRevenueDistributed)} ETH distributed</p>
+                    <p className="mt-1 text-sm text-muted-foreground">Keep an eye on distributions tied to the rights and campaign positions you hold.</p>
                   </button>
+                </div>
+
+                <div className="rounded-[1.8rem] border border-[#dbeafe] bg-white/88 p-5">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[#1d4ed8]">Investment Rights</p>
+                      <h3 className="mt-2 text-2xl font-black text-foreground">Relist-ready positions and revenue distribution</h3>
+                      <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
+                        The marketplace now surfaces artist investment campaigns beside products so collectors can discover rights-bearing positions, monitor owned units, and follow revenue distributions tied to those releases.
+                      </p>
+                    </div>
+                    <div className="grid min-w-[220px] gap-3 sm:grid-cols-2">
+                      <div className="rounded-[1.25rem] bg-[#eff6ff] px-4 py-3">
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[#1d4ed8]">Live Raises</p>
+                        <p className="mt-2 text-2xl font-black text-foreground">{campaignsLoading ? "..." : featuredCampaigns.length}</p>
+                      </div>
+                      <div className="rounded-[1.25rem] bg-[#eff6ff] px-4 py-3">
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[#1d4ed8]">Owned Units</p>
+                        <p className="mt-2 text-2xl font-black text-foreground">{hasApiSession ? totalOwnedUnits : "--"}</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {featuredCampaigns.length > 0 ? (
+                    <div className="mt-5 grid gap-3 lg:grid-cols-3">
+                      {featuredCampaigns.map((campaign) => {
+                        const ownedUnits = investorPositions[campaign.id] || 0;
+                        return (
+                          <button
+                            key={campaign.id}
+                            type="button"
+                            onClick={() => navigate(`/artists/${campaign.artist_id}`)}
+                            className="rounded-[1.4rem] border border-[#dbeafe] bg-[#f8fbff] p-4 text-left transition-colors hover:bg-white"
+                          >
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="rounded-full bg-[#dbeafe] px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.2em] text-[#1d4ed8]">
+                                {campaign.rights_type || "creative_ip"}
+                              </span>
+                              <span className="rounded-full bg-white px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.2em] text-foreground">
+                                {campaign.status || "active"}
+                              </span>
+                              {ownedUnits > 0 && (
+                                <span className="rounded-full bg-emerald-100 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.2em] text-emerald-700">
+                                  Relist-ready
+                                </span>
+                              )}
+                            </div>
+                            <h4 className="mt-3 text-lg font-semibold text-foreground">{campaign.title}</h4>
+                            <p className="mt-1 text-sm text-muted-foreground">
+                              {(campaign.artists?.name || campaign.artists?.handle || "Artist raise")} · {campaign.campaign_type || "revenue_share"}
+                            </p>
+                            <div className="mt-4 grid grid-cols-3 gap-2 text-center">
+                              <div className="rounded-xl bg-white px-3 py-2">
+                                <p className="text-sm font-bold text-foreground">{formatEthAmount(Number(campaign.funding_target_eth || 0))}</p>
+                                <p className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground">Target</p>
+                              </div>
+                              <div className="rounded-xl bg-white px-3 py-2">
+                                <p className="text-sm font-bold text-foreground">{formatEthAmount(Number(campaign.unit_price_eth || 0))}</p>
+                                <p className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground">Unit</p>
+                              </div>
+                              <div className="rounded-xl bg-white px-3 py-2">
+                                <p className="text-sm font-bold text-foreground">{ownedUnits || Number(campaign.units_sold || 0)}</p>
+                                <p className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground">{ownedUnits > 0 ? "Owned" : "Sold"}</p>
+                              </div>
+                            </div>
+                            <p className="mt-4 text-sm text-muted-foreground">
+                              {ownedUnits > 0
+                                ? "Open the artist profile to manage your position and follow revenue distributions tied to this release."
+                                : "Open the artist profile to invest, review rights terms, and track future revenue participation."}
+                            </p>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <div className="mt-5 rounded-[1.4rem] border border-dashed border-[#bfdbfe] bg-[#f8fbff] px-4 py-8 text-center text-sm text-muted-foreground">
+                      {campaignsLoading
+                        ? "Loading marketplace rights..."
+                        : "No public investment campaigns are live yet. Product listings will continue to appear below."}
+                    </div>
+                  )}
                 </div>
 
                 <div className="flex flex-wrap items-center gap-3">
@@ -286,7 +465,7 @@ export function ProductsPage() {
 
                 {loading && (
                   <div className="rounded-[1.8rem] bg-secondary/50 px-6 py-16 text-center text-muted-foreground">
-                    Loading products from Supabase...
+                    Loading marketplace listings...
                   </div>
                 )}
 
@@ -306,7 +485,7 @@ export function ProductsPage() {
                 ) : (
                   !loading && !error && (
                     <div className="rounded-[1.8rem] bg-secondary/50 px-6 py-16 text-center">
-                      <p className="mb-4 text-muted-foreground">No products found</p>
+                      <p className="mb-4 text-muted-foreground">No marketplace listings found</p>
                       <Button
                         onClick={() => {
                           setSearchQuery("");
@@ -331,7 +510,7 @@ export function ProductsPage() {
             <div className="mb-6 flex items-center justify-between">
               <div>
                 <h1 className="text-3xl font-bold">Marketplace</h1>
-                <p className="text-muted-foreground">Discover exclusive artist merchandise and collectibles</p>
+                <p className="text-muted-foreground">Discover products, rights listings, and revenue-ready artist releases</p>
               </div>
               <Button
                 onClick={() => navigate("/cart")}
@@ -352,7 +531,7 @@ export function ProductsPage() {
               <div className="relative flex-1">
                 <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                 <Input
-                  placeholder="Search products..."
+                  placeholder="Search marketplace listings..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   className="pl-10"
@@ -389,9 +568,31 @@ export function ProductsPage() {
         </div>
 
         <div className="container mx-auto max-w-6xl px-4 py-12">
+          <div className="mb-8 rounded-[1.8rem] border border-[#dbeafe] bg-[#f8fbff] p-5">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[#1d4ed8]">Rights Marketplace</p>
+            <h2 className="mt-2 text-2xl font-black text-foreground">Investment positions live next to product drops</h2>
+            <p className="mt-2 text-sm text-muted-foreground">
+              Track relist-ready positions and revenue distributions while you browse physical and digital releases.
+            </p>
+            <div className="mt-4 grid grid-cols-3 gap-3 text-center">
+              <div className="rounded-2xl bg-white px-3 py-3">
+                <p className="text-lg font-black text-foreground">{campaignsLoading ? "..." : featuredCampaigns.length}</p>
+                <p className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground">Raises</p>
+              </div>
+              <div className="rounded-2xl bg-white px-3 py-3">
+                <p className="text-lg font-black text-foreground">{hasApiSession ? totalOwnedUnits : "--"}</p>
+                <p className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground">Owned Units</p>
+              </div>
+              <div className="rounded-2xl bg-white px-3 py-3">
+                <p className="text-lg font-black text-foreground">{formatEthAmount(totalRevenueDistributed)}</p>
+                <p className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground">Revenue</p>
+              </div>
+            </div>
+          </div>
+
           {loading && (
             <div className="py-12 text-center">
-              <p className="text-muted-foreground">Loading products from Supabase...</p>
+              <p className="text-muted-foreground">Loading marketplace listings...</p>
             </div>
           )}
           {error && (
@@ -405,14 +606,14 @@ export function ProductsPage() {
           {!loading && !error && filteredByCategory.length > 0 ? (
             <>
               <p className="mb-6 text-muted-foreground">
-                {filteredByCategory.length} product{filteredByCategory.length !== 1 ? "s" : ""} found
+                {filteredByCategory.length} listing{filteredByCategory.length !== 1 ? "s" : ""} found
               </p>
               <ProductGrid products={filteredByCategory} />
             </>
           ) : (
             !loading && !error && (
               <div className="py-12 text-center">
-                <p className="mb-4 text-muted-foreground">No products found</p>
+                <p className="mb-4 text-muted-foreground">No marketplace listings found</p>
                 <Button onClick={() => setSearchQuery("")} variant="outline">
                   Clear Filters
                 </Button>

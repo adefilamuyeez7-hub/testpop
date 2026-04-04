@@ -3,7 +3,7 @@ import { Flame, Home, ShoppingBag, User } from "lucide-react";
 export const appShellNavItems = [
   { icon: Home, label: "Home", path: "/" },
   { icon: Flame, label: "Drops", path: "/drops" },
-  { icon: ShoppingBag, label: "Shop", path: "/products" },
+  { icon: ShoppingBag, label: "Marketplace", path: "/products" },
   { icon: User, label: "Profile", path: "/profile" },
 ] as const;
 

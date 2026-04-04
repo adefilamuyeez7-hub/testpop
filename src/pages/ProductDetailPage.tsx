@@ -166,7 +166,7 @@ export function ProductDetailPage() {
       <div className="container mx-auto px-4 py-8">
         <Button variant="ghost" onClick={() => navigate("/products")} className="mb-6 gap-2">
           <ArrowLeft className="h-4 w-4" />
-          Back to Products
+          Back to Marketplace
         </Button>
         <p className="text-muted-foreground">Product not found</p>
       </div>
@@ -213,7 +213,7 @@ export function ProductDetailPage() {
     <div className="container mx-auto px-4 py-8">
       <Button variant="ghost" onClick={() => navigate("/products")} className="mb-6 gap-2">
         <ArrowLeft className="h-4 w-4" />
-        Back to Products
+        Back to Marketplace
       </Button>
 
       <div className="grid grid-cols-1 gap-10 lg:grid-cols-[1.1fr_0.9fr]">
@@ -307,7 +307,7 @@ export function ProductDetailPage() {
 
           <Card className="border-blue-200 bg-blue-50">
             <CardContent className="pt-6 text-sm">
-              Checkout stays onchain, while physical fulfillment and hybrid access are tracked in your order history.
+              Checkout stays onchain, while fulfillment, release access, and marketplace history are tracked in your order flow.
             </CardContent>
           </Card>
         </div>

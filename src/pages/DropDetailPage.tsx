@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useMemo } from "react";
+import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { Loader2, ArrowLeft, Clock, Award, Link as LinkIcon, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
@@ -7,12 +7,13 @@ import { Button } from "@/components/ui/button";
 import { recordDropView } from "@/lib/analyticsStore";
 import { useSupabaseDropById } from "@/hooks/useSupabase";
 import type { AssetType } from "@/lib/assetTypes";
-import { ipfsToHttp } from "@/lib/pinata";
+import { ipfsToHttp, resolveMediaUrl } from "@/lib/pinata";
 import { resolveDropCoverImage } from "@/lib/mediaPreview";
 import { VideoViewer } from "@/components/collection/VideoViewer";
 import { AudioPlayer } from "@/components/collection/AudioPlayer";
 import { useCollectionStore } from "@/stores/collectionStore";
 import { CampaignArchitectureCard } from "@/components/campaign/CampaignArchitectureCard";
+import { getCreativeRelease, getProductsByCreativeRelease, type CreativeRelease, type Product } from "@/lib/db";
 
 const DropPrimaryActionCard = lazy(() => import("@/components/wallet/DropPrimaryActionCard"));
 
@@ -26,6 +27,8 @@ const DropDetailPage = () => {
   const navigate = useNavigate();
   const addCollectedDrop = useCollectionStore((state) => state.addCollectedDrop);
   const { data: dropRecord, loading: dropsLoading, error: dropError, refetch: refetchDrop } = useSupabaseDropById(id);
+  const [linkedRelease, setLinkedRelease] = useState<CreativeRelease | null>(null);
+  const [linkedProduct, setLinkedProduct] = useState<Product | null>(null);
 
   const drop = useMemo(() => {
     if (!dropRecord) return null;
@@ -55,6 +58,7 @@ const DropDetailPage = () => {
 
     return {
       id: dropRecord.id,
+      creativeReleaseId: dropRecord.creative_release_id || null,
       title: dropRecord.title || "Untitled",
       artistId: dropRecord.artist_id,
       artist: artist?.name || "Unknown Artist",
@@ -84,9 +88,56 @@ const DropDetailPage = () => {
   }, [dropRecord]);
 
   const hasContractAddress = Boolean(drop?.contractAddress && drop.contractAddress !== ZERO_ADDRESS);
+  const inlineLinkedRelease =
+    dropRecord?.creative_release && typeof dropRecord.creative_release === "object" && !Array.isArray(dropRecord.creative_release)
+      ? (dropRecord.creative_release as CreativeRelease)
+      : null;
+  const inlineLinkedProduct =
+    dropRecord?.linked_product && typeof dropRecord.linked_product === "object" && !Array.isArray(dropRecord.linked_product)
+      ? (dropRecord.linked_product as Product)
+      : null;
+  const resolvedLinkedRelease = linkedRelease || inlineLinkedRelease;
+  const resolvedLinkedProduct = linkedProduct || inlineLinkedProduct;
   const mediaSrc = drop ? ipfsToHttp(drop.deliveryUri || drop.imageUri || drop.image || "") : "";
   const posterSrc = drop ? ipfsToHttp(drop.image || drop.previewUri || "") : "";
-  const coverSrc = drop ? ipfsToHttp(drop.image || "") : "";
+  const linkedReleaseCoverSrc = resolvedLinkedRelease?.cover_image_uri ? ipfsToHttp(resolvedLinkedRelease.cover_image_uri) : "";
+  const linkedProductImageSrc = resolvedLinkedProduct
+    ? resolveMediaUrl(resolvedLinkedProduct.image_url, resolvedLinkedProduct.image_ipfs_uri)
+    : "";
+  const coverSrc = drop ? ipfsToHttp(drop.image || "") || linkedProductImageSrc || linkedReleaseCoverSrc : "";
+
+  useEffect(() => {
+    let isMounted = true;
+
+    async function loadLinkedCommerce() {
+      if (!dropRecord?.creative_release_id) {
+        setLinkedRelease(null);
+        setLinkedProduct(null);
+        return;
+      }
+
+      try {
+        const [release, products] = await Promise.all([
+          getCreativeRelease(dropRecord.creative_release_id),
+          getProductsByCreativeRelease(dropRecord.creative_release_id),
+        ]);
+
+        if (!isMounted) return;
+        setLinkedRelease(release || null);
+        setLinkedProduct(products?.[0] || null);
+      } catch (error) {
+        if (isMounted) {
+          console.warn("Failed to load linked marketplace release:", error);
+        }
+      }
+    }
+
+    void loadLinkedCommerce();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [dropRecord?.creative_release_id]);
 
   useEffect(() => {
     if (id) {
@@ -257,6 +308,48 @@ const DropDetailPage = () => {
         )}
 
         <p className="text-sm text-muted-foreground font-body">{drop.description}</p>
+
+        {(resolvedLinkedProduct || resolvedLinkedRelease) && (
+          <div className="rounded-2xl border border-border bg-card/70 p-4 space-y-3">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-[10px] uppercase tracking-[0.24em] text-muted-foreground">Marketplace Release</p>
+                <h2 className="mt-1 text-base font-semibold text-foreground">
+                  {resolvedLinkedProduct?.name || resolvedLinkedRelease?.title || drop.title}
+                </h2>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  This drop is linked to a marketplace release so collectors can discover the product context, media, and checkout path in one place.
+                </p>
+              </div>
+              {resolvedLinkedProduct?.id ? (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => navigate(`/products/${resolvedLinkedProduct.id}`)}
+                >
+                  Open Marketplace
+                </Button>
+              ) : null}
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {resolvedLinkedRelease?.release_type ? (
+                <Badge variant="secondary" className="text-[10px] uppercase">
+                  {resolvedLinkedRelease.release_type}
+                </Badge>
+              ) : null}
+              {resolvedLinkedProduct?.product_type ? (
+                <Badge variant="outline" className="text-[10px] uppercase">
+                  {resolvedLinkedProduct.product_type}
+                </Badge>
+              ) : null}
+              {resolvedLinkedProduct?.contract_kind ? (
+                <Badge variant="outline" className="text-[10px]">
+                  {resolvedLinkedProduct.contract_kind}
+                </Badge>
+              ) : null}
+            </div>
+          </div>
+        )}
 
         <Suspense
           fallback={

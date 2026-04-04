@@ -19,6 +19,14 @@ let dropsArtistRelationMode: "embedded" | "detached" | null = null;
 let artistsStatusMode: "native" | "legacy" | null = null;
 let productColumnsMode: "full" | "legacy" | null = null;
 const metadataJsonCache = new Map<string, Promise<Record<string, any> | null>>();
+const releasePreviewCache = new Map<
+  string,
+  Promise<{
+    creativeRelease: Record<string, any> | null;
+    product: Record<string, any> | null;
+    image: string;
+  } | null>
+>();
 
 const FULL_PUBLIC_PRODUCT_SELECT = [
   "id",
@@ -222,38 +230,128 @@ async function fetchMetadataJson(uri?: string | null) {
   return metadataJsonCache.get(normalizedUri) ?? null;
 }
 
+async function fetchReleasePreviewById(releaseId?: string | null) {
+  const normalizedReleaseId = releaseId?.trim();
+  if (!normalizedReleaseId) {
+    return null;
+  }
+
+  if (!releasePreviewCache.has(normalizedReleaseId)) {
+    releasePreviewCache.set(
+      normalizedReleaseId,
+      Promise.all([
+        supabase
+          .from("creative_releases")
+          .select("id, title, release_type, cover_image_uri, contract_address, contract_kind, status, metadata")
+          .eq("id", normalizedReleaseId)
+          .maybeSingle(),
+        supabase
+          .from("products")
+          .select("id, creative_release_id, name, image_url, image_ipfs_uri, product_type, contract_kind, status")
+          .eq("creative_release_id", normalizedReleaseId)
+          .in("status", [...PUBLIC_PRODUCT_STATUSES])
+          .order("created_at", { ascending: false })
+          .limit(1),
+      ])
+        .then(([releaseResult, productResult]) => {
+          if (releaseResult.error) {
+            throw releaseResult.error;
+          }
+          if (productResult.error) {
+            throw productResult.error;
+          }
+
+          const creativeRelease = releaseResult.data || null;
+          const product = productResult.data?.[0] || null;
+          const image =
+            (typeof creativeRelease?.cover_image_uri === "string" && creativeRelease.cover_image_uri
+              ? ipfsToHttp(creativeRelease.cover_image_uri)
+              : "") ||
+            (typeof product?.image_url === "string" && product.image_url ? product.image_url : "") ||
+            (typeof product?.image_ipfs_uri === "string" && product.image_ipfs_uri
+              ? ipfsToHttp(product.image_ipfs_uri)
+              : "");
+
+          if (!creativeRelease && !product) {
+            return null;
+          }
+
+          return {
+            creativeRelease,
+            product,
+            image,
+          };
+        })
+        .catch((error) => {
+          console.warn("Failed to fetch linked creative release preview:", normalizedReleaseId, error);
+          return null;
+        }),
+    );
+  }
+
+  return releasePreviewCache.get(normalizedReleaseId) ?? null;
+}
+
 async function enrichDropMediaFromMetadata<T extends Record<string, any>>(drop: T) {
   const withDefaults = withDropDefaults(drop);
+  const releasePreview = await fetchReleasePreviewById(withDefaults.creative_release_id);
+
+  const attachReleaseData = <U extends Record<string, any>>(value: U): U =>
+    releasePreview
+      ? ({
+          ...value,
+          creative_release: value.creative_release || releasePreview.creativeRelease,
+          linked_product: value.linked_product || releasePreview.product,
+        } as U)
+      : value;
+
+  const applyReleaseImageFallback = <U extends Record<string, any>>(value: U): U =>
+    releasePreview?.image
+      ? ({
+          ...value,
+          image_url: value.image_url || releasePreview.image,
+          image_ipfs_uri:
+            value.image_ipfs_uri ||
+            releasePreview.product?.image_ipfs_uri ||
+            releasePreview.creativeRelease?.cover_image_uri ||
+            null,
+          preview_uri: value.preview_uri || releasePreview.image,
+        } as U)
+      : value;
+
   const existingImage =
     withDefaults.preview_uri ||
     withDefaults.image_url ||
     withDefaults.image_ipfs_uri ||
-    extractImageUriFromMetadata((withDefaults.metadata as Record<string, any> | undefined) || null);
+    extractImageUriFromMetadata((withDefaults.metadata as Record<string, any> | undefined) || null) ||
+    releasePreview?.image;
+
+  const baseDrop = applyReleaseImageFallback(attachReleaseData(withDefaults));
 
   if (existingImage || !withDefaults.metadata_ipfs_uri) {
-    return withDefaults;
+    return baseDrop;
   }
 
   const metadata = await fetchMetadataJson(withDefaults.metadata_ipfs_uri);
   if (!metadata) {
-    return withDefaults;
+    return baseDrop;
   }
 
   const metadataImage = extractImageUriFromMetadata(metadata);
   if (!metadataImage) {
-    return {
-      ...withDefaults,
-      metadata: withDefaults.metadata || metadata,
-    };
+    return applyReleaseImageFallback({
+      ...baseDrop,
+      metadata: baseDrop.metadata || metadata,
+    });
   }
 
-  return {
-    ...withDefaults,
-    metadata: withDefaults.metadata || metadata,
-    image_ipfs_uri: withDefaults.image_ipfs_uri || metadataImage,
-    image_url: withDefaults.image_url || ipfsToHttp(metadataImage),
-    preview_uri: withDefaults.preview_uri || metadataImage,
-  };
+  return applyReleaseImageFallback({
+    ...baseDrop,
+    metadata: baseDrop.metadata || metadata,
+    image_ipfs_uri: baseDrop.image_ipfs_uri || metadataImage,
+    image_url: baseDrop.image_url || ipfsToHttp(metadataImage),
+    preview_uri: baseDrop.preview_uri || metadataImage,
+  });
 }
 
 async function enrichDropsMediaFromMetadata<T extends Record<string, any>>(drops: T[]) {
@@ -489,6 +587,7 @@ function getLiveDropsSelectClause() {
   const columns = [
     "id",
     "artist_id",
+    "creative_release_id",
     "title",
     "price_eth",
     "image_url",
@@ -527,6 +626,7 @@ function getDropDetailSelectClause() {
   const columns = [
     "id",
     "artist_id",
+    "creative_release_id",
     "title",
     "description",
     "price_eth",
