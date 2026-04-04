@@ -64,6 +64,7 @@ import { useSupabaseArtistByWallet, useSupabaseDropsByArtist, useSupabaseProduct
 import { ADMIN_WALLET } from "@/lib/admin";
 import { createOnchainCreativeRelease } from "@/lib/creativeReleaseEscrowChain";
 import { CREATIVE_RELEASE_ESCROW_ADDRESS } from "@/lib/contracts/creativeReleaseEscrow";
+import { normalizePublicDropStatus } from "@/lib/catalogVisibility";
 
 // â”€â”€â”€ Types â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 type StudioArtistProfile = {
@@ -91,7 +92,7 @@ type Drop = {
   price: string;
   supply: number;
   sold: number;
-  status: "live" | "draft" | "ended";
+  status: "live" | "upcoming" | "draft" | "ended";
   type: "buy" | "auction" | "campaign";
   endsIn: string;
   revenue: string;
@@ -216,11 +217,54 @@ function campaignDetailItemsFromTextarea(value: string, fallback: string[]) {
   return items.length > 0 ? items : fallback;
 }
 
+function readCampaignWindowValue(metadata: Record<string, unknown> | null | undefined, key: string) {
+  const campaignWindow =
+    metadata?.campaign_window && typeof metadata.campaign_window === "object" && !Array.isArray(metadata.campaign_window)
+      ? (metadata.campaign_window as Record<string, unknown>)
+      : null;
+  const value = campaignWindow?.[key];
+  return typeof value === "string" && value.trim() ? value.trim() : "";
+}
+
+function getStudioDropDisplayStatus(drop: {
+  type?: string | null;
+  status?: string | null;
+  ends_at?: string | null;
+  metadata?: Record<string, unknown> | null;
+}): Drop["status"] {
+  const normalizedStatus = normalizePublicDropStatus(drop.status);
+  const normalizedType = (drop.type || "drop").toLowerCase();
+
+  if (normalizedType === "campaign") {
+    const now = Date.now();
+    const startAt = readCampaignWindowValue(drop.metadata, "start_at") || readCampaignWindowValue(drop.metadata, "startAt");
+    const endAt =
+      readCampaignWindowValue(drop.metadata, "end_at") ||
+      readCampaignWindowValue(drop.metadata, "endAt") ||
+      drop.ends_at ||
+      "";
+
+    const startMs = startAt ? new Date(startAt).getTime() : Number.NaN;
+    const endMs = endAt ? new Date(endAt).getTime() : Number.NaN;
+
+    if (Number.isFinite(endMs) && endMs <= now) {
+      return "ended";
+    }
+
+    if (Number.isFinite(startMs) && startMs > now) {
+      return "upcoming";
+    }
+  }
+
+  return normalizedStatus;
+}
+
 // â”€â”€â”€ Small helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const StatusPill = ({ status }: { status: string }) => {
   const map: Record<string, string> = {
     live: "bg-green-100 text-green-800",
     active: "bg-green-100 text-green-800",
+    upcoming: "bg-amber-100 text-amber-800",
     draft: "bg-secondary text-muted-foreground",
     ended: "bg-secondary text-muted-foreground",
     completed: "bg-blue-100 text-blue-800",
@@ -960,10 +1004,19 @@ const CreateDropSheet = ({
         const endsAt =
           pendingResult.campaignConfig?.endAt ||
           new Date(Date.now() + Number(form.duration) * 3600 * 1000).toISOString();
-        const initialStatus =
-          pendingResult.mode === "campaign" && new Date(startsAt).getTime() > Date.now()
-            ? "draft"
-            : "live";
+        const initialStatus = pendingResult.mode === "campaign" ? "active" : "live";
+        const campaignMetadata =
+          pendingResult.mode === "campaign"
+            ? {
+                campaign_details: DEFAULT_CAMPAIGN_DETAILS,
+                campaign_window: {
+                  entry_mode: pendingResult.campaignConfig?.entryMode || form.entryMode,
+                  start_at: startsAt,
+                  end_at: endsAt,
+                  redeem_at: pendingResult.campaignConfig?.redeemAt || null,
+                },
+              }
+            : {};
 
         const persistedImageUri =
           pendingResult.previewUri ||
@@ -991,10 +1044,7 @@ const CreateDropSheet = ({
           contract_drop_id: publishedId,
           contract_kind: contractKind,
           ends_at: endsAt,
-          metadata:
-            pendingResult.mode === "campaign"
-              ? { campaign_details: DEFAULT_CAMPAIGN_DETAILS }
-              : {},
+          metadata: campaignMetadata,
         });
 
         if (savedDrop) {
@@ -1008,7 +1058,12 @@ const CreateDropSheet = ({
             price: form.price || "0",
             supply: Number(form.supply),
             sold: 0,
-            status: initialStatus === "draft" ? "draft" : "live",
+            status: getStudioDropDisplayStatus({
+              type: storedType,
+              status: initialStatus,
+              ends_at: endsAt,
+              metadata: campaignMetadata,
+            }),
             type: pendingResult.mode,
             endsIn: `${Math.max(0, Math.ceil((new Date(endsAt).getTime() - Date.now()) / (1000 * 60 * 60)))}h`,
             revenue: "0",
@@ -1022,10 +1077,7 @@ const CreateDropSheet = ({
             contractAddress: contractAddress ?? null,
             contractDropId: publishedId,
             contractKind: contractKind ?? undefined,
-            metadata:
-              pendingResult.mode === "campaign"
-                ? { campaign_details: DEFAULT_CAMPAIGN_DETAILS }
-                : {},
+            metadata: campaignMetadata,
           });
           toast.success(
             pendingResult.mode === "campaign"
@@ -1609,7 +1661,12 @@ const ArtistStudioPage = ({ embedded = false }: ArtistStudioPageProps) => {
           price: String(drop.price_eth || 0),
           supply: drop.supply ?? 1,
           sold: drop.sold ?? 0,
-          status: drop.status === "ended" ? "ended" : drop.status === "draft" ? "draft" : "live",
+          status: getStudioDropDisplayStatus({
+            type: drop.type,
+            status: drop.status,
+            ends_at: drop.ends_at,
+            metadata: (drop.metadata as Record<string, unknown> | undefined) || null,
+          }),
           type: fromStoredDropType(drop.type),
           endsIn: drop.ends_at
             ? `${Math.max(0, Math.floor((new Date(drop.ends_at).getTime() - Date.now()) / (1000 * 60 * 60)))}h`
@@ -1640,7 +1697,7 @@ const ArtistStudioPage = ({ embedded = false }: ArtistStudioPageProps) => {
           price: drop.priceEth,
           supply: drop.maxBuy ?? 1,
           sold: drop.bought ?? 0,
-          status: drop.status === "upcoming" ? "draft" : drop.status === "ended" ? "ended" : "live",
+          status: drop.status === "upcoming" ? "upcoming" : drop.status === "draft" ? "draft" : drop.status === "ended" ? "ended" : "live",
           type: fromStoredDropType(drop.type),
           endsIn: drop.endsIn,
           revenue: drop.currentBidEth ?? drop.priceEth,

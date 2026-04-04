@@ -11,6 +11,7 @@ import { ipfsToHttp, resolveMediaUrl } from "@/lib/pinata";
 import { resolveDropCoverImage } from "@/lib/mediaPreview";
 import { VideoViewer } from "@/components/collection/VideoViewer";
 import { AudioPlayer } from "@/components/collection/AudioPlayer";
+import { PdfReader } from "@/components/collection/PdfReader";
 import { useCollectionStore } from "@/stores/collectionStore";
 import { CampaignArchitectureCard } from "@/components/campaign/CampaignArchitectureCard";
 import {
@@ -21,6 +22,7 @@ import {
   type Product,
   type ProductAsset,
 } from "@/lib/db";
+import { detectAssetTypeFromUri } from "@/lib/assetTypes";
 
 const DropPrimaryActionCard = lazy(() => import("@/components/wallet/DropPrimaryActionCard"));
 
@@ -35,6 +37,36 @@ const formatReleaseListingLabel = (value?: string | null) => {
   if (value === "physical") return "merchandise";
   return value || "";
 };
+
+function resolveDropAssetType(dropRecord: {
+  asset_type?: string | null;
+  delivery_uri?: string | null;
+  preview_uri?: string | null;
+  image_ipfs_uri?: string | null;
+  image_url?: string | null;
+}): AssetType {
+  const storedType = (dropRecord.asset_type || "").trim().toLowerCase() as AssetType | "";
+  if (storedType && storedType !== "digital") {
+    return storedType;
+  }
+
+  const candidates = [
+    dropRecord.delivery_uri,
+    dropRecord.preview_uri,
+    dropRecord.image_ipfs_uri,
+    dropRecord.image_url,
+  ];
+
+  for (const candidate of candidates) {
+    if (!candidate?.trim()) continue;
+    const inferredType = detectAssetTypeFromUri(candidate);
+    if (inferredType === "pdf" || inferredType === "epub") {
+      return inferredType;
+    }
+  }
+
+  return storedType || "image";
+}
 
 function formatDetailValue(value: unknown): string {
   if (Array.isArray(value)) {
@@ -73,8 +105,9 @@ const DropDetailPage = () => {
     const endsAt = dropRecord.ends_at ? new Date(dropRecord.ends_at).getTime() : now + 24 * 60 * 60 * 1000;
     const endsInHours = Math.max(0, Math.ceil((endsAt - now) / (60 * 60 * 1000)));
     const normalizedType = (dropRecord.type || "drop").toLowerCase() as "drop" | "auction" | "campaign";
+    const resolvedAssetType = resolveDropAssetType(dropRecord);
     const resolvedCoverImage = resolveDropCoverImage({
-      assetType: (dropRecord.asset_type || "image") as AssetType,
+      assetType: resolvedAssetType,
       previewUri: dropRecord.preview_uri,
       imageUrl: dropRecord.image_url,
       imageIpfsUri: dropRecord.image_ipfs_uri,
@@ -112,13 +145,14 @@ const DropDetailPage = () => {
       metadataUri: dropRecord.metadata_ipfs_uri || "",
       deliveryUri: dropRecord.delivery_uri || dropRecord.image_ipfs_uri || "",
       previewUri: dropRecord.preview_uri || undefined,
+      isGated: Boolean(dropRecord.is_gated),
       contractAddress: dropRecord.contract_address || null,
       contractDropId: dropRecord.contract_drop_id !== null && dropRecord.contract_drop_id !== undefined ? Number(dropRecord.contract_drop_id) : null,
       contractKind: normalizedContractKind as "artDrop" | "poapCampaign" | "poapCampaignV2" | "creativeReleaseEscrow" | null,
       metadata: (dropRecord.metadata as Record<string, unknown> | undefined) || {},
       poap: false,
       poapNote: "",
-      assetType: (dropRecord.asset_type || "image") as AssetType,
+      assetType: resolvedAssetType,
     };
   }, [dropRecord]);
 
@@ -151,6 +185,10 @@ const DropDetailPage = () => {
     ? resolveMediaUrl(resolvedLinkedProduct.image_url, resolvedLinkedProduct.image_ipfs_uri)
     : "";
   const coverSrc = drop ? ipfsToHttp(drop.image || "") || linkedProductImageSrc || linkedReleaseCoverSrc : "";
+  const showInlinePdfReader = Boolean(drop && drop.assetType === "pdf" && mediaSrc && !drop.isGated);
+  const mediaFrameClass = showInlinePdfReader
+    ? "min-h-[34rem] overflow-hidden bg-secondary"
+    : "aspect-square overflow-hidden bg-secondary";
 
   useEffect(() => {
     let isMounted = true;
@@ -304,7 +342,7 @@ const DropDetailPage = () => {
   return (
     <div className="space-y-0 pb-4">
       <div className="relative">
-        <div className="aspect-square overflow-hidden bg-secondary">
+        <div className={mediaFrameClass}>
           {drop.assetType === "image" && <img src={ipfsToHttp(drop.image || mediaSrc)} alt={drop.title} className="w-full h-full object-cover" />}
           {drop.assetType === "video" && <VideoViewer src={mediaSrc} poster={posterSrc} />}
           {drop.assetType === "audio" && (
@@ -312,7 +350,8 @@ const DropDetailPage = () => {
               <AudioPlayer src={mediaSrc} title={drop.title} />
             </div>
           )}
-          {(drop.assetType === "pdf" || drop.assetType === "epub" || drop.assetType === "digital") && (
+          {showInlinePdfReader && <PdfReader src={mediaSrc} title={drop.title} />}
+          {!showInlinePdfReader && (drop.assetType === "pdf" || drop.assetType === "epub" || drop.assetType === "digital") && (
             coverSrc ? (
               <div className="relative w-full h-full">
                 <img src={coverSrc} alt={drop.title} className="w-full h-full object-cover" />
