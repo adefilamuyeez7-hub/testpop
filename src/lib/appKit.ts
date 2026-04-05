@@ -47,6 +47,10 @@ export async function openWalletNetworkModal() {
   await openAppKit({ view: "Networks" });
 }
 
+export async function openWalletApprovalModal() {
+  queueWalletAppHandoff({ delayMs: 0 });
+}
+
 function resolveConnectedWalletHref() {
   const activeLink = ConnectionController.state.wcLinking;
   if (activeLink?.href) {

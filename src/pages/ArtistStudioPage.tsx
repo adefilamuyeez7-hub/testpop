@@ -157,6 +157,8 @@ const seedNotifications: Notification[] = [];
 
 const ART_TYPES = ["Digital Art", "Sculpture", "Photography", "Mixed Media", "Generative", "Illustration", "3D", "Other"];
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
+const LEGACY_AUCTION_DISABLED_MESSAGE =
+  "Legacy auctions are paused while POPUP migrates them to the safer POAP campaign flow.";
 
 const toGatewayUrl = (cidOrUri: string) => ipfsToHttp(cidOrUri.startsWith("ipfs://") ? cidOrUri : `ipfs://${cidOrUri}`);
 
@@ -376,7 +378,6 @@ const CreateDropSheet = ({
     error: createDropError,
   } = useCreateDropArtist(artistContractAddress);
   const {
-    createCampaign,
     createdCampaignId,
     isPending: isCreateCampaignPending,
     isConfirming: isCreateCampaignConfirming,
@@ -591,6 +592,12 @@ const CreateDropSheet = ({
   };
 
   const handlePublish = async () => {
+    if (form.type === "auction") {
+      setUploadErr(LEGACY_AUCTION_DISABLED_MESSAGE);
+      toast.error(LEGACY_AUCTION_DISABLED_MESSAGE);
+      return;
+    }
+
     if (!coverFile) {
       toast.error("Add a cover or artwork file before publishing.");
       return;
@@ -972,17 +979,6 @@ const CreateDropSheet = ({
             endTime,
             redeemStartTime,
           });
-        } else if (form.type === "auction") {
-          createCampaign(
-            uri,
-            0,
-            Number(form.supply),
-            now,
-            now + Number(form.duration) * 3600,
-            defaultPoapAllocation.subscribers,
-            defaultPoapAllocation.bidders,
-            defaultPoapAllocation.creators
-          );
         }
       } catch (contractError: unknown) {
         const errorMessage = contractError instanceof Error ? contractError.message : "Contract call failed";
@@ -1194,7 +1190,7 @@ const CreateDropSheet = ({
     ? <><Zap className="h-4 w-4 mr-2" />Mint & Publish</>
     : form.type === "campaign"
     ? <><Award className="h-4 w-4 mr-2" />Publish Campaign</>
-    : <><Gavel className="h-4 w-4 mr-2" />Create Auction</>;
+    : <><AlertTriangle className="h-4 w-4 mr-2" />Auction Paused</>;
   const canNext0 = !!coverFile && (!requiresSeparateDelivery || !!deliveryFile);
   const canNext1 = form.type === "campaign"
     ? Boolean(form.title && form.supply && form.startAt && form.endAt)
@@ -1360,13 +1356,35 @@ const CreateDropSheet = ({
                 <div>
                   <Label className="text-xs">Drop type</Label>
                   <div className="grid grid-cols-3 gap-2 mt-1">
-                    {(["buy", "auction", "campaign"] as Drop["type"][]).map(t => (
-                      <button key={t} onClick={() => setForm({ ...form, type: t })}
-                        className={`py-2 rounded-xl text-xs font-semibold capitalize border transition-colors ${form.type === t ? "border-primary bg-primary/10 text-primary" : "border-border bg-secondary/50 text-muted-foreground"}`}>
-                        {t}
-                      </button>
-                    ))}
+                    {(["buy", "auction", "campaign"] as Drop["type"][]).map((t) => {
+                      const isAuctionOption = t === "auction";
+                      return (
+                        <button
+                          key={t}
+                          type="button"
+                          onClick={() => {
+                            if (isAuctionOption) {
+                              toast.error(LEGACY_AUCTION_DISABLED_MESSAGE);
+                              return;
+                            }
+
+                            setForm({ ...form, type: t });
+                          }}
+                          className={`py-2 rounded-xl text-xs font-semibold capitalize border transition-colors ${
+                            form.type === t
+                              ? "border-primary bg-primary/10 text-primary"
+                              : "border-border bg-secondary/50 text-muted-foreground"
+                          } ${isAuctionOption ? "cursor-not-allowed opacity-60" : ""}`}
+                          aria-disabled={isAuctionOption}
+                        >
+                          {isAuctionOption ? "auction paused" : t}
+                        </button>
+                      );
+                    })}
                   </div>
+                  <p className="mt-2 text-[11px] text-muted-foreground">
+                    Auctions are temporarily disabled while the legacy POAP auction contract is being remediated.
+                  </p>
                 </div>
               )}
               <div>

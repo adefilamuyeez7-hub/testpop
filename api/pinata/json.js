@@ -3,6 +3,7 @@
 // Called by: src/lib/pinata.ts -> uploadMetadataToPinata()
 
 import { requirePinataAuthStrategies } from "../../server/pinataAuth.js";
+import { requireApiBearerAuth } from "../../server/requestAuth.js";
 
 export default async function handler(req, res) {
   if (req.method !== "POST") {
@@ -10,6 +11,7 @@ export default async function handler(req, res) {
   }
 
   try {
+    requireApiBearerAuth(req, process.env);
     const pinataAuthStrategies = requirePinataAuthStrategies(process.env);
     let body = req.body;
 
@@ -73,7 +75,8 @@ export default async function handler(req, res) {
       uri: `ipfs://${cid}`,
     });
   } catch (err) {
+    const statusCode = Number(err?.statusCode) || 500;
     console.error("Pinata JSON proxy error:", err);
-    return res.status(500).json({ error: err.message || "Pinata JSON proxy failed" });
+    return res.status(statusCode).json({ error: err.message || "Pinata JSON proxy failed" });
   }
 }

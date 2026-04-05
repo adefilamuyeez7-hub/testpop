@@ -1,13 +1,15 @@
 // SPDX-License-Identifier: MIT
-pragma solidity 0.8.28;
+pragma solidity ^0.8.28;
 
-import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
-import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
-import "@openzeppelin/contracts/utils/Pausable.sol";
+import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/utils/Pausable.sol";
+import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
 contract ArtistSharesToken is ERC20, Ownable, ReentrancyGuard, Pausable {
+    uint256 private constant REVENUE_PRECISION = 1e18;
+
     struct FundraisingCampaign {
         uint256 targetAmount;
         uint256 amountRaised;
@@ -23,6 +25,7 @@ contract ArtistSharesToken is ERC20, Ownable, ReentrancyGuard, Pausable {
     uint256 public totalRevenueDistributed;
     uint256 public totalRevenueClaimed;
     uint256 public pendingRefundLiability;
+    uint256 public revenuePerShareStored;
 
     FundraisingCampaign public campaign;
 
@@ -31,6 +34,8 @@ contract ArtistSharesToken is ERC20, Ownable, ReentrancyGuard, Pausable {
     mapping(address => uint256) public investorShareBalance;
     mapping(address => bool) public hasInvested;
     mapping(address => uint256) public claimedRevenue;
+    mapping(address => uint256) public revenueDebt;
+    mapping(address => uint256) public pendingRevenue;
 
     bool public campaignFailed;
     bool public campaignProceedsWithdrawn;
@@ -154,6 +159,7 @@ contract ArtistSharesToken is ERC20, Ownable, ReentrancyGuard, Pausable {
 
         uint256 sharesOwnedFromCampaign = investorShareBalance[msg.sender];
         require(sharesOwnedFromCampaign > 0, "No campaign shares");
+        require(balanceOf(msg.sender) >= sharesOwnedFromCampaign, "Campaign shares transferred");
 
         investmentAmount[msg.sender] = 0;
         investorShareBalance[msg.sender] = 0;
@@ -185,23 +191,21 @@ contract ArtistSharesToken is ERC20, Ownable, ReentrancyGuard, Pausable {
         require(totalSupply() > 0, "No shareholders");
 
         totalRevenueDistributed += msg.value;
+        revenuePerShareStored += (msg.value * REVENUE_PRECISION) / totalSupply();
 
         emit RevenueDistributed(msg.sender, msg.value);
     }
 
     function claimRevenue() external nonReentrant whenNotPaused {
-        uint256 holderShares = balanceOf(msg.sender);
-        require(holderShares > 0, "No shares");
+        _accrueRevenue(msg.sender);
 
-        uint256 holderPct = (holderShares * 1e18) / totalSupply();
-        uint256 claimableAmount = (totalRevenueDistributed * holderPct) / 1e18;
-        uint256 alreadyClaimed = claimedRevenue[msg.sender];
-        uint256 available = claimableAmount - alreadyClaimed;
-
+        uint256 available = pendingRevenue[msg.sender];
         require(available > 0, "Nothing to claim");
 
-        claimedRevenue[msg.sender] = claimableAmount;
+        pendingRevenue[msg.sender] = 0;
+        claimedRevenue[msg.sender] += available;
         totalRevenueClaimed += available;
+        _syncRevenueDebt(msg.sender);
 
         (bool ok, ) = msg.sender.call{value: available}("");
         require(ok, "Transfer failed");
@@ -264,17 +268,53 @@ contract ArtistSharesToken is ERC20, Ownable, ReentrancyGuard, Pausable {
     }
 
     function getRevenueClaim(address _shareholder) external view returns (uint256 claimable) {
-        uint256 holderShares = balanceOf(_shareholder);
-        if (holderShares == 0 || totalSupply() == 0) return 0;
-
-        uint256 holderPct = (holderShares * 1e18) / totalSupply();
-        uint256 claimableAmount = (totalRevenueDistributed * holderPct) / 1e18;
-        uint256 alreadyClaimed = claimedRevenue[_shareholder];
-
-        return claimableAmount > alreadyClaimed ? claimableAmount - alreadyClaimed : 0;
+        return pendingRevenue[_shareholder] + _unrealizedRevenue(_shareholder);
     }
 
     function decimals() public pure override returns (uint8) {
         return 18;
+    }
+
+    function transfersLocked() public view returns (bool) {
+        return campaign.active || (campaign.closed && campaignFailed);
+    }
+
+    function _update(address from, address to, uint256 value) internal override {
+        if (from == to) {
+            super._update(from, to, value);
+            return;
+        }
+
+        if (from != address(0) && to != address(0)) {
+            require(!transfersLocked(), "Share transfers locked");
+        }
+
+        _accrueRevenue(from);
+        _accrueRevenue(to);
+        super._update(from, to, value);
+        _syncRevenueDebt(from);
+        _syncRevenueDebt(to);
+    }
+
+    function _accrueRevenue(address account) internal {
+        if (account == address(0)) return;
+
+        uint256 unrealized = _unrealizedRevenue(account);
+        if (unrealized > 0) {
+            pendingRevenue[account] += unrealized;
+        }
+    }
+
+    function _unrealizedRevenue(address account) internal view returns (uint256) {
+        if (account == address(0)) return 0;
+
+        uint256 cumulative = (balanceOf(account) * revenuePerShareStored) / REVENUE_PRECISION;
+        uint256 debt = revenueDebt[account];
+        return cumulative > debt ? cumulative - debt : 0;
+    }
+
+    function _syncRevenueDebt(address account) internal {
+        if (account == address(0)) return;
+        revenueDebt[account] = (balanceOf(account) * revenuePerShareStored) / REVENUE_PRECISION;
     }
 }

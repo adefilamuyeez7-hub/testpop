@@ -135,6 +135,9 @@ const SubscribeButtonWrapper = ({ artist, isConnected, connectWallet, address, t
   );
 };
 
+const LEGACY_AUCTION_DISABLED_MESSAGE =
+  "Legacy auctions are paused while POPUP migrates bidding to the remediated contract flow.";
+
 const Index = () => {
   const navigate = useNavigate();
   const { isConnected, connectWallet, address, chain, requestActiveChainSwitch } = useWallet();
@@ -1029,15 +1032,17 @@ const Index = () => {
 
                     {drop.type === "auction" ? (
                       <Button
-                        onClick={() => handleBidOnDrop(drop)}
-                        disabled={isBidding || biddingDropId === drop.id}
+                        onClick={() =>
+                          toast({
+                            title: "Auction paused",
+                            description: LEGACY_AUCTION_DISABLED_MESSAGE,
+                            variant: "destructive",
+                          })
+                        }
+                        disabled
                         className="h-11 w-full rounded-full gradient-primary text-primary-foreground font-semibold"
                       >
-                        {biddingDropId === drop.id ? (
-                          <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Bidding...</>
-                        ) : (
-                          <><Gavel className="mr-2 h-4 w-4" /> Place Bid</>
-                        )}
+                        <><AlertTriangle className="mr-2 h-4 w-4" /> Auction Paused</>
                       </Button>
                     ) : drop.type === "campaign" ? (
                       <Button onClick={() => navigate(`/drops/${drop.id}`)} className="h-11 w-full rounded-full gradient-primary text-primary-foreground font-semibold">

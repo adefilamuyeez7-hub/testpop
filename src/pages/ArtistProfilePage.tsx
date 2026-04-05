@@ -456,18 +456,6 @@ const ArtistProfilePage = () => {
         [selectedCampaign.id]:
           (prev[selectedCampaign.id] || 0) + Number(created.units_purchased || units || 0),
       }));
-      setRaiseCampaigns((prev) => prev.map((campaign) => (
-        campaign.id === selectedCampaign.id
-          ? {
-              ...campaign,
-              units_sold: Number(campaign.units_sold || 0) + Number(created.units_purchased || units || 0),
-              metadata: {
-                ...(campaign.metadata || {}),
-                committed_amount_eth: Number(campaign.metadata?.committed_amount_eth || 0) + Number(created.amount_eth || amountEth || 0),
-              },
-            }
-          : campaign
-      )));
       setInvestOpen(false);
       setInvestmentForm({ amountEth: "", units: "" });
       toast.success("Investment commitment recorded. Payment settlement is still pending.");

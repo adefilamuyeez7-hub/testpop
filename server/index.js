@@ -1673,6 +1673,10 @@ app.get("/health", (_req, res) => {
 
 // DEBUG: Check if dist folder exists
 app.get("/debug/dist-status", (req, res) => {
+  if (NODE_ENV !== "development") {
+    return res.status(404).json({ error: "Not found" });
+  }
+
   const distPath = frontendDistPath;
   const indexPath = frontendIndexPath;
   const distExists = fs.existsSync(distPath);
@@ -4074,33 +4078,6 @@ registerRoute("post", "/ip-investments", authRequired, async (req, res) => {
       .single();
 
     if (investmentError) return res.status(400).json({ error: investmentError.message });
-
-    const nextUnitsSold = Number(campaign.units_sold || 0) + computedUnits;
-    const campaignUpdates = {
-      units_sold: nextUnitsSold,
-      updated_at: now,
-      metadata: {
-        ...(campaign.metadata || {}),
-        last_investment_at: now,
-      },
-    };
-
-    if (campaign.total_units && nextUnitsSold >= Number(campaign.total_units)) {
-      campaignUpdates.status = "funded";
-    }
-
-    if (campaign.funding_target_eth && Number(campaign.funding_target_eth) > 0) {
-      const totalRaised = Number((Number(campaign.metadata?.committed_amount_eth || 0) + computedAmount).toFixed(8));
-      campaignUpdates.metadata.committed_amount_eth = totalRaised;
-      if (totalRaised >= Number(campaign.funding_target_eth)) {
-        campaignUpdates.status = "funded";
-      }
-    }
-
-    await supabase
-      .from("ip_campaigns")
-      .update(campaignUpdates)
-      .eq("id", campaign.id);
 
     return res.json(investment);
   } catch (error) {

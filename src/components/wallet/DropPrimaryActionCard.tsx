@@ -51,6 +51,8 @@ type DropPrimaryActionCardProps = {
 };
 
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
+const LEGACY_AUCTION_DISABLED_MESSAGE =
+  "Legacy auction bidding is paused while POPUP migrates the flow to the remediated campaign contracts.";
 
 function DropPrimaryActionCardInner({
   drop,
@@ -395,14 +397,15 @@ function DropPrimaryActionCardInner({
             onChange={(event) => setBidAmount(event.target.value)}
             placeholder="Enter bid amount (ETH)"
             className="h-10 rounded-xl bg-secondary text-sm"
+            disabled
           />
-          <p className="text-xs text-muted-foreground">Auction bidding is live on-chain for this listing.</p>
+          <p className="text-xs text-muted-foreground">{LEGACY_AUCTION_DISABLED_MESSAGE}</p>
           <Button
-            onClick={handlePlaceBid}
-            disabled={isBidPending || isBidConfirming || isSwitchingNetwork}
+            onClick={() => toast.error(LEGACY_AUCTION_DISABLED_MESSAGE)}
+            disabled
             className="w-full rounded-full gradient-primary text-primary-foreground font-semibold h-11"
           >
-            {isBidPending || isBidConfirming ? "Confirming..." : "Place Bid"}
+            Auction Paused
           </Button>
         </div>
       ) : isCampaignDrop ? (

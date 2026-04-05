@@ -15,6 +15,8 @@ import { openWalletApprovalModal } from "@/lib/appKit";
 
 const unsupportedSharedArtDropMessage =
   "The shared ArtDrop contract path is retired. Use the per-artist contract hooks from useContractsArtist or the artist-specific exports in useContracts.";
+const legacyPoapCampaignMessage =
+  "Legacy POAPCampaign v1 actions are disabled while POPUP migrates auction and claim flows to the safer V2 design.";
 
 type LegacyWriteHookResult = {
   isPending: false;
@@ -190,83 +192,22 @@ export function useIsSubscribed(artistAddress?: string | null, userAddress?: str
 }
 
 export function useCreateCampaign() {
-  const { address } = useAccount();
-  const { writeContract, data: hash, isPending, error } = useWriteContract();
-  const { data: receipt, isLoading: isConfirming, isSuccess } = useWaitForTransactionReceipt({ hash });
-
-  const createCampaign = (
-    uri: string,
-    type: number,
-    maxSupply: number,
-    startTime: number,
-    endTime: number,
-    subPct: number,
-    bidPct: number,
-    creatorPct: number
-  ) => {
-    if (!address) {
-      throw new Error("Connect wallet before creating a campaign");
-    }
-
-    void openWalletApprovalModal().catch((error) => {
-      console.warn("Unable to open wallet approval modal:", error);
-    });
-
-    return writeContract({
-      address: POAP_CAMPAIGN_ADDRESS,
-      abi: POAP_CAMPAIGN_ABI,
-      functionName: "createCampaign",
-      args: [uri, type, BigInt(maxSupply), BigInt(startTime), BigInt(endTime), subPct, bidPct, creatorPct],
-      account: address,
-      chain: ACTIVE_CHAIN,
-    });
+  return {
+    createCampaign: () => {
+      throw new Error(legacyPoapCampaignMessage);
+    },
+    createdCampaignId: null,
+    ...getUnsupportedLegacyWriteResult(),
   };
-
-  const createdCampaignId =
-    receipt?.logs
-      .map((log) => {
-        try {
-          const decoded = decodeEventLog({
-            abi: POAP_CAMPAIGN_ABI,
-            data: log.data,
-            topics: log.topics,
-          });
-          return decoded.eventName === "CampaignCreated" ? Number(decoded.args.id) : null;
-        } catch {
-          return null;
-        }
-      })
-      .find((value): value is number => typeof value === "number") ?? null;
-
-  return { createCampaign, createdCampaignId, isPending, isConfirming, isSuccess, error, hash };
 }
 
 export function usePlaceBid() {
-  const { address } = useAccount();
-  const { writeContract, data: hash, isPending, error } = useWriteContract();
-  const { isLoading: isConfirming, isSuccess } = useWaitForTransactionReceipt({ hash });
-
-  const placeBid = (campaignId: number, bidEth: string) => {
-    if (!address) {
-      throw new Error("Connect wallet before bidding");
-    }
-
-    void openWalletApprovalModal().catch((error) => {
-      console.warn("Unable to open wallet approval modal:", error);
-    });
-
-    return writeContract({
-      address: POAP_CAMPAIGN_ADDRESS,
-      abi: POAP_CAMPAIGN_ABI,
-      functionName: "placeBid",
-      args: [BigInt(campaignId)],
-      value: parseEther(bidEth),
-      account: address,
-      chain: ACTIVE_CHAIN,
-    });
+  return {
+    placeBid: () => {
+      throw new Error(legacyPoapCampaignMessage);
+    },
+    ...getUnsupportedLegacyWriteResult(),
   };
-
-  return { placeBid, isPending, isConfirming, isSuccess, error, hash };
 }
 
 export function useArtDropDetails(dropId?: number | null) {
@@ -277,17 +218,10 @@ export function useArtDropDetails(dropId?: number | null) {
 }
 
 export function useCampaignDetails(campaignId?: number | null, enabled = true) {
-  const { data, isLoading, error, refetch } = useReadContract({
-    address: POAP_CAMPAIGN_ADDRESS,
-    abi: POAP_CAMPAIGN_ABI,
-    functionName: "campaigns",
-    args: campaignId === null || campaignId === undefined ? undefined : [BigInt(campaignId)],
-    query: {
-      enabled: enabled && campaignId !== null && campaignId !== undefined,
-    },
-  });
-
-  return { data, isLoading, error, refetch };
+  return {
+    data: null,
+    ...getUnsupportedLegacyReadResult(Boolean(enabled && campaignId !== null && campaignId !== undefined)),
+  };
 }
 
 export function useUserOwnedTokens(userAddress?: string | null) {
@@ -315,63 +249,26 @@ export function useTokenDropId(tokenId?: number | null) {
 }
 
 export function useUserOwnedPOAPs(userAddress?: string | null) {
-  const normalized = normalizeAddress(userAddress);
-  const { data: balance, isLoading: balanceLoading } = useReadContract({
-    address: POAP_CAMPAIGN_ADDRESS,
-    abi: POAP_CAMPAIGN_ABI,
-    functionName: "balanceOf",
-    args: normalized ? [normalized] : undefined,
-    query: { enabled: Boolean(normalized) },
-  });
-
   return {
-    balance: balance ? Number(balance as bigint) : 0,
-    isLoading: balanceLoading,
+    balance: 0,
+    isLoading: false,
   };
 }
 
 export function useHasClaimedPOAP(campaignId?: number | null, userAddress?: string | null) {
-  const normalized = normalizeAddress(userAddress);
-  const { data, isLoading } = useReadContract({
-    address: POAP_CAMPAIGN_ADDRESS,
-    abi: POAP_CAMPAIGN_ABI,
-    functionName: "claimed",
-    args:
-      campaignId !== null &&
-      campaignId !== undefined &&
-      normalized
-        ? [BigInt(campaignId), normalized]
-        : undefined,
-    query: { enabled: campaignId !== null && campaignId !== undefined && Boolean(normalized) },
-  });
-
   return {
-    hasClaimed: Boolean(data),
-    isLoading,
+    hasClaimed: false,
+    isLoading: false,
   };
 }
 
 export function useClaimPOAP() {
-  const { address } = useAccount();
-  const { writeContractAsync, data: hash, isPending, error } = useWriteContract();
-  const { isLoading: isConfirming, isSuccess } = useWaitForTransactionReceipt({ hash });
-
-  const claim = async (campaignId: number) => {
-    if (!address) {
-      throw new Error("Connect wallet before claiming");
-    }
-
-    return writeContractAsync({
-      address: POAP_CAMPAIGN_ADDRESS,
-      abi: POAP_CAMPAIGN_ABI,
-      functionName: "claim",
-      args: [BigInt(campaignId)],
-      account: address,
-      chain: ACTIVE_CHAIN,
-    });
+  return {
+    claim: async () => {
+      throw new Error(legacyPoapCampaignMessage);
+    },
+    ...getUnsupportedLegacyWriteResult(),
   };
-
-  return { claim, isPending, isConfirming, isSuccess, error, hash };
 }
 
 export function useTogglePause() {
@@ -382,72 +279,30 @@ export function useTogglePause() {
 }
 
 export function useSettleAuction() {
-  const { address } = useAccount();
-  const { writeContract, data: hash, isPending, error } = useWriteContract();
-  const { isLoading: isConfirming, isSuccess } = useWaitForTransactionReceipt({ hash });
-
-  const settleAuction = (campaignId: number) => {
-    if (!address) {
-      throw new Error("Connect wallet before settling auction");
-    }
-
-    return writeContract({
-      address: POAP_CAMPAIGN_ADDRESS,
-      abi: POAP_CAMPAIGN_ABI,
-      functionName: "settleAuction",
-      args: [BigInt(campaignId)],
-      account: address,
-      chain: ACTIVE_CHAIN,
-    });
+  return {
+    settleAuction: () => {
+      throw new Error(legacyPoapCampaignMessage);
+    },
+    ...getUnsupportedLegacyWriteResult(),
   };
-
-  return { settleAuction, isPending, isConfirming, isSuccess, error, hash };
 }
 
 export function useCancelCampaign() {
-  const { address } = useAccount();
-  const { writeContract, data: hash, isPending, error } = useWriteContract();
-  const { isLoading: isConfirming, isSuccess } = useWaitForTransactionReceipt({ hash });
-
-  const cancelCampaign = (campaignId: number) => {
-    if (!address) {
-      throw new Error("Connect wallet before cancelling campaign");
-    }
-
-    return writeContract({
-      address: POAP_CAMPAIGN_ADDRESS,
-      abi: POAP_CAMPAIGN_ABI,
-      functionName: "cancelCampaign",
-      args: [BigInt(campaignId)],
-      account: address,
-      chain: ACTIVE_CHAIN,
-    });
+  return {
+    cancelCampaign: () => {
+      throw new Error(legacyPoapCampaignMessage);
+    },
+    ...getUnsupportedLegacyWriteResult(),
   };
-
-  return { cancelCampaign, isPending, isConfirming, isSuccess, error, hash };
 }
 
 export function useDistributePOAP() {
-  const { address } = useAccount();
-  const { writeContract, data: hash, isPending, error } = useWriteContract();
-  const { isLoading: isConfirming, isSuccess } = useWaitForTransactionReceipt({ hash });
-
-  const distribute = (campaignId: number, toAddress: string) => {
-    if (!address) {
-      throw new Error("Connect wallet before distributing POAP");
-    }
-
-    return writeContract({
-      address: POAP_CAMPAIGN_ADDRESS,
-      abi: POAP_CAMPAIGN_ABI,
-      functionName: "distribute",
-      args: [BigInt(campaignId), getAddress(toAddress)],
-      account: address,
-      chain: ACTIVE_CHAIN,
-    });
+  return {
+    distribute: () => {
+      throw new Error(legacyPoapCampaignMessage);
+    },
+    ...getUnsupportedLegacyWriteResult(),
   };
-
-  return { distribute, isPending, isConfirming, isSuccess, error, hash };
 }
 
 export function useSubscribeToArtistContract(artistContractAddress?: string | null) {

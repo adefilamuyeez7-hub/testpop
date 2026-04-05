@@ -3,6 +3,7 @@
 // Called by: src/lib/pinata.ts -> uploadFileToPinata()
 
 import { requirePinataAuthStrategies } from "../../server/pinataAuth.js";
+import { requireApiBearerAuth } from "../../server/requestAuth.js";
 
 export const config = {
   api: {
@@ -10,17 +11,26 @@ export const config = {
   },
 };
 
+const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
+
 export default async function handler(req, res) {
   if (req.method !== "POST") {
     return res.status(405).json({ error: "Method not allowed" });
   }
 
   try {
+    requireApiBearerAuth(req, process.env);
     const pinataAuthStrategies = requirePinataAuthStrategies(process.env);
 
     const chunks = [];
+    let totalBytes = 0;
     for await (const chunk of req) {
-      chunks.push(typeof chunk === "string" ? Buffer.from(chunk) : chunk);
+      const nextChunk = typeof chunk === "string" ? Buffer.from(chunk) : chunk;
+      totalBytes += nextChunk.length;
+      if (totalBytes > MAX_UPLOAD_BYTES) {
+        return res.status(413).json({ error: "File upload exceeds 10MB limit" });
+      }
+      chunks.push(nextChunk);
     }
     const rawBody = Buffer.concat(chunks);
 
@@ -75,7 +85,8 @@ export default async function handler(req, res) {
       uri: `ipfs://${cid}`,
     });
   } catch (err) {
+    const statusCode = Number(err?.statusCode) || 500;
     console.error("Pinata proxy error:", err);
-    return res.status(500).json({ error: err.message || "Pinata proxy failed" });
+    return res.status(statusCode).json({ error: err.message || "Pinata proxy failed" });
   }
 }
