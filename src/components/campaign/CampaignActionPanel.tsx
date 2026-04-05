@@ -268,7 +268,7 @@ export function CampaignActionPanel({
 
   useEffect(() => {
     if (isBuySuccess) {
-      toast.success("Campaign entries purchased successfully.");
+      toast.success("ETH participation purchased. Your onchain campaign credit is recorded; POAP redemption opens after the campaign closes.");
     }
   }, [isBuySuccess]);
 
@@ -409,7 +409,7 @@ export function CampaignActionPanel({
 
       {!hasContractCampaignId && (
         <div className="rounded-xl border border-border bg-secondary/40 p-3 text-xs text-muted-foreground">
-          Onchain purchase and redemption are still syncing, but app-based participation is available below.
+          This campaign is missing its onchain campaign ID, so ETH purchase and POAP redemption are blocked until that link is restored.
         </div>
       )}
 
@@ -496,7 +496,7 @@ export function CampaignActionPanel({
         <div className="rounded-xl border border-border p-3 space-y-2">
           <p className="text-sm font-semibold text-foreground">Buy ETH participation</p>
           <p className="text-xs text-muted-foreground">
-            Each ETH entry creates one POAP credit. Redemption happens 24 hours after the campaign closes.
+            Each ETH entry creates one onchain campaign credit. The current V2 contract redeems that credit into a POAP after the campaign closes.
           </p>
           <div className="flex gap-2">
             <Input

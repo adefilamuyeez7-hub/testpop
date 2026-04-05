@@ -2,6 +2,7 @@ import { createPublicClient, decodeEventLog, http, parseEther } from "viem";
 import { writeContract } from "@wagmi/core";
 import { ACTIVE_CHAIN, config as wagmiConfig } from "@/lib/wagmi";
 import { PRODUCT_STORE_ABI, PRODUCT_STORE_ADDRESS } from "@/lib/contracts/productStore";
+import { openWalletApprovalModal } from "@/lib/appKit";
 
 const publicClient = createPublicClient({
   chain: ACTIVE_CHAIN,
@@ -82,6 +83,10 @@ export async function createOnchainProduct(params: {
   royaltyPercent?: number;
   account: `0x${string}`;
 }) {
+  void openWalletApprovalModal().catch((error) => {
+    console.warn("Unable to open wallet approval modal:", error);
+  });
+
   const hash = await writeContract(wagmiConfig, {
     address: PRODUCT_STORE_ADDRESS,
     abi: PRODUCT_STORE_ABI,
@@ -112,6 +117,10 @@ export async function buyOnchainProduct(params: {
   account: `0x${string}`;
 }) {
   const totalValue = params.unitPriceWei * BigInt(params.quantity);
+
+  void openWalletApprovalModal().catch((error) => {
+    console.warn("Unable to open wallet approval modal:", error);
+  });
 
   const hash = await writeContract(wagmiConfig, {
     address: PRODUCT_STORE_ADDRESS,

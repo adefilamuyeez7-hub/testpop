@@ -1,4 +1,4 @@
-import { createAppKit } from "@reown/appkit";
+import { createAppKit, type OpenOptions } from "@reown/appkit";
 import { networks, projectId, wagmiAdapter } from "@/lib/wagmi";
 
 let appKitPromise: Promise<ReturnType<typeof createAppKit>> | null = null;
@@ -21,15 +21,29 @@ function createPopupAppKit() {
     features: {
       analytics: false,
     },
+    experimental_preferUniversalLinks: true,
+    enableMobileFullScreen: true,
     themeMode: isDarkMode ? "dark" : "light",
   });
 }
 
-export async function openAppKit() {
+export async function openAppKit(options?: OpenOptions) {
   if (!appKitPromise) {
     appKitPromise = Promise.resolve(createPopupAppKit());
   }
 
   const appKit = await appKitPromise;
-  appKit.open();
+  await appKit.open(options);
+}
+
+export async function openWalletConnectModal() {
+  await openAppKit({ view: "Connect" });
+}
+
+export async function openWalletNetworkModal() {
+  await openAppKit({ view: "Networks" });
+}
+
+export async function openWalletApprovalModal() {
+  await openAppKit({ view: "ApproveTransaction" });
 }

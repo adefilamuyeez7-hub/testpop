@@ -20,6 +20,7 @@ import {
 import { decodeEventLog, parseEther, getAddress } from "viem";
 import { ACTIVE_CHAIN } from "@/lib/wagmi";
 import { ARTIST_DROP_ABI } from "@/lib/contracts/artDropArtist";
+import { openWalletApprovalModal } from "@/lib/appKit";
 
 // Helper to validate decoded events
 interface DecodedEvent {
@@ -111,6 +112,10 @@ export function useCreateDropArtist(artistContractAddress?: string | null) {
       contractAddress: normalized,
     });
 
+    void openWalletApprovalModal().catch((error) => {
+      console.warn("Unable to open wallet approval modal:", error);
+    });
+
     return writeContract({
       address: normalized as `0x${string}`,
       abi: ARTIST_DROP_ABI,
@@ -192,6 +197,10 @@ export function useMintArtist(artistContractAddress?: string | null) {
       userAddress: address,
     });
 
+    void openWalletApprovalModal().catch((error) => {
+      console.warn("Unable to open wallet approval modal:", error);
+    });
+
     return writeContract({
       address: effectiveContractAddress as `0x${string}`,
       abi: ARTIST_DROP_ABI,
@@ -267,6 +276,10 @@ export function useSubscribeToArtistContract(artistContractAddress?: string | nu
       amountEth: amountStr,
       weiAmount: weiAmount.toString(),
       subscriber: address,
+    });
+
+    void openWalletApprovalModal().catch((error) => {
+      console.warn("Unable to open wallet approval modal:", error);
     });
 
     return writeContract({

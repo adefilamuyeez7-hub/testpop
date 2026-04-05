@@ -16,6 +16,54 @@ import {
   type CampaignSubmission,
 } from "@/lib/db";
 
+function toRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function readCampaignWindowValue(
+  metadata: Record<string, unknown> | null | undefined,
+  ...keys: string[]
+) {
+  const campaignWindow = toRecord(metadata?.campaign_window);
+  for (const key of keys) {
+    const value = campaignWindow?.[key];
+    if (typeof value === "string" && value.trim()) return value.trim();
+    if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  }
+  return "";
+}
+
+function parseTimestamp(value: string) {
+  if (!value) return null;
+
+  if (/^\d+$/.test(value)) {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric) || numeric <= 0) return null;
+    return numeric > 1_000_000_000_000 ? Math.floor(numeric / 1000) : numeric;
+  }
+
+  const parsed = new Date(value).getTime();
+  return Number.isFinite(parsed) ? Math.floor(parsed / 1000) : null;
+}
+
+function buildFallbackCampaign(metadata?: Record<string, unknown> | null) {
+  const startTime = parseTimestamp(readCampaignWindowValue(metadata, "start_at", "startAt"));
+  const endTime = parseTimestamp(readCampaignWindowValue(metadata, "end_at", "endAt"));
+  const redeemStartTime = parseTimestamp(readCampaignWindowValue(metadata, "redeem_at", "redeemAt"));
+
+  if (startTime === null && endTime === null && redeemStartTime === null) {
+    return null;
+  }
+
+  return {
+    startTime: startTime ?? 0,
+    endTime: endTime ?? 0,
+    redeemStartTime: redeemStartTime ?? endTime ?? 0,
+  };
+}
+
 function formatRedeemCountdown(targetUnixSeconds: number): string {
   const diffMs = targetUnixSeconds * 1000 - Date.now();
   if (diffMs <= 0) return "Open now";
@@ -46,6 +94,8 @@ function CampaignCreditCard({
   const { redeem, isPending, isConfirming } = useRedeemCampaignV2();
 
   const hasOnchainCampaign = drop.contract_drop_id !== null && drop.contract_drop_id !== undefined;
+  const fallbackCampaign = buildFallbackCampaign(toRecord(drop.metadata));
+  const displayCampaign = campaign ?? fallbackCampaign;
   const approvedSubmissions = submissions.filter((submission) => submission.status === "approved").length;
   const pendingSubmissions = submissions.filter((submission) => submission.status === "pending").length;
   const rejectedSubmissions = submissions.filter((submission) => submission.status === "rejected").length;
@@ -62,13 +112,13 @@ function CampaignCreditCard({
       : pendingSubmissions > 0
         ? "under review"
         : "unavailable"
-    : !campaign
+    : !displayCampaign
       ? "syncing"
-      : now < campaign.startTime
+      : now < displayCampaign.startTime
         ? "upcoming"
-        : now <= campaign.endTime
+        : now <= displayCampaign.endTime
           ? "live"
-          : now < campaign.redeemStartTime
+          : now < displayCampaign.redeemStartTime
             ? "cooldown"
             : "redeemable";
 
@@ -131,14 +181,14 @@ function CampaignCreditCard({
                   <Zap className="mr-1.5 h-3.5 w-3.5" />
                   Redeem {redeemableCredits} {redeemableCredits === 1 ? "POAP" : "POAPs"}
                 </Button>
-              ) : status === "cooldown" && campaign ? (
+              ) : status === "cooldown" && displayCampaign ? (
                 <p className="mt-2 flex items-center gap-1 text-xs text-primary">
                   <Clock3 className="h-3.5 w-3.5" />
-                  Redeem opens in {formatRedeemCountdown(campaign.redeemStartTime)}
+                  Redeem opens in {formatRedeemCountdown(displayCampaign.redeemStartTime)}
                 </p>
               ) : status === "live" ? (
                 <p className="mt-2 text-xs text-muted-foreground">
-                  Campaign is still live. Redemption starts 24 hours after close.
+                  Your ETH participation is recorded onchain. POAP redemption opens after the campaign closes.
                 </p>
               ) : status === "upcoming" ? (
                 <p className="mt-2 text-xs text-muted-foreground">
@@ -146,7 +196,7 @@ function CampaignCreditCard({
                 </p>
               ) : status === "syncing" ? (
                 <p className="mt-2 text-xs text-muted-foreground">
-                  Campaign approvals are waiting to sync with onchain credits.
+                  Campaign details are still loading. Your wallet credits will appear here as soon as the campaign read finishes.
                 </p>
               ) : (
                 <p className="mt-2 text-xs text-muted-foreground">

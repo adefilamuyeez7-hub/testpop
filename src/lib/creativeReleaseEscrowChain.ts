@@ -5,6 +5,7 @@ import {
   CREATIVE_RELEASE_ESCROW_ABI,
   CREATIVE_RELEASE_ESCROW_ADDRESS,
 } from "@/lib/contracts/creativeReleaseEscrow";
+import { openWalletApprovalModal } from "@/lib/appKit";
 
 const publicClient = createPublicClient({
   chain: ACTIVE_CHAIN,
@@ -92,6 +93,10 @@ export async function createOnchainCreativeRelease(params: {
   payoutBps?: number;
   account: `0x${string}`;
 }) {
+  void openWalletApprovalModal().catch((error) => {
+    console.warn("Unable to open wallet approval modal:", error);
+  });
+
   const hash = await writeContract(wagmiConfig, {
     address: CREATIVE_RELEASE_ESCROW_ADDRESS,
     abi: CREATIVE_RELEASE_ESCROW_ABI,
@@ -124,6 +129,10 @@ export async function buyOnchainCreativeRelease(params: {
   account: `0x${string}`;
 }) {
   const totalValue = params.unitPriceWei * BigInt(params.quantity);
+
+  void openWalletApprovalModal().catch((error) => {
+    console.warn("Unable to open wallet approval modal:", error);
+  });
 
   const hash = await writeContract(wagmiConfig, {
     address: CREATIVE_RELEASE_ESCROW_ADDRESS,

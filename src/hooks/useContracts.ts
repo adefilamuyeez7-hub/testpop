@@ -11,6 +11,7 @@ import { decodeEventLog, getAddress, parseEther } from "viem";
 import { ACTIVE_CHAIN } from "@/lib/wagmi";
 import { ARTIST_DROP_ABI } from "@/lib/contracts/artDropArtist";
 import { POAP_CAMPAIGN_ABI, POAP_CAMPAIGN_ADDRESS } from "@/lib/contracts/poapCampaign";
+import { openWalletApprovalModal } from "@/lib/appKit";
 
 const unsupportedSharedArtDropMessage =
   "The shared ArtDrop contract path is retired. Use the per-artist contract hooks from useContractsArtist or the artist-specific exports in useContracts.";
@@ -98,13 +99,15 @@ export function useWallet() {
   } = useSwitchChain();
 
   const connectWallet = async () => {
-    const { openAppKit } = await import("@/lib/appKit");
-    await openAppKit();
+    const { openWalletConnectModal } = await import("@/lib/appKit");
+    await openWalletConnectModal();
   };
 
   const isWrongNetwork = isConnected && chain?.id !== ACTIVE_CHAIN.id;
 
   const switchToActiveChain = async () => {
+    const { openWalletNetworkModal } = await import("@/lib/appKit");
+    await openWalletNetworkModal();
     await switchChain({ chainId: ACTIVE_CHAIN.id });
   };
 
@@ -205,6 +208,10 @@ export function useCreateCampaign() {
       throw new Error("Connect wallet before creating a campaign");
     }
 
+    void openWalletApprovalModal().catch((error) => {
+      console.warn("Unable to open wallet approval modal:", error);
+    });
+
     return writeContract({
       address: POAP_CAMPAIGN_ADDRESS,
       abi: POAP_CAMPAIGN_ABI,
@@ -243,6 +250,10 @@ export function usePlaceBid() {
     if (!address) {
       throw new Error("Connect wallet before bidding");
     }
+
+    void openWalletApprovalModal().catch((error) => {
+      console.warn("Unable to open wallet approval modal:", error);
+    });
 
     return writeContract({
       address: POAP_CAMPAIGN_ADDRESS,

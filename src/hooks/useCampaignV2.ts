@@ -16,6 +16,7 @@ import {
   POAP_CAMPAIGN_V2_ABI,
   POAP_CAMPAIGN_V2_ADDRESS,
 } from "@/lib/contracts/poapCampaignV2";
+import { openWalletApprovalModal } from "@/lib/appKit";
 
 export type CampaignV2EntryMode = "eth" | "content" | "both";
 
@@ -64,6 +65,10 @@ export function useCreateCampaignV2() {
     const entryMode = entryModeToIndex(params.entryMode);
     const ticketPriceWei =
       params.entryMode === "content" ? 0n : parseEther(params.ticketPriceEth || "0");
+
+    void openWalletApprovalModal().catch((error) => {
+      console.warn("Unable to open wallet approval modal:", error);
+    });
 
     return writeContract({
       address: POAP_CAMPAIGN_V2_ADDRESS,
@@ -132,6 +137,10 @@ export function useBuyCampaignEntriesV2() {
 
     const totalValue = parseEther(ticketPriceEth || "0") * BigInt(quantity);
 
+    void openWalletApprovalModal().catch((error) => {
+      console.warn("Unable to open wallet approval modal:", error);
+    });
+
     return writeContract({
       address: resolveCampaignContractAddress(contractAddress),
       abi: POAP_CAMPAIGN_V2_ABI,
@@ -156,6 +165,10 @@ export function useRedeemCampaignV2() {
     if (!Number.isInteger(quantity) || quantity <= 0) {
       throw new Error("Quantity must be at least 1");
     }
+
+    void openWalletApprovalModal().catch((error) => {
+      console.warn("Unable to open wallet approval modal:", error);
+    });
 
     return writeContract({
       address: resolveCampaignContractAddress(contractAddress),
