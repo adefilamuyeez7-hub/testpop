@@ -150,7 +150,7 @@ export async function signChallengeMessage(message: string, wallet: string): Pro
 
   const ethereum = (window as Window & { ethereum?: { request?: (...args: unknown[]) => Promise<unknown> } }).ethereum;
   if (!ethereum?.request) {
-    throw new Error("No wallet signing provider found for secure signing.");
+    throw new Error("No wallet signing provider found for secure signing. Reconnect your wallet in POPUP and try again.");
   }
 
   const signature = await withTimeout(

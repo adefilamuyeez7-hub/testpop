@@ -217,6 +217,17 @@ function campaignDetailItemsFromTextarea(value: string, fallback: string[]) {
   return items.length > 0 ? items : fallback;
 }
 
+function sanitizeCampaignDetails(details: CampaignDetailContent | CampaignDetailForm): CampaignDetailForm {
+  return {
+    title: details.title?.trim() || DEFAULT_CAMPAIGN_DETAILS.title,
+    intro: details.intro?.trim() || DEFAULT_CAMPAIGN_DETAILS.intro,
+    primaryLabel: details.primaryLabel?.trim() || DEFAULT_CAMPAIGN_DETAILS.primaryLabel,
+    primaryItems: normalizeCampaignDetailItems(details.primaryItems, DEFAULT_CAMPAIGN_DETAILS.primaryItems),
+    secondaryLabel: details.secondaryLabel?.trim() || DEFAULT_CAMPAIGN_DETAILS.secondaryLabel,
+    secondaryItems: normalizeCampaignDetailItems(details.secondaryItems, DEFAULT_CAMPAIGN_DETAILS.secondaryItems),
+  };
+}
+
 function readCampaignWindowValue(metadata: Record<string, unknown> | null | undefined, key: string) {
   const campaignWindow =
     metadata?.campaign_window && typeof metadata.campaign_window === "object" && !Array.isArray(metadata.campaign_window)
@@ -391,6 +402,7 @@ const CreateDropSheet = ({
     startAt: "",
     endAt: "",
   });
+  const [campaignDetails, setCampaignDetails] = useState<CampaignDetailForm>(DEFAULT_CAMPAIGN_DETAILS);
 
   const requiresSeparateDelivery = contentKind !== "artwork";
   const isPhysicalRelease = releaseType === "physical" || releaseType === "hybrid";
@@ -546,6 +558,7 @@ const CreateDropSheet = ({
       startAt: "",
       endAt: "",
     });
+    setCampaignDetails(DEFAULT_CAMPAIGN_DETAILS);
     setReleaseType("collectible");
     setCoverPreview(null);
     setCoverFile(null);
@@ -1047,7 +1060,7 @@ const CreateDropSheet = ({
         const campaignMetadata =
           pendingResult.mode === "campaign"
             ? {
-                campaign_details: DEFAULT_CAMPAIGN_DETAILS,
+                campaign_details: sanitizeCampaignDetails(campaignDetails),
                 campaign_window: {
                   entry_mode: pendingResult.campaignConfig?.entryMode || form.entryMode,
                   start_at: startsAt,
@@ -1149,6 +1162,7 @@ const CreateDropSheet = ({
     onClose,
     onCreated,
     pendingResult,
+    campaignDetails,
     coverPreview,
   ]);
 
@@ -1395,6 +1409,78 @@ const CreateDropSheet = ({
                     <div><Label className="text-xs">ETH entry price</Label><Input placeholder={form.entryMode === "content" ? "0" : "0.1"} value={form.price} onChange={e => setForm({ ...form, price: e.target.value })} className="h-9 rounded-lg text-sm mt-1" /></div>
                     <div><Label className="text-xs">POAP supply</Label><Input placeholder="50" value={form.supply} onChange={e => setForm({ ...form, supply: e.target.value })} className="h-9 rounded-lg text-sm mt-1" /></div>
                   </div>
+                  <div className="rounded-xl border border-border bg-card/60 p-3 space-y-3">
+                    <div>
+                      <p className="text-xs font-semibold text-foreground">Collector-facing campaign details</p>
+                      <p className="mt-1 text-[11px] text-muted-foreground">
+                        This replaces the generic campaign explainer on the public page, so collectors can understand this campaign in your own words.
+                      </p>
+                    </div>
+                    <div>
+                      <Label className="text-xs">Details headline</Label>
+                      <Input
+                        value={campaignDetails.title}
+                        onChange={(e) => setCampaignDetails((prev) => ({ ...prev, title: e.target.value }))}
+                        className="mt-1 h-9 rounded-lg text-sm"
+                        placeholder="Why this campaign matters"
+                      />
+                    </div>
+                    <div>
+                      <Label className="text-xs">Intro</Label>
+                      <textarea
+                        value={campaignDetails.intro}
+                        onChange={(e) => setCampaignDetails((prev) => ({ ...prev, intro: e.target.value }))}
+                        className="mt-1 min-h-[84px] w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                        placeholder="Explain the goal, what collectors are joining, and what participation unlocks."
+                      />
+                    </div>
+                    <div>
+                      <Label className="text-xs">Primary section label</Label>
+                      <Input
+                        value={campaignDetails.primaryLabel}
+                        onChange={(e) => setCampaignDetails((prev) => ({ ...prev, primaryLabel: e.target.value }))}
+                        className="mt-1 h-9 rounded-lg text-sm"
+                        placeholder="How it works"
+                      />
+                    </div>
+                    <div>
+                      <Label className="text-xs">Primary section items</Label>
+                      <textarea
+                        value={campaignDetailItemsToTextarea(campaignDetails.primaryItems)}
+                        onChange={(e) =>
+                          setCampaignDetails((prev) => ({
+                            ...prev,
+                            primaryItems: campaignDetailItemsFromTextarea(e.target.value, DEFAULT_CAMPAIGN_DETAILS.primaryItems),
+                          }))
+                        }
+                        className="mt-1 min-h-[96px] w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                        placeholder="One collector-facing point per line"
+                      />
+                    </div>
+                    <div>
+                      <Label className="text-xs">Secondary section label</Label>
+                      <Input
+                        value={campaignDetails.secondaryLabel}
+                        onChange={(e) => setCampaignDetails((prev) => ({ ...prev, secondaryLabel: e.target.value }))}
+                        className="mt-1 h-9 rounded-lg text-sm"
+                        placeholder="Collector notes"
+                      />
+                    </div>
+                    <div>
+                      <Label className="text-xs">Secondary section items</Label>
+                      <textarea
+                        value={campaignDetailItemsToTextarea(campaignDetails.secondaryItems)}
+                        onChange={(e) =>
+                          setCampaignDetails((prev) => ({
+                            ...prev,
+                            secondaryItems: campaignDetailItemsFromTextarea(e.target.value, DEFAULT_CAMPAIGN_DETAILS.secondaryItems),
+                          }))
+                        }
+                        className="mt-1 min-h-[96px] w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                        placeholder="One collector-facing point per line"
+                      />
+                    </div>
+                  </div>
                 </>
               ) : (
                 <div className="grid grid-cols-3 gap-2">
@@ -1475,6 +1561,9 @@ const CreateDropSheet = ({
                   <div key={k} className="flex justify-between text-muted-foreground"><span>{k}</span><span className="font-semibold text-foreground">{v}</span></div>
                 ))}
               </div>
+              {form.type === "campaign" && !isPhysicalRelease && (
+                <CampaignArchitectureCard details={sanitizeCampaignDetails(campaignDetails)} />
+              )}
               {uploadErr && <div className="flex gap-2 p-3 rounded-xl bg-destructive/10 text-destructive text-xs"><AlertTriangle className="h-4 w-4 shrink-0" />{uploadErr}</div>}
               {form.type === "campaign" && !isPhysicalRelease && <div className="flex gap-2 p-3 rounded-xl bg-primary/5 text-foreground text-xs"><AlertTriangle className="h-4 w-4 shrink-0 text-primary" />Campaign timing, ETH entry credits, artist-approved content credits, and redemption all run through the V2 campaign contract. App-side editing only changes the collector-facing detail card.</div>}
               {activePublishError && <p className="text-xs text-destructive">{(activePublishError as Web3Error).shortMessage ?? (activePublishError as Web3Error).message}</p>}
@@ -2095,14 +2184,7 @@ const ArtistStudioPage = ({ embedded = false }: ArtistStudioPageProps) => {
 
     setCampaignEditSaving(true);
     try {
-      const nextDetails: CampaignDetailContent = {
-        title: campaignEditForm.title.trim(),
-        intro: campaignEditForm.intro.trim(),
-        primaryLabel: campaignEditForm.primaryLabel.trim(),
-        primaryItems: campaignEditForm.primaryItems,
-        secondaryLabel: campaignEditForm.secondaryLabel.trim(),
-        secondaryItems: campaignEditForm.secondaryItems,
-      };
+      const nextDetails = sanitizeCampaignDetails(campaignEditForm);
 
       const nextMetadata = {
         ...(editingCampaignDrop.metadata || {}),

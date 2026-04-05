@@ -8,7 +8,7 @@ type RuntimeSessionState = {
 
 type PersistedRuntimeSessionState = Pick<
   RuntimeSessionState,
-  "wallet" | "role" | "guestCustomerId"
+  "apiToken" | "supabaseToken" | "wallet" | "role" | "guestCustomerId"
 >;
 
 const SESSION_STORAGE_KEY = "popup.runtime-session";
@@ -50,6 +50,8 @@ function persistRuntimeSession(session: RuntimeSessionState) {
 
   try {
     const persistedSession: PersistedRuntimeSessionState = {
+      apiToken: session.apiToken,
+      supabaseToken: session.supabaseToken,
       wallet: session.wallet,
       role: session.role,
       guestCustomerId: session.guestCustomerId,

@@ -96,6 +96,23 @@ function toRecord(value: unknown): Record<string, unknown> | null {
     : null;
 }
 
+function mergeLinkedProductDetails(
+  inlineProduct: Product | null,
+  fetchedProduct: Product | null,
+): Product | null {
+  if (!inlineProduct) return fetchedProduct;
+  if (!fetchedProduct) return inlineProduct;
+
+  return {
+    ...inlineProduct,
+    ...fetchedProduct,
+    metadata: {
+      ...(toRecord(inlineProduct.metadata) || {}),
+      ...(toRecord(fetchedProduct.metadata) || {}),
+    },
+  };
+}
+
 const DropDetailPage = () => {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -282,7 +299,11 @@ const DropDetailPage = () => {
           dropRecord?.creative_release_id ? getCreativeRelease(dropRecord.creative_release_id) : Promise.resolve(null),
           dropRecord?.creative_release_id ? getProductsByCreativeRelease(dropRecord.creative_release_id) : Promise.resolve([]),
         ]);
-        const nextProduct = inlineLinkedProduct || products?.[0] || null;
+        const fetchedProduct =
+          products?.find((product) => product.id === inlineLinkedProduct?.id) ||
+          products?.[0] ||
+          null;
+        const nextProduct = mergeLinkedProductDetails(inlineLinkedProduct, fetchedProduct);
         const assets = nextProduct?.id ? await getProductAssets(nextProduct.id) : [];
 
         if (!isMounted) return;

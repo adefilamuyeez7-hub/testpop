@@ -242,12 +242,28 @@ async function fetchReleasePreviewById(releaseId?: string | null) {
       Promise.all([
         supabase
           .from("creative_releases")
-          .select("id, title, release_type, cover_image_uri, contract_address, contract_kind, status, metadata")
+          .select(
+            [
+              "id",
+              "title",
+              "release_type",
+              "cover_image_uri",
+              "contract_address",
+              "contract_kind",
+              "contract_listing_id",
+              "contract_drop_id",
+              "physical_details_jsonb",
+              "shipping_profile_jsonb",
+              "creator_notes",
+              "status",
+              "metadata",
+            ].join(", ")
+          )
           .eq("id", normalizedReleaseId)
           .maybeSingle(),
         supabase
           .from("products")
-          .select("id, creative_release_id, name, image_url, image_ipfs_uri, product_type, contract_kind, status")
+          .select(getPublicProductSelectClause())
           .eq("creative_release_id", normalizedReleaseId)
           .in("status", [...PUBLIC_PRODUCT_STATUSES])
           .order("created_at", { ascending: false })
@@ -257,12 +273,29 @@ async function fetchReleasePreviewById(releaseId?: string | null) {
           if (releaseResult.error) {
             throw releaseResult.error;
           }
+          updateProductSchemaMode(productResult.error);
+          if (productResult.error && productColumnsMode === "legacy") {
+            return supabase
+              .from("products")
+              .select(getPublicProductSelectClause())
+              .eq("creative_release_id", normalizedReleaseId)
+              .in("status", [...PUBLIC_PRODUCT_STATUSES])
+              .order("created_at", { ascending: false })
+              .limit(1)
+              .then(({ data, error }) => {
+                if (error) {
+                  throw error;
+                }
+                return [releaseResult.data || null, data?.[0] || null] as const;
+              });
+          }
           if (productResult.error) {
             throw productResult.error;
           }
 
-          const creativeRelease = releaseResult.data || null;
-          const product = productResult.data?.[0] || null;
+          return [releaseResult.data || null, productResult.data?.[0] || null] as const;
+        })
+        .then(([creativeRelease, product]) => {
           const image =
             (typeof creativeRelease?.cover_image_uri === "string" && creativeRelease.cover_image_uri
               ? ipfsToHttp(creativeRelease.cover_image_uri)
