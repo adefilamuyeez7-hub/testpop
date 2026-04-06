@@ -202,12 +202,46 @@ export function useCreateCampaign() {
 }
 
 export function usePlaceBid() {
-  return {
-    placeBid: () => {
-      throw new Error(legacyPoapCampaignMessage);
-    },
-    ...getUnsupportedLegacyWriteResult(),
+  const { address } = useAccount();
+  const { writeContract, data: hash, isPending, error } = useWriteContract();
+  const { data: receipt, isLoading: isConfirming, isSuccess } = useWaitForTransactionReceipt({ hash });
+
+  const placeBid = (campaignId: number, bidAmount: string | number) => {
+    if (!address) {
+      throw new Error("Connect wallet before placing a bid");
+    }
+    if (!Number.isInteger(campaignId) || campaignId < 0) {
+      throw new Error(`Invalid campaign ID: ${campaignId}`);
+    }
+
+    const value = parsePositiveEth(bidAmount);
+
+    return writeContract({
+      address: POAP_CAMPAIGN_ADDRESS,
+      abi: POAP_CAMPAIGN_ABI,
+      functionName: "placeBid",
+      args: [BigInt(campaignId)],
+      value,
+      account: address,
+      chain: ACTIVE_CHAIN,
+    });
   };
+
+  const bidConfirmed =
+    receipt?.logs.some((log) => {
+      try {
+        const decoded = decodeEventLog({
+          abi: POAP_CAMPAIGN_ABI,
+          data: log.data,
+          topics: log.topics,
+        });
+        return decoded.eventName === "BidPlaced";
+      } catch {
+        return false;
+      }
+    }) ?? false;
+
+  return { placeBid, bidConfirmed, isPending, isConfirming, isSuccess, error, hash };
 }
 
 export function useArtDropDetails(dropId?: number | null) {
