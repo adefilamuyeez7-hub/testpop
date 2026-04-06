@@ -1,4 +1,4 @@
-import { lazy, Suspense } from "react";
+import { lazy, Suspense, useEffect } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Route, Routes } from "react-router-dom";
 import { Toaster as Sonner } from "@/components/ui/sonner";
@@ -10,6 +10,7 @@ import MobileWebAppGate from "./components/MobileWebAppGate";
 import { ThemeProvider } from "./components/theme-provider";
 import WalletRuntimeProvider from "./components/wallet/WalletRuntimeProvider";
 import NotFound from "./pages/NotFound";
+import { initializePushNotifications } from "@/lib/webPush";
 
 // ─── Route Code Splitting ──────────────────────────────────────────────
 // Lazy load all routes to reduce initial bundle size
@@ -53,49 +54,59 @@ const queryClient = new QueryClient({
   },
 });
 
-const App = () => (
-  <QueryClientProvider client={queryClient}>
-    <ThemeProvider attribute="class" defaultTheme="light" enableSystem={false} disableTransitionOnChange>
-      <WalletRuntimeProvider>
-        <TooltipProvider>
-          <Toaster />
-          <Sonner />
-          <MobileWebAppGate>
-            <BrowserRouter>
-              <Suspense fallback={<LoadingSpinner />}>
-                <Routes>
-                  <Route element={<AppLayout />}>
-                    <Route path="/" element={<WalletIndexRoute />} />
-                    <Route path="/apply" element={<WalletArtistApplicationRoute />} />
-                    <Route path="/drops" element={<DropsPage />} />
-                    <Route path="/drops/:id" element={<DropDetailPage />} />
-                    <Route path="/artists" element={<WalletArtistsRoute />} />
-                    <Route path="/artists/:id" element={<WalletArtistProfileRoute />} />
-                    <Route path="/invest" element={<WalletMarketplaceRoute />} />
-                    <Route path="/profile" element={<WalletProfileRoute />} />
-                    <Route path="/collection" element={<WalletCollectionRoute />} />
-                    <Route path="/poaps" element={<WalletPOAPsRoute />} />
-                    <Route path="/subscriptions" element={<WalletSubscriptionsRoute />} />
-                    <Route path="/products" element={<ProductsPage />} />
-                    <Route path="/products/:id" element={<ProductDetailPage />} />
-                    <Route path="/cart" element={<CartPage />} />
-                    <Route path="/checkout" element={<CheckoutPage />} />
-                    <Route path="/orders" element={<OrderHistoryPage />} />
-                  </Route>
+const App = () => {
+  // Initialize push notifications when app loads
+  useEffect(() => {
+    initializePushNotifications().catch((err) => {
+      console.warn('Failed to initialize push notifications:', err);
+      // Don't fail the app if push notifications aren't supported
+    });
+  }, []);
 
-                  {/* Admin/Studio routes - lazy loaded separately */}
-                  <Route path="/admin" element={<WalletAdminRoute />} />
-                  <Route path="/studio" element={<WalletStudioRoute />} />
-                  
-                  <Route path="*" element={<NotFound />} />
-                </Routes>
-              </Suspense>
-            </BrowserRouter>
-          </MobileWebAppGate>
-        </TooltipProvider>
-      </WalletRuntimeProvider>
-    </ThemeProvider>
-  </QueryClientProvider>
-);
+  return (
+    <QueryClientProvider client={queryClient}>
+      <ThemeProvider attribute="class" defaultTheme="light" enableSystem={false} disableTransitionOnChange>
+        <WalletRuntimeProvider>
+          <TooltipProvider>
+            <Toaster />
+            <Sonner />
+            <MobileWebAppGate>
+              <BrowserRouter>
+                <Suspense fallback={<LoadingSpinner />}>
+                  <Routes>
+                    <Route element={<AppLayout />}>
+                      <Route path="/" element={<WalletIndexRoute />} />
+                      <Route path="/apply" element={<WalletArtistApplicationRoute />} />
+                      <Route path="/drops" element={<DropsPage />} />
+                      <Route path="/drops/:id" element={<DropDetailPage />} />
+                      <Route path="/artists" element={<WalletArtistsRoute />} />
+                      <Route path="/artists/:id" element={<WalletArtistProfileRoute />} />
+                      <Route path="/invest" element={<WalletMarketplaceRoute />} />
+                      <Route path="/profile" element={<WalletProfileRoute />} />
+                      <Route path="/collection" element={<WalletCollectionRoute />} />
+                      <Route path="/poaps" element={<WalletPOAPsRoute />} />
+                      <Route path="/subscriptions" element={<WalletSubscriptionsRoute />} />
+                      <Route path="/products" element={<ProductsPage />} />
+                      <Route path="/products/:id" element={<ProductDetailPage />} />
+                      <Route path="/cart" element={<CartPage />} />
+                      <Route path="/checkout" element={<CheckoutPage />} />
+                      <Route path="/orders" element={<OrderHistoryPage />} />
+                    </Route>
+
+                    {/* Admin/Studio routes - lazy loaded separately */}
+                    <Route path="/admin" element={<WalletAdminRoute />} />
+                    <Route path="/studio" element={<WalletStudioRoute />} />
+                    
+                    <Route path="*" element={<NotFound />} />
+                  </Routes>
+                </Suspense>
+              </BrowserRouter>
+            </MobileWebAppGate>
+          </TooltipProvider>
+        </WalletRuntimeProvider>
+      </ThemeProvider>
+    </QueryClientProvider>
+  );
+};
 
 export default App;

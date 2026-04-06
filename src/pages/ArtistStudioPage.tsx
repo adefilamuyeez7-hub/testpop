@@ -22,6 +22,7 @@ import { useWallet, useCreateCampaign, useGetSubscriberCountFromArtistContract }
 import { useCreateDropArtist } from "@/hooks/useContractsArtist";
 import { useCreateCampaignV2 } from "@/hooks/useCampaignV2";
 import { useGetArtistContract, useResolvedArtistContract } from "@/hooks/useContractIntegrations";
+import { useNotifications } from "@/hooks/useNotifications";
 import { ipfsToHttp, resolveMediaUrl, uploadFileToPinata, uploadMetadataToPinata } from "@/lib/pinata";
 import { establishSecureSession } from "@/lib/secureAuth";
 import { getRuntimeApiToken } from "@/lib/runtimeSession";
@@ -1630,7 +1631,15 @@ const ArtistStudioPage = ({ embedded = false }: ArtistStudioPageProps) => {
   const { address, balance, disconnect } = useWallet();
   const [tab, setTab] = useState("home");
   const [drops, setDrops] = useState<Drop[]>(seedDrops);
-  const [notifications, setNotifications] = useState<Notification[]>(seedNotifications);
+  
+  // Integration with real-time notification system
+  const { 
+    notifications,
+    unreadCount: hookUnreadCount,
+    loading: notificationsLoading,
+    markAsRead 
+  } = useNotifications();
+  
   const [showDropSheet, setShowDropSheet] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -1744,8 +1753,6 @@ const ArtistStudioPage = ({ embedded = false }: ArtistStudioPageProps) => {
     () => (artistDropRecords || []).filter((drop) => !isReleaseBackedSyntheticDrop(drop)),
     [artistDropRecords]
   );
-
-  const unreadCount = notifications.filter(n => !n.read).length;
 
   useEffect(() => {
     const artist = artistProfileRecord
@@ -2324,8 +2331,8 @@ const ArtistStudioPage = ({ embedded = false }: ArtistStudioPageProps) => {
           <div className="flex items-center gap-2">
             <button onClick={() => setShowNotifications(true)} className="relative p-2 rounded-full hover:bg-secondary transition-colors">
               <Bell className="h-5 w-5 text-foreground" />
-              {unreadCount > 0 && (
-                <span className="absolute top-1 right-1 h-4 w-4 rounded-full bg-primary text-primary-foreground text-[9px] font-bold flex items-center justify-center">{unreadCount}</span>
+              {hookUnreadCount > 0 && (
+                <span className="absolute top-1 right-1 h-4 w-4 rounded-full bg-primary text-primary-foreground text-[9px] font-bold flex items-center justify-center">{hookUnreadCount}</span>
               )}
             </button>
             {profile.handle && (
@@ -3330,29 +3337,58 @@ const ArtistStudioPage = ({ embedded = false }: ArtistStudioPageProps) => {
           <DialogHeader>
             <DialogTitle className="flex items-center justify-between">
               Notifications
-              {unreadCount > 0 && (
-                <button onClick={() => setNotifications(n => n.map(x => ({ ...x, read: true })))}
-                  className="text-xs text-primary font-normal">Mark all read</button>
+              {hookUnreadCount > 0 && (
+                <button 
+                  onClick={() => {
+                    notifications.filter(n => !n.read).forEach(n => markAsRead(n.id));
+                  }}
+                  className="text-xs text-primary font-normal"
+                >
+                  Mark all read
+                </button>
               )}
             </DialogTitle>
           </DialogHeader>
           <div className="space-y-2 max-h-80 overflow-y-auto mt-2">
-            {notifications.map(n => (
-              <div key={n.id} onClick={() => setNotifications(prev => prev.map(x => x.id === n.id ? { ...x, read: true } : x))}
-                className={`flex gap-3 p-3 rounded-xl cursor-pointer transition-colors ${n.read ? "bg-secondary/30" : "bg-primary/5 border border-primary/20"}`}>
-                <div className={`h-8 w-8 rounded-full flex items-center justify-center shrink-0 ${n.type === "bid" ? "bg-blue-100" : n.type === "sale" ? "bg-green-100" : n.type === "subscriber" ? "bg-purple-100" : "bg-amber-100"}`}>
-                  {n.type === "bid" ? <TrendingUp className="h-4 w-4 text-blue-600" />
-                    : n.type === "sale" ? <DollarSign className="h-4 w-4 text-green-600" />
-                    : n.type === "subscriber" ? <Users className="h-4 w-4 text-purple-600" />
-                    : <Award className="h-4 w-4 text-amber-600" />}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-xs text-foreground leading-relaxed">{n.text}</p>
-                  <p className="text-[10px] text-muted-foreground mt-1">{n.time}</p>
-                </div>
-                {!n.read && <div className="h-2 w-2 rounded-full bg-primary shrink-0 mt-1" />}
+            {notificationsLoading ? (
+              <div className="flex items-center justify-center py-8">
+                <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
               </div>
-            ))}
+            ) : notifications && notifications.length > 0 ? (
+              notifications.map(n => (
+                <div 
+                  key={n.id} 
+                  onClick={() => !n.read && markAsRead(n.id)}
+                  className={`flex gap-3 p-3 rounded-xl cursor-pointer transition-colors ${n.read ? "bg-secondary/30" : "bg-primary/5 border border-primary/20"}`}
+                >
+                  <div className={`h-8 w-8 rounded-full flex items-center justify-center shrink-0 ${
+                    n.event_type === 'subscription' ? 'bg-purple-100'
+                    : n.event_type === 'purchase' ? 'bg-green-100'
+                    : n.event_type === 'investment' ? 'bg-blue-100'
+                    : 'bg-amber-100'
+                  }`}>
+                    {n.event_type === 'subscription' ? <Users className="h-4 w-4 text-purple-600" />
+                      : n.event_type === 'purchase' ? <DollarSign className="h-4 w-4 text-green-600" />
+                      : n.event_type === 'investment' ? <TrendingUp className="h-4 w-4 text-blue-600" />
+                      : <Award className="h-4 w-4 text-amber-600" />}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-semibold text-foreground">{n.title}</p>
+                    <p className="text-xs text-foreground leading-relaxed mt-0.5">{n.message || n.description}</p>
+                    {n.amount_eth && <p className="text-[10px] text-primary font-semibold mt-1">{n.amount_eth} ETH</p>}
+                    <p className="text-[10px] text-muted-foreground mt-1">
+                      {n.created_at ? new Date(n.created_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'Just now'}
+                    </p>
+                  </div>
+                  {!n.read && <div className="h-2 w-2 rounded-full bg-primary shrink-0 mt-1" />}
+                </div>
+              ))
+            ) : (
+              <div className="flex flex-col items-center justify-center py-8 text-muted-foreground">
+                <Bell className="h-8 w-8 mb-2 opacity-50" />
+                <p className="text-sm">No notifications yet</p>
+              </div>
+            )}
           </div>
         </DialogContent>
       </Dialog>

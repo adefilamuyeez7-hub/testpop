@@ -13,6 +13,8 @@ import { ethers } from "ethers";
 import { dropUpdateSchema, validateInput } from "./validation.js";
 import { appJwtSecret } from "./config.js";
 import { getPinataAuthMode, requirePinataAuthStrategies } from "./pinataAuth.js";
+import notificationRoutes from "./api/notifications.js";
+import { initializeEventListeners } from "./services/eventListeners.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -4654,6 +4656,11 @@ app.get('*', (req, res, next) => {
   next();
 });
 
+// ============================================
+// NOTIFICATION ROUTES (Creator Interactions)
+// ============================================
+app.use('/api/notifications', notificationRoutes);
+
 // 404 handler - API routes that don't match
 app.use((_req, res) => {
   console.warn(`⚠️ 404 NOT FOUND: ${_req.method} ${_req.path} | Full URL: ${_req.originalUrl}`);
@@ -4677,6 +4684,20 @@ app.use((err, _req, res, _next) => {
 
 // Only listen locally, not on Vercel serverless
 if (NODE_ENV !== 'production' && !process.env.VERCEL) {
+  // Initialize smart contract event listeners for notifications
+  if (process.env.BASE_RPC_URL && process.env.PRODUCT_STORE_ADDRESS) {
+    try {
+      console.log('🚀 Initializing smart contract event listeners for notifications...');
+      await initializeEventListeners();
+      console.log('✅ Event listeners initialized');
+    } catch (err) {
+      console.warn('⚠️  Failed to initialize event listeners:', err.message);
+      // Don't fail server startup if events fail
+    }
+  } else {
+    console.warn('⚠️  Skipping event listeners: BASE_RPC_URL or PRODUCT_STORE_ADDRESS not configured');
+  }
+
   app.listen(port, () => {
     console.log(`PopUp API listening on http://localhost:${port}`);
   });
