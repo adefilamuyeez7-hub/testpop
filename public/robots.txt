@@ -1,14 +1,53 @@
+# POPUP Platform - Robots.txt
+# SEO-optimized crawl rules for search engines
+
+# Default rules for all bots
+User-agent: *
+Allow: /
+Disallow: /admin
+Disallow: /api
+Disallow: /_next
+Disallow: /.next
+Disallow: /private
+Disallow: /search?
+Disallow: /*?
+Allow: /?path=
+
+# Google specific
 User-agent: Googlebot
 Allow: /
+Crawl-delay: 0
 
+# Bing specific
 User-agent: Bingbot
 Allow: /
+Crawl-delay: 1
 
+# Allow social media crawlers
 User-agent: Twitterbot
 Allow: /
 
 User-agent: facebookexternalhit
 Allow: /
 
-User-agent: *
+User-agent: Pinterestbot
 Allow: /
+
+User-agent: LinkedInBot
+Allow: /
+
+# Block bad/aggressive bots
+User-agent: AhrefsBot
+User-agent: MJ12bot
+User-agent: SemrushBot
+Disallow: /
+
+# Crawl rate limits
+Crawl-delay: 0
+Request-rate: 30/1s
+
+# Sitemap locations
+Sitemap: https://testpop-one.vercel.app/sitemap.xml
+Sitemap: https://testpop-one.vercel.app/sitemap-artists.xml
+Sitemap: https://testpop-one.vercel.app/sitemap-products.xml
+Sitemap: https://testpop-one.vercel.app/sitemap-drops.xml
