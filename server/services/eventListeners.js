@@ -4,9 +4,9 @@
  * Location: server/services/eventListeners.js
  */
 
-const { ethers } = require('ethers');
-const notificationService = require('./notifications');
-const { createClient } = require('@supabase/supabase-js');
+import { ethers } from 'ethers';
+import notificationService from './notifications.js';
+import { createClient } from '@supabase/supabase-js';
 
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -16,9 +16,69 @@ const supabase = createClient(supabaseUrl, supabaseServiceKey);
 const RPC_URL = process.env.BASE_RPC_URL || 'https://mainnet.base.org';
 const provider = new ethers.JsonRpcProvider(RPC_URL);
 
+// ════════════════════════════════════════════════════════
+// CONTRACT ABIs - Imported from contract definitions
+// ════════════════════════════════════════════════════════
+
+// Artist Contract ABI - For listening to subscription events
+const ARTIST_CONTRACT_ABI = [
+  {
+    type: "event",
+    name: "NewSubscription",
+    inputs: [
+      { name: "subscriber", type: "address", indexed: true },
+      { name: "amount", type: "uint256", indexed: false },
+      { name: "artistShare", type: "uint256", indexed: false },
+      { name: "founderShare", type: "uint256", indexed: false },
+      { name: "expiryTime", type: "uint256", indexed: false },
+    ],
+  },
+  {
+    type: "event",
+    name: "SubscriptionRenewed",
+    inputs: [
+      { name: "subscriber", type: "address", indexed: true },
+      { name: "amount", type: "uint256", indexed: false },
+      { name: "newExpiryTime", type: "uint256", indexed: false },
+    ],
+  },
+  {
+    type: "event",
+    name: "SubscriptionCancelled",
+    inputs: [
+      { name: "subscriber", type: "address", indexed: true },
+    ],
+  },
+];
+
+// Product Store Contract ABI - For listening to purchase events
+const PRODUCT_STORE_ABI = [
+  {
+    type: "event",
+    name: "PurchaseCompleted",
+    inputs: [
+      { name: "orderId", type: "uint256", indexed: true },
+      { name: "buyer", type: "address", indexed: true },
+      { name: "productId", type: "uint256", indexed: true },
+      { name: "quantity", type: "uint256", indexed: false },
+      { name: "totalPrice", type: "uint256", indexed: false },
+    ],
+  },
+  {
+    type: "event",
+    name: "ProductCreated",
+    inputs: [
+      { name: "productId", type: "uint256", indexed: true },
+      { name: "creator", type: "address", indexed: true },
+      { name: "price", type: "uint256", indexed: false },
+      { name: "royaltyPercent", type: "uint256", indexed: false },
+    ],
+  },
+];
+
 /**
  * Listen to Artist Contract subscription events
- * Triggers when: creator.on('NewSubscriber')
+ * Triggers when: creator.on('NewSubscription')
  */
 async function listenToSubscriptionEvents(artistContractAddress, artistId, artistWallet, artistContractABI) {
   try {
@@ -30,11 +90,11 @@ async function listenToSubscriptionEvents(artistContractAddress, artistId, artis
       provider
     );
 
-    // Listen to 'NewSubscriber' event
-    contract.on('NewSubscriber', async (subscriber, priceEth, expiryTimestamp, txEvent) => {
+    // Listen to 'NewSubscription' event (correct event name from contract)
+    contract.on('NewSubscription', async (subscriber, amount, artistShare, founderShare, expiryTime, txEvent) => {
       try {
-        console.log(`✅ New subscriber event detected for ${artistWallet}`);
-        console.log(`   Subscriber: ${subscriber}, Price: ${priceEth} ETH`);
+        console.log(`✅ New subscription event detected for ${artistWallet}`);
+        console.log(`   Subscriber: ${subscriber}, Amount: ${ethers.formatEther(amount)} ETH`);
 
         // Format address for display
         const displayName = formatAddress(subscriber);
@@ -46,12 +106,14 @@ async function listenToSubscriptionEvents(artistContractAddress, artistId, artis
           eventType: 'subscription',
           eventId: txEvent.transactionHash, // Use tx hash to prevent duplicates
           title: '🎉 New Subscriber!',
-          message: `${displayName} subscribed for ${ethers.formatEther(priceEth)} ETH/month`,
-          data: {
-            interactorWallet: subscriber,
-            interactorName: displayName,
-            amountEth: parseFloat(ethers.formatEther(priceEth)),
-            expiryTimestamp: expiryTimestamp.toString(),
+          message: `${displayName} subscribed for ${ethers.formatEther(amount)} ETH/month`,
+          interactorWallet: subscriber,
+          interactorDisplayName: displayName,
+          amountEth: parseFloat(ethers.formatEther(amount)),
+          metadata: {
+            expiryTime: expiryTime.toString(),
+            artistShare: artistShare.toString(),
+            founderShare: founderShare.toString(),
             actionUrl: `/studio/subscribers`
           }
         });
@@ -164,9 +226,6 @@ async function initializeEventListeners() {
     if (artists && artists.length > 0) {
       console.log(`📋 Found ${artists.length} artists with deployed contracts`);
 
-      // Load artist contract ABI
-      const artistABI = require('../config').ARTIST_CONTRACT_ABI || [];
-
       // Set up subscription listener for each artist
       for (const artist of artists) {
         if (artist.contract_address) {
@@ -174,17 +233,18 @@ async function initializeEventListeners() {
             artist.contract_address,
             artist.id,
             artist.wallet,
-            artistABI
+            ARTIST_CONTRACT_ABI
           );
         }
       }
+    } else {
+      console.log('ℹ️  No artists with deployed contracts found');
     }
 
     // Set up purchase listener for ProductStore
     const productStoreAddress = process.env.PRODUCT_STORE_ADDRESS;
     if (productStoreAddress) {
-      const productStoreABI = require('../config').PRODUCT_STORE_ABI || [];
-      listenToPurchaseEvents(productStoreAddress, productStoreABI);
+      listenToPurchaseEvents(productStoreAddress, PRODUCT_STORE_ABI);
     } else {
       console.warn('⚠️  PRODUCT_STORE_ADDRESS not set in env');
     }
@@ -208,9 +268,11 @@ function stopAllListeners() {
   }
 }
 
-module.exports = {
+export {
   initializeEventListeners,
   listenToSubscriptionEvents,
   listenToPurchaseEvents,
-  stopAllListeners
+  stopAllListeners,
+  ARTIST_CONTRACT_ABI,
+  PRODUCT_STORE_ABI
 };

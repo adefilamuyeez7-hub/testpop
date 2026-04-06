@@ -4,7 +4,8 @@
  * Location: server/services/notifications.js
  */
 
-const { createClient } = require('@supabase/supabase-js');
+import { createClient } from '@supabase/supabase-js';
+import webpush from 'web-push';
 
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -162,7 +163,6 @@ async function deliverWebPush(notification) {
       return;
     }
 
-    const webpush = require('web-push');
     const pushPayload = {
       title: notification.title,
       body: notification.message,
@@ -364,7 +364,7 @@ async function registerPushSubscription(creatorWallet, subscription) {
   }
 }
 
-module.exports = {
+export {
   createNotification,
   getNotifications,
   markNotificationAsRead,

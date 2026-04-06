@@ -342,6 +342,67 @@ const authLimiter = rateLimit({
   legacyHeaders: false,
 });
 
+
+// ════════════════════════════════════════════════════════
+// CONTRACT ABIs for On-Chain Event Listeners
+// ════════════════════════════════════════════════════════
+
+// Artist Contract ABI - For listening to subscription events
+const ARTIST_CONTRACT_ABI = [
+  {
+    type: "event",
+    name: "NewSubscription",
+    inputs: [
+      { name: "subscriber", type: "address", indexed: true },
+      { name: "amount", type: "uint256", indexed: false },
+      { name: "artistShare", type: "uint256", indexed: false },
+      { name: "founderShare", type: "uint256", indexed: false },
+      { name: "expiryTime", type: "uint256", indexed: false },
+    ],
+  },
+  {
+    type: "event",
+    name: "SubscriptionRenewed",
+    inputs: [
+      { name: "subscriber", type: "address", indexed: true },
+      { name: "amount", type: "uint256", indexed: false },
+      { name: "newExpiryTime", type: "uint256", indexed: false },
+    ],
+  },
+  {
+    type: "event",
+    name: "SubscriptionCancelled",
+    inputs: [
+      { name: "subscriber", type: "address", indexed: true },
+    ],
+  },
+];
+
+// Product Store Contract ABI - For listening to purchase events
+const PRODUCT_STORE_ABI = [
+  {
+    type: "event",
+    name: "PurchaseCompleted",
+    inputs: [
+      { name: "orderId", type: "uint256", indexed: true },
+      { name: "buyer", type: "address", indexed: true },
+      { name: "productId", type: "uint256", indexed: true },
+      { name: "quantity", type: "uint256", indexed: false },
+      { name: "totalPrice", type: "uint256", indexed: false },
+    ],
+  },
+  {
+    type: "event",
+    name: "ProductCreated",
+    inputs: [
+      { name: "productId", type: "uint256", indexed: true },
+      { name: "creator", type: "address", indexed: true },
+      { name: "price", type: "uint256", indexed: false },
+      { name: "royaltyPercent", type: "uint256", indexed: false },
+    ],
+  },
+];
+
 export {
   app,
   supabase,
@@ -361,4 +422,6 @@ export {
   sanitizeDropPayload,
   resolveMediaProxyTarget,
   authLimiter,
+  ARTIST_CONTRACT_ABI,
+  PRODUCT_STORE_ABI,
 };

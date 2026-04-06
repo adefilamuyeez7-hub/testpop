@@ -3,10 +3,11 @@
  * Location: server/api/notifications.js
  */
 
-const express = require('express');
+import express from 'express';
+import * as notificationService from '../services/notifications.js';
+import { verifyAuthToken } from '../requestAuth.js';
+
 const router = express.Router();
-const notificationService = require('../services/notifications');
-const { verifyAuthToken } = require('../requestAuth');
 
 /**
  * POST /api/notifications
@@ -174,4 +175,4 @@ router.post('/push-subscription', verifyAuthToken, async (req, res) => {
   }
 });
 
-module.exports = router;
+export default router;
