@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useMemo, useState } from "react";
-import { ArrowLeft, Grid3X3, Loader2, X } from "lucide-react";
+import { ArrowLeft, Grid3X3, Loader2, MessageSquare, X } from "lucide-react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { useWallet } from "@/hooks/useContracts";
@@ -12,11 +12,14 @@ import {
   getEntitlementsByBuyer,
   getFulfillmentsByOrder,
   getOrdersByBuyer,
+  createProductFeedbackThread,
   type Entitlement,
   type Fulfillment,
   type OrderWithItems,
 } from "@/lib/db";
 import { detectAssetTypeFromUri, type AssetType } from "@/lib/assetTypes";
+import { toast } from "sonner";
+import { establishSecureSession } from "@/lib/secureAuth";
 
 const ACCESSIBLE_ORDER_STATUSES = new Set(["paid", "processing", "shipped", "delivered"]);
 
@@ -182,6 +185,14 @@ const MyCollectionPage = ({ embedded = false }: MyCollectionPageProps) => {
   const addCollectedDrop = useCollectionStore((state) => state.addCollectedDrop);
   const [purchasedCollection, setPurchasedCollection] = useState<CollectedDropItem[]>([]);
   const [purchasedCollectionLoading, setPurchasedCollectionLoading] = useState(false);
+  const [feedbackSubmitting, setFeedbackSubmitting] = useState(false);
+  const [feedbackForm, setFeedbackForm] = useState({
+    visibility: "public" as "public" | "private",
+    feedbackType: "review" as "review" | "feedback" | "question",
+    rating: 5,
+    title: "",
+    body: "",
+  });
   const isReaderItem = selectedItem?.assetType === "pdf" || selectedItem?.assetType === "epub";
 
   useEffect(() => {
@@ -201,6 +212,16 @@ const MyCollectionPage = ({ embedded = false }: MyCollectionPageProps) => {
 
     addCollectedDrop(routeCollectedItem);
   }, [addCollectedDrop, address, routeCollectedItem]);
+
+  useEffect(() => {
+    setFeedbackForm({
+      visibility: "public",
+      feedbackType: "review",
+      rating: 5,
+      title: "",
+      body: "",
+    });
+  }, [selectedItem?.id]);
 
   useEffect(() => {
     if (!isConnected || !address) {
@@ -369,6 +390,46 @@ const MyCollectionPage = ({ embedded = false }: MyCollectionPageProps) => {
     }
   };
 
+  async function handleSubmitCollectorFeedback() {
+    if (!selectedItem?.productId) {
+      toast.error("This collection item is not linked to a product yet.");
+      return;
+    }
+
+    if (!address) {
+      toast.error("Connect your wallet to send verified feedback.");
+      return;
+    }
+
+    if (!feedbackForm.body.trim()) {
+      toast.error("Write your feedback before sending it.");
+      return;
+    }
+
+    setFeedbackSubmitting(true);
+    try {
+      await establishSecureSession(address);
+      await createProductFeedbackThread({
+        productId: selectedItem.productId,
+        feedbackType: feedbackForm.visibility === "public" ? "review" : feedbackForm.feedbackType,
+        visibility: feedbackForm.visibility,
+        rating: feedbackForm.visibility === "public" ? feedbackForm.rating : null,
+        title: feedbackForm.title,
+        body: feedbackForm.body,
+      });
+      setFeedbackForm((prev) => ({ ...prev, title: "", body: "" }));
+      toast.success(
+        feedbackForm.visibility === "public"
+          ? "Your verified review is now attached to this product."
+          : "Your private feedback is now in the creator inbox."
+      );
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to send feedback");
+    } finally {
+      setFeedbackSubmitting(false);
+    }
+  }
+
   if (!isConnected) {
     return (
       <div className="px-4 py-10 text-center space-y-4">
@@ -440,6 +501,106 @@ const MyCollectionPage = ({ embedded = false }: MyCollectionPageProps) => {
                             }
                           }}
                         />
+
+                        {selectedItem.productId ? (
+                          <div className="rounded-2xl border border-gray-700 bg-white/5 p-4">
+                            <div className="flex items-center gap-2 text-white">
+                              <MessageSquare className="h-4 w-4 text-primary" />
+                              <p className="text-sm font-semibold">Verified collector feedback</p>
+                            </div>
+                            <p className="mt-2 text-xs leading-5 text-gray-400">
+                              Feedback from your collection is verified by ownership. Publish a public review or send a private note straight into the creator inbox.
+                            </p>
+
+                            <div className="mt-4 flex flex-wrap gap-2">
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant={feedbackForm.visibility === "public" ? "default" : "outline"}
+                                onClick={() =>
+                                  setFeedbackForm((prev) => ({ ...prev, visibility: "public", feedbackType: "review" }))
+                                }
+                                className="rounded-full"
+                              >
+                                Public review
+                              </Button>
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant={feedbackForm.visibility === "private" ? "default" : "outline"}
+                                onClick={() =>
+                                  setFeedbackForm((prev) => ({ ...prev, visibility: "private", feedbackType: "feedback" }))
+                                }
+                                className="rounded-full"
+                              >
+                                Private feedback
+                              </Button>
+                            </div>
+
+                            <div className="mt-4 grid gap-3 md:grid-cols-[1fr_auto]">
+                              <input
+                                value={feedbackForm.title}
+                                onChange={(event) => setFeedbackForm((prev) => ({ ...prev, title: event.target.value }))}
+                                className="h-10 rounded-xl border border-gray-700 bg-black/30 px-3 text-sm text-white placeholder:text-gray-500"
+                                placeholder={
+                                  feedbackForm.visibility === "public"
+                                    ? "Review title"
+                                    : "Optional subject for the creator"
+                                }
+                              />
+                              <select
+                                value={feedbackForm.visibility === "public" ? feedbackForm.rating : feedbackForm.feedbackType}
+                                onChange={(event) => {
+                                  if (feedbackForm.visibility === "public") {
+                                    setFeedbackForm((prev) => ({ ...prev, rating: Number(event.target.value) || 5 }));
+                                    return;
+                                  }
+                                  setFeedbackForm((prev) => ({
+                                    ...prev,
+                                    feedbackType: event.target.value as "review" | "feedback" | "question",
+                                  }));
+                                }}
+                                className="h-10 rounded-xl border border-gray-700 bg-black/30 px-3 text-sm text-white"
+                              >
+                                {feedbackForm.visibility === "public" ? (
+                                  [5, 4, 3, 2, 1].map((value) => (
+                                    <option key={value} value={value}>
+                                      {value} / 5
+                                    </option>
+                                  ))
+                                ) : (
+                                  <>
+                                    <option value="feedback">Feedback</option>
+                                    <option value="question">Question</option>
+                                    <option value="review">Collector note</option>
+                                  </>
+                                )}
+                              </select>
+                            </div>
+
+                            <textarea
+                              value={feedbackForm.body}
+                              onChange={(event) => setFeedbackForm((prev) => ({ ...prev, body: event.target.value }))}
+                              className="mt-3 min-h-[120px] w-full rounded-2xl border border-gray-700 bg-black/30 px-3 py-3 text-sm text-white placeholder:text-gray-500"
+                              placeholder={
+                                feedbackForm.visibility === "public"
+                                  ? "Tell future collectors what this item felt like to own or use."
+                                  : "Send a private note, bug report, idea, or question to the creator."
+                              }
+                            />
+                            <Button
+                              onClick={() => void handleSubmitCollectorFeedback()}
+                              disabled={feedbackSubmitting || !feedbackForm.body.trim()}
+                              className="mt-3 w-full rounded-full"
+                            >
+                              {feedbackSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : "Send verified feedback"}
+                            </Button>
+                          </div>
+                        ) : (
+                          <div className="rounded-2xl border border-dashed border-gray-700 px-4 py-3 text-xs text-gray-400">
+                            Feedback opens once this collectible is linked to a product record.
+                          </div>
+                        )}
                       </div>
                     );
                   })()}

@@ -1,19 +1,23 @@
 import { useEffect, useMemo, useState } from "react";
-import { Inbox, Loader2, MessageSquare, Plus, Send, Sparkles, Users } from "lucide-react";
+import { Inbox, Loader2, MessageSquare, Plus, Send, Sparkles, Star, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { useWallet } from "@/hooks/useContracts";
 import { toast } from "sonner";
 import {
+  curateProductFeedbackThread,
   createCreatorChannel,
   createCreatorPost,
   createOrOpenCreatorThread,
   getCreatorThreadMessages,
   getFanHubOverview,
+  getProductFeedbackThreadMessages,
   sendCreatorThreadMessage,
+  sendProductFeedbackMessage,
   type CreatorThreadMessage,
   type FanHubOverview,
+  type ProductFeedbackMessage,
 } from "@/lib/db";
 import { establishSecureSession } from "@/lib/secureAuth";
 import { resolveMediaUrl } from "@/lib/pinata";
@@ -46,6 +50,10 @@ const InboxPage = () => {
   const [threadMessages, setThreadMessages] = useState<CreatorThreadMessage[]>([]);
   const [threadLoading, setThreadLoading] = useState(false);
   const [threadDraft, setThreadDraft] = useState("");
+  const [selectedFeedbackThreadId, setSelectedFeedbackThreadId] = useState<string | null>(null);
+  const [feedbackMessages, setFeedbackMessages] = useState<ProductFeedbackMessage[]>([]);
+  const [feedbackLoading, setFeedbackLoading] = useState(false);
+  const [feedbackDraft, setFeedbackDraft] = useState("");
   const [threadForm, setThreadForm] = useState({ artistId: "", fanWallet: "", subject: "", body: "" });
   const [channelForm, setChannelForm] = useState({
     artistId: "",
@@ -60,17 +68,22 @@ const InboxPage = () => {
     body: "",
     postKind: "update" as "update" | "drop" | "release" | "reward" | "event" | "poll",
   });
-  const [busy, setBusy] = useState<null | "channel" | "post" | "thread" | "message">(null);
+  const [busy, setBusy] = useState<null | "channel" | "post" | "thread" | "message" | "feedbackMessage" | "feedbackCurate">(null);
 
   const ownedCreators = overview?.owned_creators || [];
   const relationships = overview?.relationships || [];
   const channels = overview?.channels || [];
   const posts = overview?.recent_posts || [];
   const threads = overview?.threads || [];
+  const feedbackThreads = overview?.feedback_threads || [];
 
   const selectedThread = useMemo(
     () => threads.find((thread) => thread.id === selectedThreadId) || null,
     [selectedThreadId, threads],
+  );
+  const selectedFeedbackThread = useMemo(
+    () => feedbackThreads.find((thread) => thread.id === selectedFeedbackThreadId) || null,
+    [feedbackThreads, selectedFeedbackThreadId],
   );
 
   const artistOptions = useMemo(() => {
@@ -99,6 +112,7 @@ const InboxPage = () => {
       setOverview(nextOverview);
       const defaultArtistId = nextOverview.owned_creators[0]?.id || nextOverview.relationships[0]?.artist_id || "";
       setSelectedThreadId(preferredThreadId || selectedThreadId || nextOverview.threads[0]?.id || null);
+      setSelectedFeedbackThreadId((current) => current || nextOverview.feedback_threads[0]?.id || null);
       setThreadForm((prev) => ({ ...prev, artistId: prev.artistId || defaultArtistId }));
       setChannelForm((prev) => ({ ...prev, artistId: prev.artistId || nextOverview.owned_creators[0]?.id || "" }));
       setPostForm((prev) => {
@@ -147,10 +161,50 @@ const InboxPage = () => {
   }, [isConnected, selectedThreadId]);
 
   useEffect(() => {
+    if (!selectedFeedbackThreadId || !isConnected) {
+      setFeedbackMessages([]);
+      return;
+    }
+
+    let active = true;
+    setFeedbackLoading(true);
+    getProductFeedbackThreadMessages(selectedFeedbackThreadId)
+      .then((data) => {
+        if (active) setFeedbackMessages(data.messages || []);
+      })
+      .catch((loadError) => {
+        if (active) {
+          console.error(loadError);
+          setFeedbackMessages([]);
+        }
+      })
+      .finally(() => {
+        if (active) setFeedbackLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [isConnected, selectedFeedbackThreadId]);
+
+  useEffect(() => {
     if (!postForm.artistId) return;
     if (postChannels.some((channel) => channel.id === postForm.channelId)) return;
     setPostForm((prev) => ({ ...prev, channelId: postChannels[0]?.id || "" }));
   }, [postChannels, postForm.artistId, postForm.channelId]);
+
+  useEffect(() => {
+    if (!feedbackThreads.length) {
+      setSelectedFeedbackThreadId(null);
+      return;
+    }
+
+    if (selectedFeedbackThreadId && feedbackThreads.some((thread) => thread.id === selectedFeedbackThreadId)) {
+      return;
+    }
+
+    setSelectedFeedbackThreadId(feedbackThreads[0]?.id || null);
+  }, [feedbackThreads, selectedFeedbackThreadId]);
 
   async function handleCreateChannel() {
     if (!channelForm.artistId || !channelForm.name.trim()) {
@@ -225,6 +279,45 @@ const InboxPage = () => {
     }
   }
 
+  async function handleSendFeedbackMessage() {
+    if (!selectedFeedbackThreadId || !feedbackDraft.trim()) return;
+
+    setBusy("feedbackMessage");
+    try {
+      const message = await sendProductFeedbackMessage(selectedFeedbackThreadId, feedbackDraft);
+      setFeedbackMessages((prev) => [...prev, message]);
+      setFeedbackDraft("");
+      await loadOverview();
+    } catch (submitError) {
+      toast.error(submitError instanceof Error ? submitError.message : "Failed to send feedback reply");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function handleCurateFeedback(updates: {
+    featured?: boolean;
+    creatorCurated?: boolean;
+    status?: "open" | "closed" | "archived";
+    visibility?: "public" | "private";
+  }) {
+    if (!selectedFeedbackThreadId) return;
+
+    setBusy("feedbackCurate");
+    try {
+      await curateProductFeedbackThread({
+        threadId: selectedFeedbackThreadId,
+        ...updates,
+      });
+      await loadOverview(selectedThreadId);
+      toast.success("Feedback thread updated.");
+    } catch (submitError) {
+      toast.error(submitError instanceof Error ? submitError.message : "Failed to update feedback thread");
+    } finally {
+      setBusy(null);
+    }
+  }
+
   if (!isConnected) {
     return (
       <div className="mx-auto max-w-3xl px-4 py-12 text-center">
@@ -257,7 +350,7 @@ const InboxPage = () => {
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
               <div className="rounded-[1.4rem] bg-[#eff6ff] px-4 py-3"><p className="text-[11px] uppercase tracking-[0.18em] text-primary/70">Relationships</p><p className="mt-2 text-2xl font-black text-foreground">{relationships.length}</p></div>
               <div className="rounded-[1.4rem] bg-[#eff6ff] px-4 py-3"><p className="text-[11px] uppercase tracking-[0.18em] text-primary/70">Channels</p><p className="mt-2 text-2xl font-black text-foreground">{channels.length}</p></div>
-              <div className="rounded-[1.4rem] bg-[#eff6ff] px-4 py-3"><p className="text-[11px] uppercase tracking-[0.18em] text-primary/70">Posts</p><p className="mt-2 text-2xl font-black text-foreground">{overview?.unread_counts.posts || 0}</p></div>
+              <div className="rounded-[1.4rem] bg-[#eff6ff] px-4 py-3"><p className="text-[11px] uppercase tracking-[0.18em] text-primary/70">Feedback</p><p className="mt-2 text-2xl font-black text-foreground">{overview?.unread_counts.feedback || 0}</p></div>
               <div className="rounded-[1.4rem] bg-[#eff6ff] px-4 py-3"><p className="text-[11px] uppercase tracking-[0.18em] text-primary/70">Threads</p><p className="mt-2 text-2xl font-black text-foreground">{threads.length}</p></div>
             </div>
           </div>
@@ -380,6 +473,120 @@ const InboxPage = () => {
             </section>
 
             <section className="space-y-4">
+              <div className="rounded-[1.8rem] border border-white/80 bg-white/92 p-4 shadow-[0_30px_80px_rgba(37,99,235,0.08)]">
+                <div className="flex items-center gap-2"><Star className="h-4 w-4 text-primary" /><p className="text-sm font-semibold text-foreground">Feedback Inbox</p></div>
+                <div className="mt-4 grid gap-4 lg:grid-cols-[220px_minmax(0,1fr)]">
+                  <div className="space-y-2">
+                    {feedbackThreads.length === 0 ? (
+                      <p className="rounded-[1.2rem] bg-[#f7fbff] px-4 py-5 text-sm text-muted-foreground">
+                        Verified collector feedback will appear here once fans respond from their collection.
+                      </p>
+                    ) : feedbackThreads.map((thread) => (
+                      <button
+                        key={thread.id}
+                        type="button"
+                        onClick={() => setSelectedFeedbackThreadId(thread.id)}
+                        className={`w-full rounded-[1.2rem] px-3 py-3 text-left transition-colors ${selectedFeedbackThreadId === thread.id ? "bg-[#dbeafe]" : "bg-[#f7fbff]"}`}
+                      >
+                        <p className="truncate text-sm font-semibold text-foreground">
+                          {thread.product?.name || thread.title || "Product feedback"}
+                        </p>
+                        <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">
+                          {thread.latest_message?.body || thread.title || "Open feedback thread"}
+                        </p>
+                        <div className="mt-2 flex flex-wrap gap-1">
+                          {thread.visibility === "public" ? <Badge variant="outline">Public</Badge> : <Badge variant="outline">Private</Badge>}
+                          {thread.feedback_type === "review" ? <Badge className="bg-[#ecfeff] text-[#155e75]">Review</Badge> : null}
+                          {thread.subscriber_priority ? <Badge className="bg-[#dcfce7] text-[#166534]">Subscriber</Badge> : null}
+                          {thread.featured ? <Badge className="bg-[#fef3c7] text-[#92400e]">Featured</Badge> : null}
+                        </div>
+                        <p className="mt-2 text-[11px] uppercase tracking-[0.18em] text-primary/70">{formatRelativeDate(thread.last_message_at)}</p>
+                      </button>
+                    ))}
+                  </div>
+
+                  <div className="rounded-[1.2rem] bg-[#f7fbff] p-3">
+                    {selectedFeedbackThread ? (
+                      <>
+                        <div className="border-b border-border/60 pb-3">
+                          <div className="flex flex-wrap items-start justify-between gap-3">
+                            <div>
+                              <p className="text-sm font-semibold text-foreground">
+                                {selectedFeedbackThread.product?.name || selectedFeedbackThread.title || "Product feedback"}
+                              </p>
+                              <p className="mt-1 text-xs text-muted-foreground">
+                                {selectedFeedbackThread.feedback_type} · {selectedFeedbackThread.visibility} · {selectedFeedbackThread.rating ? `${selectedFeedbackThread.rating}/5` : "no rating"}
+                              </p>
+                            </div>
+                            <div className="flex flex-wrap gap-2">
+                              {selectedFeedbackThread.subscriber_priority ? <Badge className="bg-[#dcfce7] text-[#166534]">Subscriber priority</Badge> : null}
+                              {selectedFeedbackThread.creator_curated ? <Badge variant="outline">Curated</Badge> : null}
+                            </div>
+                          </div>
+
+                          {ownedCreators.some((artist) => artist.id === selectedFeedbackThread.artist_id) ? (
+                            <div className="mt-3 flex flex-wrap gap-2">
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                onClick={() => void handleCurateFeedback({ featured: !selectedFeedbackThread.featured, creatorCurated: true })}
+                                disabled={busy === "feedbackCurate"}
+                                className="rounded-full"
+                              >
+                                {selectedFeedbackThread.featured ? "Unfeature" : "Feature"}
+                              </Button>
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                onClick={() => void handleCurateFeedback({ visibility: selectedFeedbackThread.visibility === "public" ? "private" : "public", creatorCurated: true })}
+                                disabled={busy === "feedbackCurate"}
+                                className="rounded-full"
+                              >
+                                Make {selectedFeedbackThread.visibility === "public" ? "private" : "public"}
+                              </Button>
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                onClick={() => void handleCurateFeedback({ status: selectedFeedbackThread.status === "archived" ? "open" : "archived" })}
+                                disabled={busy === "feedbackCurate"}
+                                className="rounded-full"
+                              >
+                                {selectedFeedbackThread.status === "archived" ? "Reopen" : "Archive"}
+                              </Button>
+                            </div>
+                          ) : null}
+                        </div>
+
+                        <div className="mt-3 max-h-[300px] space-y-3 overflow-y-auto pr-1">
+                          {feedbackLoading ? (
+                            <div className="flex items-center justify-center py-10"><Loader2 className="h-5 w-5 animate-spin text-primary" /></div>
+                          ) : feedbackMessages.length === 0 ? (
+                            <p className="py-10 text-center text-sm text-muted-foreground">No messages yet.</p>
+                          ) : feedbackMessages.map((message) => {
+                            const isOwn = message.sender_wallet.toLowerCase() === (address || "").toLowerCase();
+                            return (
+                              <div key={message.id} className={`rounded-2xl px-4 py-3 text-sm ${isOwn ? "ml-10 bg-[#1d4ed8] text-white" : "mr-10 bg-white text-foreground"}`}>
+                                <p className="whitespace-pre-wrap leading-6">{message.body}</p>
+                                <p className={`mt-2 text-[11px] ${isOwn ? "text-white/75" : "text-muted-foreground"}`}>{message.sender_role} · {formatRelativeDate(message.created_at)}</p>
+                              </div>
+                            );
+                          })}
+                        </div>
+                        <div className="mt-3 flex items-end gap-2">
+                          <textarea value={feedbackDraft} onChange={(event) => setFeedbackDraft(event.target.value)} className="min-h-[84px] flex-1 rounded-2xl border border-border bg-white px-3 py-3 text-sm" placeholder="Reply to the collector, ask a follow-up, or thank them for the feedback..." />
+                          <Button onClick={() => void handleSendFeedbackMessage()} disabled={busy === "feedbackMessage" || !feedbackDraft.trim()} className="h-11 rounded-full gradient-primary text-primary-foreground">{busy === "feedbackMessage" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}</Button>
+                        </div>
+                      </>
+                    ) : (
+                      <div className="flex min-h-[280px] items-center justify-center text-center"><div><Star className="mx-auto h-8 w-8 text-primary/70" /><p className="mt-3 text-sm font-semibold text-foreground">Choose a feedback thread</p><p className="mt-1 text-xs text-muted-foreground">Verified product feedback from collectors and subscribers lives here.</p></div></div>
+                    )}
+                  </div>
+                </div>
+              </div>
+
               <div className="rounded-[1.8rem] border border-white/80 bg-white/92 p-4 shadow-[0_30px_80px_rgba(37,99,235,0.08)]">
                 <div className="flex items-center gap-2"><MessageSquare className="h-4 w-4 text-primary" /><p className="text-sm font-semibold text-foreground">Threads</p></div>
                 <div className="mt-4 rounded-[1.2rem] bg-[#f7fbff] p-3">

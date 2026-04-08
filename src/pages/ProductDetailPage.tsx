@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { AlertTriangle, ArrowLeft, ExternalLink, Loader2, ShoppingCart } from "lucide-react";
+import { AlertTriangle, ArrowLeft, ExternalLink, Loader2, MessageSquare, ShoppingCart } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useCartStore } from "@/stores/cartStore";
 import { useProductStore } from "@/stores/productStore";
@@ -12,12 +14,16 @@ import { toast } from "sonner";
 import { useSupabaseProductById } from "@/hooks/useSupabase";
 import {
   getCreativeRelease,
+  getProductFeedbackOverview,
   getProductAssets,
+  createProductFeedbackThread,
+  type ProductFeedbackOverview,
   type CreativeRelease,
   type ProductAsset,
 } from "@/lib/db";
 import { ipfsToHttp, resolveMediaUrl } from "@/lib/pinata";
 import { resolveContractProductId, resolveProductMetadataUri } from "@/lib/productMetadata";
+import { establishSecureSession } from "@/lib/secureAuth";
 
 function resolveAssetUrl(asset?: ProductAsset | null) {
   if (!asset) return "";
@@ -48,6 +54,16 @@ export function ProductDetailPage() {
   const [productAssets, setProductAssets] = useState<ProductAsset[]>([]);
   const [detailsLoading, setDetailsLoading] = useState(false);
   const [selectedImage, setSelectedImage] = useState<string>("");
+  const [feedbackOverview, setFeedbackOverview] = useState<ProductFeedbackOverview | null>(null);
+  const [feedbackLoading, setFeedbackLoading] = useState(false);
+  const [feedbackSubmitting, setFeedbackSubmitting] = useState(false);
+  const [feedbackForm, setFeedbackForm] = useState({
+    visibility: "public" as "public" | "private",
+    feedbackType: "review" as "review" | "feedback" | "question",
+    rating: 5,
+    title: "",
+    body: "",
+  });
 
   const product = useMemo(() => {
     if (selectedProduct?.id === id) {
@@ -114,6 +130,39 @@ export function ProductDetailPage() {
       isMounted = false;
     };
   }, [supabaseProduct?.id, supabaseProduct?.creative_release_id]);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const loadFeedback = async () => {
+      if (!id) return;
+      setFeedbackLoading(true);
+
+      try {
+        if (address) {
+          await establishSecureSession(address).catch(() => undefined);
+        }
+        const nextFeedback = await getProductFeedbackOverview(id);
+        if (isMounted) {
+          setFeedbackOverview(nextFeedback);
+        }
+      } catch (error) {
+        if (isMounted) {
+          console.error(error);
+          setFeedbackOverview(null);
+        }
+      } finally {
+        if (isMounted) {
+          setFeedbackLoading(false);
+        }
+      }
+    };
+
+    void loadFeedback();
+    return () => {
+      isMounted = false;
+    };
+  }, [address, id]);
 
   const galleryImages = useMemo(() => {
     const urls = new Set<string>();
@@ -207,6 +256,42 @@ export function ProductDetailPage() {
       product.image || "",
     );
     toast.success("Added to cart!");
+  };
+
+  const handleSubmitFeedback = async () => {
+    if (!id) return;
+    if (!address) {
+      toast.error("Connect your wallet to leave verified feedback.");
+      return;
+    }
+    if (!feedbackForm.body.trim()) {
+      toast.error("Write your feedback before sending it.");
+      return;
+    }
+
+    setFeedbackSubmitting(true);
+    try {
+      await establishSecureSession(address);
+      await createProductFeedbackThread({
+        productId: id,
+        feedbackType: feedbackForm.visibility === "public" ? "review" : feedbackForm.feedbackType,
+        visibility: feedbackForm.visibility,
+        rating: feedbackForm.visibility === "public" ? feedbackForm.rating : null,
+        title: feedbackForm.title,
+        body: feedbackForm.body,
+      });
+      setFeedbackForm((prev) => ({ ...prev, title: "", body: "" }));
+      setFeedbackOverview(await getProductFeedbackOverview(id));
+      toast.success(
+        feedbackForm.visibility === "public"
+          ? "Your verified collector review is live."
+          : "Your private feedback is in the creator inbox."
+      );
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to send feedback");
+    } finally {
+      setFeedbackSubmitting(false);
+    }
   };
 
   return (
@@ -427,6 +512,153 @@ export function ProductDetailPage() {
             </Card>
           </TabsContent>
         </Tabs>
+      </div>
+
+      <div className="mt-12 grid gap-6 lg:grid-cols-[1.1fr_0.9fr]">
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-xl">
+              <MessageSquare className="h-5 w-5 text-primary" />
+              Collector Reviews & Product Threads
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {feedbackLoading ? (
+              <div className="flex items-center justify-center py-8">
+                <Loader2 className="h-5 w-5 animate-spin text-primary" />
+              </div>
+            ) : feedbackOverview?.public_threads?.length ? (
+              feedbackOverview.public_threads.map((thread) => (
+                <article key={thread.id} className="rounded-2xl border bg-secondary/20 p-4">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-semibold text-foreground">
+                        {thread.title || (thread.feedback_type === "review" ? "Verified collector review" : "Collector thread")}
+                      </p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        {thread.rating ? `${thread.rating}/5` : "Conversation"} · {thread.feedback_type} · {thread.subscriber_priority ? "subscriber priority" : "collector"}
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {thread.featured ? <Badge className="bg-[#dbeafe] text-[#1d4ed8]">Featured</Badge> : null}
+                      {thread.creator_curated ? <Badge variant="outline">Curated</Badge> : null}
+                    </div>
+                  </div>
+                  <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-foreground/85">
+                    {thread.latest_message?.body || "Open feedback thread"}
+                  </p>
+                </article>
+              ))
+            ) : (
+              <div className="rounded-2xl border border-dashed p-6 text-sm text-muted-foreground">
+                No public collector reviews yet. The first verified review can come from your collection.
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-xl">Verified Feedback</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {feedbackOverview?.can_leave_feedback ? (
+              <>
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    type="button"
+                    variant={feedbackForm.visibility === "public" ? "default" : "outline"}
+                    onClick={() =>
+                      setFeedbackForm((prev) => ({ ...prev, visibility: "public", feedbackType: "review" }))
+                    }
+                    className="rounded-full"
+                  >
+                    Public review
+                  </Button>
+                  <Button
+                    type="button"
+                    variant={feedbackForm.visibility === "private" ? "default" : "outline"}
+                    onClick={() =>
+                      setFeedbackForm((prev) => ({ ...prev, visibility: "private", feedbackType: "feedback" }))
+                    }
+                    className="rounded-full"
+                  >
+                    Private feedback
+                  </Button>
+                  {feedbackOverview.viewer_relationship.active_subscription ? (
+                    <Badge className="bg-[#ecfeff] text-[#0f766e]">Subscriber priority</Badge>
+                  ) : null}
+                </div>
+
+                {feedbackForm.visibility === "private" ? (
+                  <select
+                    value={feedbackForm.feedbackType}
+                    onChange={(event) =>
+                      setFeedbackForm((prev) => ({
+                        ...prev,
+                        feedbackType: event.target.value as "feedback" | "question" | "review",
+                      }))
+                    }
+                    className="h-10 w-full rounded-xl border border-border bg-background px-3 text-sm"
+                  >
+                    <option value="feedback">Feedback</option>
+                    <option value="question">Question</option>
+                    <option value="review">Collector note</option>
+                  </select>
+                ) : (
+                  <div className="flex items-center gap-2 text-sm">
+                    <span className="text-muted-foreground">Rating</span>
+                    <select
+                      value={feedbackForm.rating}
+                      onChange={(event) =>
+                        setFeedbackForm((prev) => ({ ...prev, rating: Number(event.target.value) || 5 }))
+                      }
+                      className="h-10 rounded-xl border border-border bg-background px-3 text-sm"
+                    >
+                      {[5, 4, 3, 2, 1].map((value) => (
+                        <option key={value} value={value}>
+                          {value} / 5
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+
+                <Input
+                  value={feedbackForm.title}
+                  onChange={(event) => setFeedbackForm((prev) => ({ ...prev, title: event.target.value }))}
+                  placeholder={
+                    feedbackForm.visibility === "public"
+                      ? "Review title"
+                      : "Optional subject for the creator"
+                  }
+                  className="rounded-xl"
+                />
+                <textarea
+                  value={feedbackForm.body}
+                  onChange={(event) => setFeedbackForm((prev) => ({ ...prev, body: event.target.value }))}
+                  className="min-h-[140px] w-full rounded-2xl border border-border bg-background px-3 py-3 text-sm"
+                  placeholder={
+                    feedbackForm.visibility === "public"
+                      ? "Tell future collectors what this product felt like to own or use."
+                      : "Send the creator a verified note, request, bug report, or idea from your collection."
+                  }
+                />
+                <Button
+                  onClick={() => void handleSubmitFeedback()}
+                  disabled={feedbackSubmitting || !feedbackForm.body.trim()}
+                  className="w-full rounded-full"
+                >
+                  {feedbackSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : "Send verified feedback"}
+                </Button>
+              </>
+            ) : (
+              <div className="rounded-2xl border border-dashed p-6 text-sm text-muted-foreground">
+                Verified feedback opens after this product reaches your collection. Collectors can publish reviews or send the creator private notes from ownership.
+              </div>
+            )}
+          </CardContent>
+        </Card>
       </div>
     </div>
   );

@@ -97,6 +97,21 @@ async function getArtistsByWallets(wallets) {
   return data || [];
 }
 
+async function getProductsByIds(productIds) {
+  if (!productIds.length) return [];
+
+  const { data, error } = await supabase
+    .from("products")
+    .select("id, artist_id, creator_wallet, name, image_url, image_ipfs_uri, preview_uri, status")
+    .in("id", productIds);
+
+  if (error) {
+    throw new Error(error.message || "Failed to load products");
+  }
+
+  return data || [];
+}
+
 async function getOwnedCreators(wallet) {
   const normalizedWallet = normalizeWallet(wallet);
   const { data, error } = await supabase
@@ -527,6 +542,111 @@ async function getThreadsForWallet(wallet, artistsById) {
   }));
 }
 
+async function getRelationshipSnapshot(wallet, artistId) {
+  const normalizedWallet = normalizeWallet(wallet);
+  if (!normalizedWallet || !artistId) return null;
+
+  const { data, error } = await supabase
+    .from("creator_fans")
+    .select("*")
+    .eq("artist_id", artistId)
+    .eq("fan_wallet", normalizedWallet)
+    .maybeSingle();
+
+  if (!error && data) {
+    return data;
+  }
+
+  const records = await buildRelationshipMap(normalizedWallet);
+  return records.find((entry) => entry.artist_id === artistId) || null;
+}
+
+async function getCollectedOrderItemForWalletProduct(wallet, productId) {
+  const normalizedWallet = normalizeWallet(wallet);
+  if (!normalizedWallet || !productId) return null;
+
+  const { data, error } = await supabase
+    .from("order_items")
+    .select(`
+      id,
+      order_id,
+      product_id,
+      quantity,
+      line_total_eth,
+      created_at,
+      orders!inner(
+        id,
+        buyer_wallet,
+        status,
+        paid_at,
+        created_at
+      )
+    `)
+    .eq("product_id", productId)
+    .eq("orders.buyer_wallet", normalizedWallet)
+    .in("orders.status", Array.from(ACTIVE_ORDER_STATUSES))
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(error.message || "Failed to verify product ownership");
+  }
+
+  return data || null;
+}
+
+async function getProductFeedbackThreadsForWallet(wallet, artistsById) {
+  const normalizedWallet = normalizeWallet(wallet);
+  if (!normalizedWallet) return [];
+
+  const { data: threads, error } = await supabase
+    .from("product_feedback_threads")
+    .select("*")
+    .or(`creator_wallet.eq.${normalizedWallet},buyer_wallet.eq.${normalizedWallet}`)
+    .order("subscriber_priority", { ascending: false })
+    .order("featured", { ascending: false })
+    .order("last_message_at", { ascending: false });
+
+  if (error) {
+    throw new Error(error.message || "Failed to load feedback threads");
+  }
+
+  const threadIds = (threads || []).map((thread) => thread.id);
+  const productIds = Array.from(new Set((threads || []).map((thread) => thread.product_id).filter(Boolean)));
+
+  const [{ data: messages, error: messagesError }, products] = await Promise.all([
+    threadIds.length
+      ? supabase
+          .from("product_feedback_messages")
+          .select("id, thread_id, sender_wallet, sender_role, body, created_at")
+          .in("thread_id", threadIds)
+          .order("created_at", { ascending: false })
+      : Promise.resolve({ data: [], error: null }),
+    getProductsByIds(productIds),
+  ]);
+
+  if (messagesError) {
+    throw new Error(messagesError.message || "Failed to load feedback messages");
+  }
+
+  const latestMessageByThreadId = new Map();
+  for (const message of messages || []) {
+    if (!latestMessageByThreadId.has(message.thread_id)) {
+      latestMessageByThreadId.set(message.thread_id, message);
+    }
+  }
+
+  const productsById = new Map(products.map((product) => [product.id, product]));
+
+  return (threads || []).map((thread) => ({
+    ...thread,
+    artist: artistsById.get(thread.artist_id) || null,
+    product: productsById.get(thread.product_id) || null,
+    latest_message: latestMessageByThreadId.get(thread.id) || null,
+  }));
+}
+
 export async function getFanHubOverview(wallet) {
   const ownedCreators = await getOwnedCreators(wallet);
   await ensureDefaultChannelsForArtists(ownedCreators);
@@ -541,6 +661,7 @@ export async function getFanHubOverview(wallet) {
   const channels = await getChannelsForOverview(wallet, ownedCreators, relationships);
   const recentPosts = await getRecentPosts(channels, artistsById);
   const threads = await getThreadsForWallet(wallet, artistsById);
+  const feedbackThreads = await getProductFeedbackThreadsForWallet(wallet, artistsById);
 
   return {
     wallet: normalizeWallet(wallet),
@@ -549,9 +670,11 @@ export async function getFanHubOverview(wallet) {
     channels,
     recent_posts: recentPosts,
     threads,
+    feedback_threads: feedbackThreads,
     unread_counts: {
       posts: recentPosts.length,
       threads: threads.filter((thread) => thread.status === "open").length,
+      feedback: feedbackThreads.filter((thread) => thread.status === "open").length,
     },
   };
 }
@@ -650,6 +773,28 @@ async function getArtistById(artistId) {
   }
 
   return data;
+}
+
+async function getProductById(productId) {
+  const { data, error } = await supabase
+    .from("products")
+    .select("id, artist_id, creator_wallet, name, image_url, image_ipfs_uri, preview_uri, status")
+    .eq("id", productId)
+    .single();
+
+  if (error) {
+    throw new Error(error.message || "Product not found");
+  }
+
+  if (data.artist_id) {
+    return data;
+  }
+
+  const artists = await getArtistsByWallets([data.creator_wallet]);
+  return {
+    ...data,
+    artist_id: artists[0]?.id || null,
+  };
 }
 
 async function getThreadById(threadId) {
@@ -794,6 +939,375 @@ export async function createThreadMessage({ wallet, threadId, body }) {
 
   if (threadUpdateError) {
     throw new Error(threadUpdateError.message || "Failed to update thread metadata");
+  }
+
+  return data;
+}
+
+export async function getProductFeedback(productId, wallet = "") {
+  const product = await getProductById(productId);
+  if (!product?.artist_id) {
+    throw new Error("This product is not linked to a creator yet.");
+  }
+
+  const normalizedWallet = normalizeWallet(wallet);
+  const relationship = normalizedWallet
+    ? await getRelationshipSnapshot(normalizedWallet, product.artist_id)
+    : null;
+  const collectedOrderItem = normalizedWallet
+    ? await getCollectedOrderItemForWalletProduct(normalizedWallet, productId)
+    : null;
+
+  const { data: publicThreads, error } = await supabase
+    .from("product_feedback_threads")
+    .select("*")
+    .eq("product_id", productId)
+    .eq("visibility", "public")
+    .neq("status", "archived")
+    .order("featured", { ascending: false })
+    .order("last_message_at", { ascending: false })
+    .limit(24);
+
+  if (error) {
+    throw new Error(error.message || "Failed to load product feedback");
+  }
+
+  const viewerThreadsResult = normalizedWallet
+    ? await supabase
+        .from("product_feedback_threads")
+        .select("*")
+        .eq("product_id", productId)
+        .eq("buyer_wallet", normalizedWallet)
+        .order("last_message_at", { ascending: false })
+        .limit(8)
+    : { data: [], error: null };
+
+  if (viewerThreadsResult.error) {
+    throw new Error(viewerThreadsResult.error.message || "Failed to load viewer feedback");
+  }
+
+  const allThreads = [...(publicThreads || []), ...(viewerThreadsResult.data || [])];
+  const uniqueThreads = new Map(allThreads.map((thread) => [thread.id, thread]));
+  const threadIds = Array.from(uniqueThreads.keys());
+  const { data: messages, error: messagesError } = threadIds.length
+    ? await supabase
+        .from("product_feedback_messages")
+        .select("id, thread_id, sender_wallet, sender_role, body, created_at")
+        .in("thread_id", threadIds)
+        .order("created_at", { ascending: false })
+    : { data: [], error: null };
+
+  if (messagesError) {
+    throw new Error(messagesError.message || "Failed to load feedback messages");
+  }
+
+  const latestMessageByThreadId = new Map();
+  for (const message of messages || []) {
+    if (!latestMessageByThreadId.has(message.thread_id)) {
+      latestMessageByThreadId.set(message.thread_id, message);
+    }
+  }
+
+  const publicThreadList = (publicThreads || []).map((thread) => ({
+    ...thread,
+    product,
+    latest_message: latestMessageByThreadId.get(thread.id) || null,
+  }));
+  const viewerThreadList = (viewerThreadsResult.data || []).map((thread) => ({
+    ...thread,
+    product,
+    latest_message: latestMessageByThreadId.get(thread.id) || null,
+  }));
+
+  return {
+    product,
+    can_leave_feedback: Boolean(collectedOrderItem),
+    viewer_relationship: relationship
+      ? {
+          is_subscriber: Boolean(relationship.is_subscriber),
+          active_subscription: Boolean(relationship.active_subscription),
+          is_collector: Boolean(relationship.is_collector),
+        }
+      : {
+          is_subscriber: false,
+          active_subscription: false,
+          is_collector: Boolean(collectedOrderItem),
+        },
+    public_threads: publicThreadList,
+    viewer_threads: viewerThreadList,
+  };
+}
+
+export async function createProductFeedbackThread({
+  wallet,
+  productId,
+  feedbackType,
+  visibility,
+  rating,
+  title,
+  body,
+}) {
+  const normalizedWallet = normalizeWallet(wallet);
+  const product = await getProductById(productId);
+
+  if (!product?.artist_id) {
+    throw new Error("This product is not linked to a creator yet.");
+  }
+
+  const collectedOrderItem = await getCollectedOrderItemForWalletProduct(normalizedWallet, productId);
+  if (!collectedOrderItem) {
+    throw new Error("Only collectors can leave feedback on products in their collection.");
+  }
+
+  const relationship = await getRelationshipSnapshot(normalizedWallet, product.artist_id);
+  const normalizedVisibility = visibility === "public" ? "public" : "private";
+  const normalizedFeedbackType = ["review", "feedback", "question"].includes(String(feedbackType))
+    ? feedbackType
+    : normalizedVisibility === "public"
+      ? "review"
+      : "feedback";
+  const ratingValue = Number(rating);
+  const safeRating = Number.isFinite(ratingValue) && ratingValue >= 1 && ratingValue <= 5
+    ? Math.round(ratingValue)
+    : null;
+  const subject = String(title || "").trim() || null;
+  const openingMessage = String(body || "").trim();
+
+  if (!openingMessage) {
+    throw new Error("Write the feedback you want the creator to receive.");
+  }
+
+  const existingResult = await supabase
+    .from("product_feedback_threads")
+    .select("*")
+    .eq("product_id", productId)
+    .eq("buyer_wallet", normalizedWallet)
+    .eq("feedback_type", normalizedFeedbackType)
+    .eq("visibility", normalizedVisibility)
+    .eq("status", "open")
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (existingResult.error) {
+    throw new Error(existingResult.error.message || "Failed to load existing feedback thread");
+  }
+
+  let thread = existingResult.data || null;
+
+  if (!thread) {
+    const insertResult = await supabase
+      .from("product_feedback_threads")
+      .insert({
+        product_id: productId,
+        artist_id: product.artist_id,
+        order_id: collectedOrderItem.order_id,
+        order_item_id: collectedOrderItem.id,
+        buyer_wallet: normalizedWallet,
+        creator_wallet: normalizeWallet(product.creator_wallet),
+        feedback_type: normalizedFeedbackType,
+        visibility: normalizedVisibility,
+        rating: safeRating,
+        title: subject,
+        subscriber_priority: Boolean(relationship?.active_subscription),
+        last_message_at: new Date().toISOString(),
+        metadata: {
+          product_name: product.name,
+          product_image_url: product.preview_uri || product.image_url || product.image_ipfs_uri || null,
+          quantity: Number(collectedOrderItem.quantity || 1),
+          line_total_eth: toNumber(collectedOrderItem.line_total_eth),
+          source: "my_collection",
+          subscriber_perks: relationship?.active_subscription
+            ? ["priority-feedback", "subscriber-badge", "creator-priority-inbox"]
+            : [],
+        },
+      })
+      .select("*")
+      .single();
+
+    if (insertResult.error) {
+      throw new Error(insertResult.error.message || "Failed to create feedback thread");
+    }
+
+    thread = insertResult.data;
+  } else {
+    const updateResult = await supabase
+      .from("product_feedback_threads")
+      .update({
+        rating: safeRating ?? thread.rating,
+        title: subject || thread.title,
+        subscriber_priority: Boolean(relationship?.active_subscription || thread.subscriber_priority),
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", thread.id)
+      .select("*")
+      .single();
+
+    if (updateResult.error) {
+      throw new Error(updateResult.error.message || "Failed to update feedback thread");
+    }
+
+    thread = updateResult.data;
+  }
+
+  await createProductFeedbackMessage({
+    wallet: normalizedWallet,
+    threadId: thread.id,
+    body: openingMessage,
+  });
+
+  return thread;
+}
+
+async function getProductFeedbackThreadById(threadId) {
+  const { data, error } = await supabase
+    .from("product_feedback_threads")
+    .select("*")
+    .eq("id", threadId)
+    .single();
+
+  if (error) {
+    throw new Error(error.message || "Feedback thread not found");
+  }
+
+  return data;
+}
+
+function canAccessProductFeedbackThread(wallet, thread) {
+  const normalizedWallet = normalizeWallet(wallet);
+  if (!normalizedWallet) {
+    return thread.visibility === "public" && thread.status !== "archived";
+  }
+
+  return (
+    normalizeWallet(thread.creator_wallet) === normalizedWallet ||
+    normalizeWallet(thread.buyer_wallet) === normalizedWallet
+  );
+}
+
+export async function getProductFeedbackThreadMessages({ wallet, threadId }) {
+  const thread = await getProductFeedbackThreadById(threadId);
+  if (!canAccessProductFeedbackThread(wallet, thread)) {
+    throw new Error("You do not have access to this feedback thread.");
+  }
+
+  const { data, error } = await supabase
+    .from("product_feedback_messages")
+    .select("*")
+    .eq("thread_id", threadId)
+    .order("created_at", { ascending: true });
+
+  if (error) {
+    throw new Error(error.message || "Failed to load feedback messages");
+  }
+
+  const product = await getProductById(thread.product_id);
+
+  return {
+    thread: {
+      ...thread,
+      product,
+    },
+    messages: data || [],
+  };
+}
+
+export async function createProductFeedbackMessage({ wallet, threadId, body }) {
+  const normalizedWallet = normalizeWallet(wallet);
+  const thread = await getProductFeedbackThreadById(threadId);
+  if (!canAccessProductFeedbackThread(normalizedWallet, thread)) {
+    throw new Error("You do not have access to this feedback thread.");
+  }
+
+  const messageText = String(body || "").trim();
+  if (!messageText) {
+    throw new Error("Feedback message is required.");
+  }
+
+  const senderRole =
+    normalizeWallet(thread.creator_wallet) === normalizedWallet
+      ? "creator"
+      : normalizeWallet(thread.buyer_wallet) === normalizedWallet
+        ? "collector"
+        : "admin";
+
+  const { data, error } = await supabase
+    .from("product_feedback_messages")
+    .insert({
+      thread_id: threadId,
+      sender_wallet: normalizedWallet,
+      sender_role: senderRole,
+      body: messageText,
+    })
+    .select("*")
+    .single();
+
+  if (error) {
+    throw new Error(error.message || "Failed to send feedback message");
+  }
+
+  const { error: threadUpdateError } = await supabase
+    .from("product_feedback_threads")
+    .update({
+      last_message_at: data.created_at || new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      status: "open",
+    })
+    .eq("id", threadId);
+
+  if (threadUpdateError) {
+    throw new Error(threadUpdateError.message || "Failed to update feedback thread");
+  }
+
+  return data;
+}
+
+export async function curateProductFeedbackThread({
+  wallet,
+  threadId,
+  featured,
+  creatorCurated,
+  status,
+  visibility,
+  title,
+}) {
+  const normalizedWallet = normalizeWallet(wallet);
+  const thread = await getProductFeedbackThreadById(threadId);
+  const artist = await getArtistById(thread.artist_id);
+
+  if (normalizeWallet(artist.wallet) !== normalizedWallet) {
+    throw new Error("Only the creator can curate this feedback thread.");
+  }
+
+  const updates = {
+    updated_at: new Date().toISOString(),
+  };
+
+  if (typeof featured === "boolean") {
+    updates.featured = featured;
+  }
+  if (typeof creatorCurated === "boolean") {
+    updates.creator_curated = creatorCurated;
+  }
+  if (["open", "closed", "archived"].includes(String(status))) {
+    updates.status = status;
+  }
+  if (["public", "private"].includes(String(visibility))) {
+    updates.visibility = visibility;
+  }
+  if (typeof title === "string") {
+    updates.title = title.trim() || null;
+  }
+
+  const { data, error } = await supabase
+    .from("product_feedback_threads")
+    .update(updates)
+    .eq("id", threadId)
+    .select("*")
+    .single();
+
+  if (error) {
+    throw new Error(error.message || "Failed to curate feedback thread");
   }
 
   return data;
