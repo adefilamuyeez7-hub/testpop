@@ -1,6 +1,7 @@
 export interface Favorites {
   favoriteArtists: string[];
   favoritePOAPs: number[];
+  favoriteProducts: string[];
 }
 
 const favoritesByWallet = new Map<string, Favorites>();
@@ -10,7 +11,7 @@ function normalizeWallet(userAddress?: string) {
 }
 
 function getDefaultFavorites(): Favorites {
-  return { favoriteArtists: [], favoritePOAPs: [] };
+  return { favoriteArtists: [], favoritePOAPs: [], favoriteProducts: [] };
 }
 
 export function getFavorites(userAddress?: string): Favorites {
@@ -38,6 +39,7 @@ export function toggleArtistFavorite(userAddress: string, artistAddress: string)
   favoritesByWallet.set(wallet, {
     favoriteArtists: [...favorites.favoriteArtists],
     favoritePOAPs: [...favorites.favoritePOAPs],
+    favoriteProducts: [...favorites.favoriteProducts],
   });
 
   return index < 0;
@@ -66,6 +68,7 @@ export function togglePOAPFavorite(userAddress: string, campaignId: number): boo
   favoritesByWallet.set(wallet, {
     favoriteArtists: [...favorites.favoriteArtists],
     favoritePOAPs: [...favorites.favoritePOAPs],
+    favoriteProducts: [...favorites.favoriteProducts],
   });
 
   return index < 0;
@@ -74,4 +77,32 @@ export function togglePOAPFavorite(userAddress: string, campaignId: number): boo
 export function isPOAPFavorited(userAddress: string, campaignId: number): boolean {
   const favorites = getFavorites(userAddress);
   return favorites.favoritePOAPs.includes(campaignId);
+}
+
+export function toggleProductFavorite(userAddress: string, productId: string): boolean {
+  const wallet = normalizeWallet(userAddress);
+  if (!wallet) return false;
+
+  const favorites = getFavorites(userAddress);
+  const normalizedProductId = String(productId || "").trim();
+  const index = favorites.favoriteProducts.findIndex((product) => product === normalizedProductId);
+
+  if (index >= 0) {
+    favorites.favoriteProducts.splice(index, 1);
+  } else {
+    favorites.favoriteProducts.push(normalizedProductId);
+  }
+
+  favoritesByWallet.set(wallet, {
+    favoriteArtists: [...favorites.favoriteArtists],
+    favoritePOAPs: [...favorites.favoritePOAPs],
+    favoriteProducts: [...favorites.favoriteProducts],
+  });
+
+  return index < 0;
+}
+
+export function isProductFavorited(userAddress: string, productId: string): boolean {
+  const favorites = getFavorites(userAddress);
+  return favorites.favoriteProducts.includes(String(productId || "").trim());
 }

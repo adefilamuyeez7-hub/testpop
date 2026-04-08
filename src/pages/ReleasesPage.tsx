@@ -1,11 +1,16 @@
 import { useMemo, useState } from "react";
-import { ArrowRight, Search, Sparkles } from "lucide-react";
+import { Gavel, Heart, MessageCircle, Search, ShoppingCart, Sparkles } from "lucide-react";
+import { useAccount } from "wagmi";
 import { useNavigate } from "react-router-dom";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { useCartStore } from "@/stores/cartStore";
 import { useSupabasePublishedProducts } from "@/hooks/useSupabase";
+import type { Product } from "@/lib/db";
+import { isProductFavorited, toggleProductFavorite } from "@/lib/favoritesStore";
 import { resolveMediaUrl } from "@/lib/pinata";
+import { toast } from "sonner";
 
 function formatEthAmount(value: string | number | null | undefined) {
   const numeric = Number(value || 0);
@@ -17,8 +22,56 @@ function formatLabel(value?: string | null) {
   return String(value || "").replace(/_/g, " ").trim();
 }
 
+function isOnchainReady(product: Product) {
+  const listingId = Number(product.contract_listing_id || 0);
+  const productId = Number(product.contract_product_id || 0);
+
+  return (
+    (product.contract_kind === "creativeReleaseEscrow" && Number.isFinite(listingId) && listingId > 0) ||
+    (Number.isFinite(productId) && productId > 0)
+  );
+}
+
+function resolveReleaseAction(product: Product) {
+  const searchSpace = [
+    product.product_type,
+    product.category,
+    typeof product.metadata?.release_type === "string" ? product.metadata.release_type : "",
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+
+  if (searchSpace.includes("auction") || searchSpace.includes("bid")) {
+    return {
+      label: "Bid",
+      icon: Gavel,
+      action: "detail" as const,
+      disabled: false,
+    };
+  }
+
+  if (product.product_type === "digital" || searchSpace.includes("collectible") || searchSpace.includes("collect")) {
+    return {
+      label: "Collect",
+      icon: Sparkles,
+      action: "detail" as const,
+      disabled: false,
+    };
+  }
+
+  return {
+    label: "Add to cart",
+    icon: ShoppingCart,
+    action: "cart" as const,
+    disabled: !isOnchainReady(product),
+  };
+}
+
 const ReleasesPage = () => {
   const navigate = useNavigate();
+  const { address } = useAccount();
+  const addItem = useCartStore((state) => state.addItem);
   const { data: products, loading, error } = useSupabasePublishedProducts();
   const [searchQuery, setSearchQuery] = useState("");
   const [typeFilter, setTypeFilter] = useState("all");
@@ -50,6 +103,48 @@ const ReleasesPage = () => {
   }, [products, searchQuery, typeFilter]);
 
   const featuredProduct = filteredProducts[0] || products?.[0] || null;
+
+  function handleToggleLike(product: Product) {
+    if (!address) {
+      toast.error("Connect your wallet to like releases.");
+      return;
+    }
+
+    const added = toggleProductFavorite(address, product.id);
+    toast.success(added ? "Release added to likes." : "Release removed from likes.");
+  }
+
+  function handleOpenComments(productId: string) {
+    navigate(`/products/${productId}#feedback`);
+  }
+
+  function handleSecondaryAction(product: Product) {
+    const action = resolveReleaseAction(product);
+
+    if (action.action === "cart") {
+      if (action.disabled) {
+        toast.error("This release is not ready for cart checkout yet.");
+        return;
+      }
+
+      addItem(
+        product.id,
+        product.creative_release_id ?? null,
+        product.contract_kind ?? "productStore",
+        Number.isFinite(Number(product.contract_listing_id)) ? Number(product.contract_listing_id) : null,
+        Number.isFinite(Number(product.contract_product_id)) ? Number(product.contract_product_id) : null,
+        1,
+        BigInt(Math.floor(Number(product.price_eth || 0) * 1e18)),
+        product.name || "Untitled Release",
+        resolveMediaUrl(product.image_url, product.image_ipfs_uri),
+      );
+      toast.success("Release added to cart.");
+      navigate("/cart");
+      return;
+    }
+
+    navigate(`/products/${product.id}`);
+  }
 
   return (
     <div className="min-h-screen bg-background px-4 py-6 md:px-6 md:py-8">
@@ -107,6 +202,13 @@ const ReleasesPage = () => {
               {featuredProduct ? (
                 <div className="grid gap-6 lg:grid-cols-[1.05fr_0.95fr] lg:items-center">
                   <div className="space-y-4">
+                    {(() => {
+                      const featuredAction = resolveReleaseAction(featuredProduct);
+                      const FeaturedActionIcon = featuredAction.icon;
+                      const isLiked = address ? isProductFavorited(address, featuredProduct.id) : false;
+
+                      return (
+                        <>
                     <p className="text-xs uppercase tracking-[0.28em] text-foreground/60">Featured Release</p>
                     <h2 className="text-4xl font-black leading-tight text-foreground">{featuredProduct.name || "Untitled Release"}</h2>
                     <p className="text-lg font-semibold text-foreground/80">
@@ -123,14 +225,44 @@ const ReleasesPage = () => {
                         {featuredProduct.status || "published"}
                       </Badge>
                     </div>
+                    <div className="flex flex-wrap gap-2">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => handleToggleLike(featuredProduct)}
+                        className={`rounded-full bg-white/70 ${isLiked ? "border-rose-200 text-rose-600" : ""}`}
+                      >
+                        <Heart className={`mr-2 h-4 w-4 ${isLiked ? "fill-current" : ""}`} />
+                        Like
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => handleOpenComments(featuredProduct.id)}
+                        className="rounded-full bg-white/70"
+                      >
+                        <MessageCircle className="mr-2 h-4 w-4" />
+                        Comment
+                      </Button>
+                    </div>
                     <div className="flex flex-wrap gap-3">
                       <Button onClick={() => navigate(`/products/${featuredProduct.id}`)} className="rounded-full bg-[#1d4ed8] text-white hover:bg-[#1e40af]">
                         Open release
                       </Button>
-                      <Button variant="outline" onClick={() => navigate("/drops")} className="rounded-full bg-white/70">
-                        Browse drops
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => handleSecondaryAction(featuredProduct)}
+                        disabled={featuredAction.disabled}
+                        className="rounded-full bg-white/70"
+                      >
+                        <FeaturedActionIcon className="mr-2 h-4 w-4" />
+                        {featuredAction.label}
                       </Button>
                     </div>
+                        </>
+                      );
+                    })()}
                   </div>
 
                   <div className="overflow-hidden rounded-[1.8rem] border border-white/60 bg-white/65 shadow-sm">
@@ -171,6 +303,9 @@ const ReleasesPage = () => {
               <div className="grid gap-4 lg:grid-cols-2">
                 {filteredProducts.map((product) => {
                   const remainingStock = Number(product.stock || 0) > 0 ? Math.max(Number(product.stock || 0) - Number(product.sold || 0), 0) : null;
+                  const action = resolveReleaseAction(product);
+                  const ActionIcon = action.icon;
+                  const isLiked = address ? isProductFavorited(address, product.id) : false;
                   return (
                     <article key={product.id} className="rounded-[1.7rem] border border-[#dbeafe] bg-white p-5 shadow-[0_18px_45px_rgba(37,99,235,0.08)]">
                       <div className="overflow-hidden rounded-[1.3rem] bg-[#f8fbff]">
@@ -219,12 +354,34 @@ const ReleasesPage = () => {
                       </div>
 
                       <div className="mt-4 flex flex-wrap gap-3">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={() => handleToggleLike(product)}
+                          className={`rounded-full ${isLiked ? "border-rose-200 text-rose-600" : ""}`}
+                        >
+                          <Heart className={`mr-2 h-4 w-4 ${isLiked ? "fill-current" : ""}`} />
+                          Like
+                        </Button>
+                        <Button type="button" variant="outline" onClick={() => handleOpenComments(product.id)} className="rounded-full">
+                          <MessageCircle className="mr-2 h-4 w-4" />
+                          Comment
+                        </Button>
+                      </div>
+
+                      <div className="mt-3 flex flex-wrap gap-3">
                         <Button onClick={() => navigate(`/products/${product.id}`)} className="rounded-full bg-[#1d4ed8] text-white hover:bg-[#1e40af]">
                           Open release
                         </Button>
-                        <Button variant="outline" onClick={() => navigate("/drops")} className="rounded-full">
-                          Browse drops
-                          <ArrowRight className="ml-2 h-4 w-4" />
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={() => handleSecondaryAction(product)}
+                          disabled={action.disabled}
+                          className="rounded-full"
+                        >
+                          <ActionIcon className="mr-2 h-4 w-4" />
+                          {action.label}
                         </Button>
                       </div>
                     </article>

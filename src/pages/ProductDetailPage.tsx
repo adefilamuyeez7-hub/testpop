@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useParams, useNavigate, useLocation } from "react-router-dom";
 import { AlertTriangle, ArrowLeft, ExternalLink, Loader2, MessageSquare, ShoppingCart } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -50,6 +50,7 @@ function formatDetailValue(value: unknown): string {
 export function ProductDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const location = useLocation();
   const { address } = useAccount();
   const { selectedProduct, setSelectedProduct } = useProductStore();
   const { addItem } = useCartStore();
@@ -72,6 +73,7 @@ export function ProductDetailPage() {
   const [selectedCreatorThreadLoading, setSelectedCreatorThreadLoading] = useState(false);
   const [viewerReplyDraft, setViewerReplyDraft] = useState("");
   const [creatorReplyDraft, setCreatorReplyDraft] = useState("");
+  const feedbackSectionRef = useRef<HTMLDivElement | null>(null);
   const [feedbackForm, setFeedbackForm] = useState({
     visibility: "public" as "public" | "private",
     feedbackType: "review" as "review" | "feedback" | "question",
@@ -328,6 +330,16 @@ export function ProductDetailPage() {
       setSelectedImage(galleryImages[0]);
     }
   }, [galleryImages, selectedImage]);
+
+  useEffect(() => {
+    if (location.hash !== "#feedback") {
+      return;
+    }
+
+    window.setTimeout(() => {
+      feedbackSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 120);
+  }, [location.hash, feedbackOverview]);
 
   const isOnchainReady =
     (product?.contractKind === "creativeReleaseEscrow" &&
@@ -718,7 +730,7 @@ export function ProductDetailPage() {
         </Tabs>
       </div>
 
-      <div className="mt-12 grid gap-6 lg:grid-cols-[1.1fr_0.9fr]">
+      <div id="feedback" ref={feedbackSectionRef} className="mt-12 grid gap-6 lg:grid-cols-[1.1fr_0.9fr]">
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-xl">
