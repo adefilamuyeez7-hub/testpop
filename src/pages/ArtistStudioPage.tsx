@@ -1302,7 +1302,7 @@ const CreateDropSheet = ({
                   <Upload className="h-8 w-8 text-muted-foreground" />
                   <div className="text-center">
                     <p className="text-sm font-semibold text-foreground">Upload artwork</p>
-                    <p className="text-xs text-muted-foreground">PNG Â· JPG Â· GIF Â· MP4 Â· Max 10MB</p>
+                    <p className="text-xs text-muted-foreground">PNG / JPG / GIF / MP4 / Max 10MB</p>
                   </div>
                 </button>
               )}
@@ -2414,7 +2414,7 @@ const ArtistStudioPage = ({ embedded = false }: ArtistStudioPageProps) => {
                   className="p-4 rounded-2xl bg-card border border-border text-left hover:border-primary/40 transition-colors">
                   <Edit3 className="h-5 w-5 text-primary mb-2" />
                   <p className="text-sm font-semibold text-foreground">Edit Profile</p>
-                  <p className="text-[10px] text-muted-foreground mt-0.5">Bio Â· links Â· pricing</p>
+                  <p className="text-[10px] text-muted-foreground mt-0.5">Bio / links / pricing</p>
                 </button>
                 <button onClick={() => setTab("raises")}
                   className="p-4 rounded-2xl bg-card border border-border text-left hover:border-primary/40 transition-colors">

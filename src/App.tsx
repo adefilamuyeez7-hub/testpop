@@ -23,7 +23,6 @@ const DropsPage = lazy(() => import("./pages/DropsPage"));
 const DropDetailPage = lazy(() => import("./pages/DropDetailPage"));
 const WalletArtistsRoute = lazy(() => import("./routes/WalletArtistsRoute"));
 const WalletArtistProfileRoute = lazy(() => import("./routes/WalletArtistProfileRoute"));
-const WalletMarketplaceRoute = lazy(() => import("./routes/WalletMarketplaceRoute"));
 const InboxPage = lazy(() => import("./pages/InboxPage"));
 
 // User profile routes
@@ -33,7 +32,8 @@ const WalletPOAPsRoute = lazy(() => import("./routes/WalletPOAPsRoute"));
 const WalletSubscriptionsRoute = lazy(() => import("./routes/WalletSubscriptionsRoute"));
 
 // Commerce routes
-const ProductsPage = lazy(() => import("./pages/ProductsPage").then((module) => ({ default: module.ProductsPage })));
+const InvestBoardPage = lazy(() => import("./pages/ProductsPage").then((module) => ({ default: module.ProductsPage })));
+const ReleasesPage = lazy(() => import("./pages/ReleasesPage"));
 const ProductDetailPage = lazy(() => import("./pages/ProductDetailPage").then((module) => ({ default: module.ProductDetailPage })));
 const CartPage = lazy(() => import("./pages/CartPage").then((module) => ({ default: module.CartPage })));
 const CheckoutPage = lazy(() => import("./pages/CheckoutPage").then((module) => ({ default: module.CheckoutPage })));
@@ -82,13 +82,13 @@ const App = () => {
                       <Route path="/drops/:id" element={<DropDetailPage />} />
                       <Route path="/artists" element={<WalletArtistsRoute />} />
                       <Route path="/artists/:id" element={<WalletArtistProfileRoute />} />
-                      <Route path="/invest" element={<WalletMarketplaceRoute />} />
+                      <Route path="/invest" element={<InvestBoardPage />} />
                       <Route path="/inbox" element={<InboxPage />} />
                       <Route path="/profile" element={<WalletProfileRoute />} />
                       <Route path="/collection" element={<WalletCollectionRoute />} />
                       <Route path="/poaps" element={<WalletPOAPsRoute />} />
                       <Route path="/subscriptions" element={<WalletSubscriptionsRoute />} />
-                      <Route path="/products" element={<ProductsPage />} />
+                      <Route path="/products" element={<ReleasesPage />} />
                       <Route path="/products/:id" element={<ProductDetailPage />} />
                       <Route path="/cart" element={<CartPage />} />
                       <Route path="/checkout" element={<CheckoutPage />} />

@@ -515,6 +515,7 @@ export interface ProductFeedbackThread {
 export interface ProductFeedbackOverview {
   product: Pick<Product, "id" | "artist_id" | "creator_wallet" | "name" | "image_url" | "image_ipfs_uri" | "preview_uri" | "status">;
   can_leave_feedback: boolean;
+  is_creator_viewer: boolean;
   viewer_relationship: {
     is_subscriber: boolean;
     active_subscription: boolean;
@@ -522,6 +523,7 @@ export interface ProductFeedbackOverview {
   };
   public_threads: ProductFeedbackThread[];
   viewer_threads: ProductFeedbackThread[];
+  creator_threads: ProductFeedbackThread[];
 }
 
 export interface FanHubOverview {

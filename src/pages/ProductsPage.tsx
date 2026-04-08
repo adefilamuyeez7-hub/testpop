@@ -71,7 +71,7 @@ export function ProductsPage() {
         console.error("Failed to load marketplace campaigns:", error);
         if (isMounted) {
           setCampaigns([]);
-          setMarketplaceError(error instanceof Error ? error.message : "Failed to load creator IP cards.");
+          setMarketplaceError(error instanceof Error ? error.message : "Failed to load creator investment cards.");
         }
       })
       .finally(() => {
@@ -105,7 +105,7 @@ export function ProductsPage() {
         setRoyaltyDistributions(distributions || []);
       })
       .catch((error) => {
-        console.error("Failed to load investor marketplace data:", error);
+          console.error("Failed to load investor data:", error);
         if (isMounted) {
           setInvestorPositions({});
           setRoyaltyDistributions([]);
@@ -177,7 +177,7 @@ export function ProductsPage() {
           <div className="rounded-[1.8rem] bg-white/92 p-5">
             <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
               <div>
-                <h1 className="text-3xl font-black tracking-tight text-foreground">Marketplace</h1>
+                <h1 className="text-3xl font-black tracking-tight text-foreground">Invest</h1>
                 <p className="mt-1 text-sm text-muted-foreground">
                   Discover creator IP raises, collectible proof-of-investment cards, and revenue-sharing positions in one board.
                 </p>

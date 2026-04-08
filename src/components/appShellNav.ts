@@ -4,7 +4,7 @@ export const appShellNavItems = [
   { icon: Home, label: "Home", path: "/" },
   { icon: Flame, label: "Drops", path: "/drops" },
   { icon: Inbox, label: "Inbox", path: "/inbox" },
-  { icon: ShoppingBag, label: "Marketplace", path: "/products" },
+  { icon: ShoppingBag, label: "Releases", path: "/products" },
   { icon: User, label: "Profile", path: "/profile" },
 ] as const;
 
@@ -23,7 +23,6 @@ export function isAppShellNavActive(itemPath: string, pathname: string) {
         pathname.startsWith("/poaps") ||
         pathname.startsWith("/subscriptions") ||
         pathname.startsWith("/studio"))) ||
-    (itemPath === "/products" &&
-      (pathname.startsWith("/invest") || pathname.startsWith("/products")))
+    (itemPath === "/products" && pathname.startsWith("/products"))
   );
 }

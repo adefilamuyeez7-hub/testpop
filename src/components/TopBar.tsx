@@ -71,7 +71,7 @@ function SearchPanel({ onClose }: { onClose: () => void }) {
         <input
           ref={inputRef}
           type="text"
-          placeholder="Search artists, drops, products..."
+          placeholder="Search creators, drops, and releases..."
           value={query}
           onChange={(event) => setQuery(event.target.value)}
           className="flex-1 bg-transparent text-sm text-foreground placeholder-muted-foreground outline-none"
@@ -230,7 +230,7 @@ const TopBar = () => {
             <img src={logo} alt="POPUP" className="h-10 w-10 rounded-lg object-contain" />
             <div className="min-w-0">
               <p className="text-sm font-semibold tracking-[0.18em] text-foreground/70 uppercase">Popup</p>
-              <p className="text-xs text-muted-foreground">Collect, discover, and shop digital culture.</p>
+              <p className="text-xs text-muted-foreground">Collect releases, follow creators, and support them onchain.</p>
             </div>
           </div>
 

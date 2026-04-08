@@ -5,6 +5,7 @@ const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.
 const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
 const ACTIVE_ORDER_STATUSES = new Set(["paid", "processing", "shipped", "delivered"]);
+const RELATIONSHIP_CACHE_TTL_MS = 5 * 60 * 1000;
 
 function normalizeWallet(wallet = "") {
   const normalized = String(wallet || "").trim().toLowerCase();
@@ -77,6 +78,32 @@ async function getArtistsByIds(artistIds) {
   }
 
   return data || [];
+}
+
+async function getStoredRelationships(wallet) {
+  const normalizedWallet = normalizeWallet(wallet);
+  if (!normalizedWallet) return [];
+
+  const { data, error } = await supabase
+    .from("creator_fans")
+    .select("*")
+    .eq("fan_wallet", normalizedWallet)
+    .order("relationship_score", { ascending: false });
+
+  if (error) {
+    throw new Error(error.message || "Failed to load creator fan relationships");
+  }
+
+  return data || [];
+}
+
+function areRelationshipsFresh(relationships) {
+  if (!relationships.length) return false;
+
+  return relationships.every((relationship) => {
+    const updatedAt = new Date(relationship.updated_at || relationship.created_at || 0).getTime();
+    return Number.isFinite(updatedAt) && Date.now() - updatedAt < RELATIONSHIP_CACHE_TTL_MS;
+  });
 }
 
 async function getArtistsByWallets(wallets) {
@@ -651,7 +678,10 @@ export async function getFanHubOverview(wallet) {
   const ownedCreators = await getOwnedCreators(wallet);
   await ensureDefaultChannelsForArtists(ownedCreators);
 
-  const relationships = await buildRelationshipMap(wallet);
+  const storedRelationships = await getStoredRelationships(wallet);
+  const relationships = areRelationshipsFresh(storedRelationships)
+    ? storedRelationships
+    : await buildRelationshipMap(wallet);
   const artistIds = Array.from(new Set([
     ...ownedCreators.map((artist) => artist.id),
     ...relationships.map((relationship) => relationship.artist_id),
@@ -951,6 +981,9 @@ export async function getProductFeedback(productId, wallet = "") {
   }
 
   const normalizedWallet = normalizeWallet(wallet);
+  const isCreatorViewer = Boolean(
+    normalizedWallet && normalizeWallet(product.creator_wallet) === normalizedWallet
+  );
   const relationship = normalizedWallet
     ? await getRelationshipSnapshot(normalizedWallet, product.artist_id)
     : null;
@@ -986,7 +1019,26 @@ export async function getProductFeedback(productId, wallet = "") {
     throw new Error(viewerThreadsResult.error.message || "Failed to load viewer feedback");
   }
 
-  const allThreads = [...(publicThreads || []), ...(viewerThreadsResult.data || [])];
+  const creatorThreadsResult = isCreatorViewer
+    ? await supabase
+        .from("product_feedback_threads")
+        .select("*")
+        .eq("product_id", productId)
+        .order("subscriber_priority", { ascending: false })
+        .order("featured", { ascending: false })
+        .order("last_message_at", { ascending: false })
+        .limit(24)
+    : { data: [], error: null };
+
+  if (creatorThreadsResult.error) {
+    throw new Error(creatorThreadsResult.error.message || "Failed to load creator feedback inbox");
+  }
+
+  const allThreads = [
+    ...(publicThreads || []),
+    ...(viewerThreadsResult.data || []),
+    ...(creatorThreadsResult.data || []),
+  ];
   const uniqueThreads = new Map(allThreads.map((thread) => [thread.id, thread]));
   const threadIds = Array.from(uniqueThreads.keys());
   const { data: messages, error: messagesError } = threadIds.length
@@ -1018,10 +1070,16 @@ export async function getProductFeedback(productId, wallet = "") {
     product,
     latest_message: latestMessageByThreadId.get(thread.id) || null,
   }));
+  const creatorThreadList = (creatorThreadsResult.data || []).map((thread) => ({
+    ...thread,
+    product,
+    latest_message: latestMessageByThreadId.get(thread.id) || null,
+  }));
 
   return {
     product,
     can_leave_feedback: Boolean(collectedOrderItem),
+    is_creator_viewer: isCreatorViewer,
     viewer_relationship: relationship
       ? {
           is_subscriber: Boolean(relationship.is_subscriber),
@@ -1035,6 +1093,7 @@ export async function getProductFeedback(productId, wallet = "") {
         },
     public_threads: publicThreadList,
     viewer_threads: viewerThreadList,
+    creator_threads: creatorThreadList,
   };
 }
 
@@ -1175,8 +1234,12 @@ async function getProductFeedbackThreadById(threadId) {
 
 function canAccessProductFeedbackThread(wallet, thread) {
   const normalizedWallet = normalizeWallet(wallet);
+  if (thread.visibility === "public" && thread.status !== "archived") {
+    return true;
+  }
+
   if (!normalizedWallet) {
-    return thread.visibility === "public" && thread.status !== "archived";
+    return false;
   }
 
   return (

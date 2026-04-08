@@ -7,12 +7,10 @@ import { useWallet } from "@/hooks/useContracts";
 import type { ArtistPublicProfile } from "@/lib/artistStore";
 import { trackSubscriptionsView, trackCampaignInteraction } from "@/lib/analyticsStore";
 import { toggleArtistFavorite, isArtistFavorited, getFavorites } from "@/lib/favoritesStore";
-import { createPublicClient, http, getAddress } from "viem";
-import { ARTIST_DROP_ABI } from "@/lib/contracts/artDropArtist";
-import { ACTIVE_CHAIN } from "@/lib/wagmi";
 import { useSupabaseArtists } from "@/hooks/useSupabase";
-import { fetchResolvedArtistContractAddress } from "@/hooks/useContractIntegrations";
 import { resolveMediaUrl } from "@/lib/pinata";
+import { getFanHubOverview } from "@/lib/db";
+import { establishSecureSession } from "@/lib/secureAuth";
 
 type MySubscriptionsPageProps = {
   embedded?: boolean;
@@ -54,62 +52,38 @@ const MySubscriptionsPage = ({ embedded = false }: MySubscriptionsPageProps) => 
     const fetchSubscriptions = async () => {
       setSubscriptionsLoading(true);
       try {
-        const publicClient = createPublicClient({ chain: ACTIVE_CHAIN, transport: http() });
-        const userAddress = getAddress(address);
-        const results = await Promise.all(
-          artists.map(async (artist) => {
-            try {
-              const contractAddress = await fetchResolvedArtistContractAddress(
-                publicClient,
-                artist.wallet,
-                artist.contract_address
-              );
+        await establishSecureSession(address);
+        const overview = await getFanHubOverview();
+        const results = overview.relationships
+          .filter((relationship) => relationship.active_subscription)
+          .map((relationship) => {
+            const artist = artists.find((entry) => entry.id === relationship.artist_id);
 
-              if (!contractAddress) {
-                return null;
-              }
-
-              const isSubscribed = await publicClient.readContract({
-                address: getAddress(contractAddress),
-                abi: ARTIST_DROP_ABI,
-                functionName: "isSubscriptionActive",
-                args: [userAddress],
-              });
-
-              if (!isSubscribed) {
-                return null;
-              }
-
-              return {
-                id: artist.id,
-                wallet: artist.wallet,
-                name: artist.name || "Untitled Artist",
-                handle: artist.handle || "artist",
-                avatar: resolveMediaUrl(artist.avatar_url, artist.banner_url),
-                banner: resolveMediaUrl(artist.banner_url, artist.avatar_url),
-                tag: artist.tag || "artist",
-                subscribers: 0,
-                bio: artist.bio || "This artist has not published a public bio yet.",
-                subscriptionPrice: artist.subscription_price?.toString() || "0.01",
-                twitterUrl: artist.twitter_url || "",
-                instagramUrl: artist.instagram_url || "",
-                websiteUrl: artist.website_url || "",
-                investGoals: [],
-                investRaised: 0,
-                investTotal: 0,
-                portfolio: Array.isArray(artist.portfolio) ? artist.portfolio : [],
-                defaultPoapAllocation: { subscribers: 40, bidders: 35, creators: 25 },
-                contractAddress,
-              } satisfies ArtistPublicProfile;
-            } catch (error) {
-              console.warn(`Subscription check failed for artist ${artist.id}:`, error);
-              return null;
-            }
-          })
-        );
+            return {
+              id: relationship.artist_id,
+              wallet: artist?.wallet || relationship.artist_wallet,
+              name: artist?.name || relationship.artist_name || "Untitled Artist",
+              handle: artist?.handle || relationship.artist_handle || "artist",
+              avatar: resolveMediaUrl(artist?.avatar_url || relationship.avatar_url, artist?.banner_url || relationship.banner_url),
+              banner: resolveMediaUrl(artist?.banner_url || relationship.banner_url, artist?.avatar_url || relationship.avatar_url),
+              tag: artist?.tag || relationship.artist_tag || "artist",
+              subscribers: 0,
+              bio: artist?.bio || "This artist has not published a public bio yet.",
+              subscriptionPrice: artist?.subscription_price?.toString() || "0.01",
+              twitterUrl: artist?.twitter_url || "",
+              instagramUrl: artist?.instagram_url || "",
+              websiteUrl: artist?.website_url || "",
+              investGoals: [],
+              investRaised: 0,
+              investTotal: 0,
+              portfolio: Array.isArray(artist?.portfolio) ? artist.portfolio : [],
+              defaultPoapAllocation: { subscribers: 40, bidders: 35, creators: 25 },
+              contractAddress: artist?.contract_address || undefined,
+            } satisfies ArtistPublicProfile;
+          });
 
         if (!active) return;
-        setSubscriptions(results.filter((artist): artist is ArtistPublicProfile => artist !== null));
+        setSubscriptions(results);
       } catch (err) {
         console.error("Error fetching subscriptions:", err);
         if (active) setSubscriptions([]);

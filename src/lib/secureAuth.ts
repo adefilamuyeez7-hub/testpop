@@ -11,6 +11,13 @@ import { config as wagmiConfig } from "@/lib/wagmi";
 const secureApiBaseUrl = SECURE_API_BASE;
 const AUTH_REQUEST_TIMEOUT_MS = 15000;
 const SIGNATURE_TIMEOUT_MS = 45000;
+const shouldDebugAuth = import.meta.env.DEV;
+
+function debugAuth(...args: unknown[]) {
+  if (shouldDebugAuth) {
+    console.log(...args);
+  }
+}
 
 export type SecureSession = {
   wallet: string;
@@ -75,7 +82,7 @@ export async function requestWalletChallenge(wallet: string): Promise<ChallengeR
   requireSecureApi();
 
   const url = `${secureApiBaseUrl}/auth/challenge`;
-  console.log("📡 Requesting challenge from:", url);
+  debugAuth("Requesting challenge from:", url);
 
   const response = await fetchWithTimeout(
     url,
@@ -177,7 +184,7 @@ export async function verifyWalletChallenge(
   requireSecureApi();
 
   const url = `${secureApiBaseUrl}/auth/verify`;
-  console.log("📡 Verifying challenge at:", url);
+  debugAuth("Verifying challenge at:", url);
 
   const response = await fetchWithTimeout(
     url,
@@ -222,42 +229,27 @@ export async function establishSecureSession(
         expiresInSeconds: 0,
       };
     }
-    console.log("🔐 Starting secure session establishment for wallet:", wallet);
-    console.log("🌐 API Base URL:", secureApiBaseUrl);
-
-    console.log("📡 Step 1: Requesting wallet challenge...");
+    debugAuth("Starting secure session establishment for wallet:", wallet);
     if (options.forceRefresh) {
       clearRuntimeSession();
     }
 
     const challenge = await requestWalletChallenge(wallet);
-    console.log("✅ Challenge received:", challenge);
-
-    console.log("📝 Step 2: Signing challenge message...");
+    debugAuth("Challenge received");
     const signature = await signChallengeMessage(challenge.message, wallet);
-    console.log("✅ Message signed, signature length:", signature.length);
-
-    console.log("🔍 Step 3: Verifying wallet challenge...");
+    debugAuth("Challenge signed");
     const session = await verifyWalletChallenge(wallet, signature, challenge.nonce);
-    console.log("✅ Session verified:", { wallet: session.wallet, role: session.role });
-
-    console.log("💾 Step 4: Storing runtime session...");
+    debugAuth("Session verified", { wallet: session.wallet, role: session.role });
     setRuntimeSession({
       apiToken: session.apiToken,
       supabaseToken: session.supabaseToken || "",
       wallet: session.wallet,
       role: session.role,
     });
-    console.log("✅ Runtime session stored");
-
-    console.log("🎉 Secure session established successfully!");
+    debugAuth("Runtime session stored");
     return session;
   } catch (error) {
     console.error("❌ Secure session establishment failed:", error);
-    if (error instanceof Error) {
-      console.error("Error message:", error.message);
-      console.error("Error stack:", error.stack);
-    }
     throw error;
   }
 }

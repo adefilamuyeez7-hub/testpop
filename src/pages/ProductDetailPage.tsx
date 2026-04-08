@@ -18,6 +18,8 @@ import {
   getProductFeedbackThreadMessages,
   getProductAssets,
   createProductFeedbackThread,
+  curateProductFeedbackThread,
+  sendProductFeedbackMessage,
   type ProductFeedbackMessage,
   type ProductFeedbackOverview,
   type CreativeRelease,
@@ -62,6 +64,14 @@ export function ProductDetailPage() {
   const [selectedPublicThreadId, setSelectedPublicThreadId] = useState<string | null>(null);
   const [selectedPublicThreadMessages, setSelectedPublicThreadMessages] = useState<ProductFeedbackMessage[]>([]);
   const [selectedPublicThreadLoading, setSelectedPublicThreadLoading] = useState(false);
+  const [selectedViewerThreadId, setSelectedViewerThreadId] = useState<string | null>(null);
+  const [selectedViewerThreadMessages, setSelectedViewerThreadMessages] = useState<ProductFeedbackMessage[]>([]);
+  const [selectedViewerThreadLoading, setSelectedViewerThreadLoading] = useState(false);
+  const [selectedCreatorThreadId, setSelectedCreatorThreadId] = useState<string | null>(null);
+  const [selectedCreatorThreadMessages, setSelectedCreatorThreadMessages] = useState<ProductFeedbackMessage[]>([]);
+  const [selectedCreatorThreadLoading, setSelectedCreatorThreadLoading] = useState(false);
+  const [viewerReplyDraft, setViewerReplyDraft] = useState("");
+  const [creatorReplyDraft, setCreatorReplyDraft] = useState("");
   const [feedbackForm, setFeedbackForm] = useState({
     visibility: "public" as "public" | "private",
     feedbackType: "review" as "review" | "feedback" | "question",
@@ -171,8 +181,30 @@ export function ProductDetailPage() {
 
   useEffect(() => {
     const firstThreadId = feedbackOverview?.public_threads?.[0]?.id || null;
-    setSelectedPublicThreadId((current) => current || firstThreadId);
+    setSelectedPublicThreadId((current) =>
+      current && feedbackOverview?.public_threads?.some((thread) => thread.id === current)
+        ? current
+        : firstThreadId
+    );
   }, [feedbackOverview?.public_threads]);
+
+  useEffect(() => {
+    const firstViewerThreadId = feedbackOverview?.viewer_threads?.[0]?.id || null;
+    setSelectedViewerThreadId((current) =>
+      current && feedbackOverview?.viewer_threads?.some((thread) => thread.id === current)
+        ? current
+        : firstViewerThreadId
+    );
+  }, [feedbackOverview?.viewer_threads]);
+
+  useEffect(() => {
+    const firstCreatorThreadId = feedbackOverview?.creator_threads?.[0]?.id || null;
+    setSelectedCreatorThreadId((current) =>
+      current && feedbackOverview?.creator_threads?.some((thread) => thread.id === current)
+        ? current
+        : firstCreatorThreadId
+    );
+  }, [feedbackOverview?.creator_threads]);
 
   useEffect(() => {
     if (!selectedPublicThreadId) {
@@ -204,6 +236,68 @@ export function ProductDetailPage() {
       active = false;
     };
   }, [selectedPublicThreadId]);
+
+  useEffect(() => {
+    if (!selectedViewerThreadId) {
+      setSelectedViewerThreadMessages([]);
+      return;
+    }
+
+    let active = true;
+    setSelectedViewerThreadLoading(true);
+    getProductFeedbackThreadMessages(selectedViewerThreadId)
+      .then((data) => {
+        if (active) {
+          setSelectedViewerThreadMessages(data.messages || []);
+        }
+      })
+      .catch((error) => {
+        if (active) {
+          console.error(error);
+          setSelectedViewerThreadMessages([]);
+        }
+      })
+      .finally(() => {
+        if (active) {
+          setSelectedViewerThreadLoading(false);
+        }
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [selectedViewerThreadId]);
+
+  useEffect(() => {
+    if (!selectedCreatorThreadId) {
+      setSelectedCreatorThreadMessages([]);
+      return;
+    }
+
+    let active = true;
+    setSelectedCreatorThreadLoading(true);
+    getProductFeedbackThreadMessages(selectedCreatorThreadId)
+      .then((data) => {
+        if (active) {
+          setSelectedCreatorThreadMessages(data.messages || []);
+        }
+      })
+      .catch((error) => {
+        if (active) {
+          console.error(error);
+          setSelectedCreatorThreadMessages([]);
+        }
+      })
+      .finally(() => {
+        if (active) {
+          setSelectedCreatorThreadLoading(false);
+        }
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [selectedCreatorThreadId]);
 
   const galleryImages = useMemo(() => {
     const urls = new Set<string>();
@@ -254,16 +348,16 @@ export function ProductDetailPage() {
   if (!product) {
       return (
         <div className="container mx-auto px-4 py-8">
-        <Button variant="ghost" onClick={() => navigate("/drops")} className="mb-6 gap-2">
+        <Button variant="ghost" onClick={() => navigate("/products")} className="mb-6 gap-2">
           <ArrowLeft className="h-4 w-4" />
-          Back to Drops
+          Back to Releases
         </Button>
         <p className="text-muted-foreground">Product not found</p>
       </div>
     );
   }
 
-  const availableStock = product.stock === 0 ? "∞" : product.stock - product.sold;
+  const availableStock = product.stock === 0 ? "Unlimited" : product.stock - product.sold;
   const isSoldOut = product.stock > 0 && product.sold >= product.stock;
   const physicalDetails = creativeRelease?.physical_details_jsonb ?? {};
   const shippingProfile = creativeRelease?.shipping_profile_jsonb ?? {};
@@ -273,6 +367,9 @@ export function ProductDetailPage() {
     ? `https://sepolia.basescan.org/address/${creativeRelease.contract_address}`
     : null;
   const artMetadataUrl = creativeRelease?.art_metadata_uri ? ipfsToHttp(creativeRelease.art_metadata_uri) : null;
+  const isCreatorViewer = feedbackOverview?.is_creator_viewer ?? false;
+  const selectedCreatorThread =
+    feedbackOverview?.creator_threads?.find((thread) => thread.id === selectedCreatorThreadId) || null;
 
   const handleAddToCart = () => {
     if (!address) {
@@ -335,11 +432,77 @@ export function ProductDetailPage() {
     }
   };
 
+  const handleReplyToCreatorThread = async () => {
+    if (!id || !address || !selectedCreatorThreadId || !creatorReplyDraft.trim()) {
+      return;
+    }
+
+    setFeedbackSubmitting(true);
+    try {
+      await establishSecureSession(address);
+      const message = await sendProductFeedbackMessage(selectedCreatorThreadId, creatorReplyDraft);
+      setSelectedCreatorThreadMessages((prev) => [...prev, message]);
+      setCreatorReplyDraft("");
+      setFeedbackOverview(await getProductFeedbackOverview(id));
+      toast.success("Creator reply sent.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to send creator reply");
+    } finally {
+      setFeedbackSubmitting(false);
+    }
+  };
+
+  const handleReplyToViewerThread = async () => {
+    if (!id || !address || !selectedViewerThreadId || !viewerReplyDraft.trim()) {
+      return;
+    }
+
+    setFeedbackSubmitting(true);
+    try {
+      await establishSecureSession(address);
+      const message = await sendProductFeedbackMessage(selectedViewerThreadId, viewerReplyDraft);
+      setSelectedViewerThreadMessages((prev) => [...prev, message]);
+      setViewerReplyDraft("");
+      setFeedbackOverview(await getProductFeedbackOverview(id));
+      toast.success("Your feedback reply was sent.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to send feedback reply");
+    } finally {
+      setFeedbackSubmitting(false);
+    }
+  };
+
+  const handleCurateCreatorThread = async (updates: {
+    featured?: boolean;
+    creatorCurated?: boolean;
+    status?: "open" | "closed" | "archived";
+    visibility?: "public" | "private";
+  }) => {
+    if (!id || !address || !selectedCreatorThreadId) {
+      return;
+    }
+
+    setFeedbackSubmitting(true);
+    try {
+      await establishSecureSession(address);
+      await curateProductFeedbackThread({
+        threadId: selectedCreatorThreadId,
+        ...updates,
+      });
+      setFeedbackOverview(await getProductFeedbackOverview(id));
+      toast.success("Feedback thread updated.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to update feedback thread");
+    } finally {
+      setFeedbackSubmitting(false);
+    }
+  };
+
   return (
     <div className="container mx-auto px-4 py-8">
-      <Button variant="ghost" onClick={() => navigate("/drops")} className="mb-6 gap-2">
+      <Button variant="ghost" onClick={() => navigate("/products")} className="mb-6 gap-2">
         <ArrowLeft className="h-4 w-4" />
-        Back to Drops
+        Back to Releases
       </Button>
 
       <div className="grid grid-cols-1 gap-10 lg:grid-cols-[1.1fr_0.9fr]">
@@ -637,7 +800,158 @@ export function ProductDetailPage() {
             <CardTitle className="text-xl">Verified Feedback</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            {feedbackOverview?.can_leave_feedback ? (
+            {isCreatorViewer ? (
+              feedbackOverview?.creator_threads?.length ? (
+                <div className="grid gap-4 lg:grid-cols-[220px_minmax(0,1fr)]">
+                  <div className="space-y-2">
+                    {feedbackOverview.creator_threads.map((thread) => (
+                      <button
+                        key={thread.id}
+                        type="button"
+                        onClick={() => setSelectedCreatorThreadId(thread.id)}
+                        className={`w-full rounded-2xl px-4 py-3 text-left transition-colors ${
+                          selectedCreatorThreadId === thread.id ? "bg-primary/10" : "bg-background"
+                        }`}
+                      >
+                        <div className="flex flex-wrap gap-2">
+                          <Badge variant="outline">{thread.visibility}</Badge>
+                          <Badge variant="outline">{thread.feedback_type}</Badge>
+                          {thread.featured ? <Badge className="bg-[#dbeafe] text-[#1d4ed8]">Featured</Badge> : null}
+                          {thread.subscriber_priority ? <Badge className="bg-[#ecfeff] text-[#0f766e]">Subscriber priority</Badge> : null}
+                        </div>
+                        <p className="mt-2 text-sm font-semibold text-foreground">
+                          {thread.title || thread.product?.name || "Product feedback"}
+                        </p>
+                        <p className="mt-1 line-clamp-2 text-sm text-muted-foreground">
+                          {thread.latest_message?.body || "Open feedback thread"}
+                        </p>
+                      </button>
+                    ))}
+                  </div>
+
+                  <div className="rounded-2xl border bg-secondary/20 p-4">
+                    {selectedCreatorThread ? (
+                      <>
+                        <div className="border-b border-border pb-3">
+                          <div className="flex flex-wrap items-start justify-between gap-3">
+                            <div>
+                              <p className="text-sm font-semibold text-foreground">
+                                {selectedCreatorThread.title || selectedCreatorThread.product?.name || "Product feedback"}
+                              </p>
+                              <p className="mt-1 text-xs text-muted-foreground">
+                                {selectedCreatorThread.feedback_type} · {selectedCreatorThread.visibility} · {selectedCreatorThread.rating ? `${selectedCreatorThread.rating}/5` : "no rating"}
+                              </p>
+                            </div>
+                            <div className="flex flex-wrap gap-2">
+                              {selectedCreatorThread.creator_curated ? <Badge variant="outline">Curated</Badge> : null}
+                              {selectedCreatorThread.status !== "open" ? <Badge variant="outline">{selectedCreatorThread.status}</Badge> : null}
+                            </div>
+                          </div>
+
+                          <div className="mt-3 flex flex-wrap gap-2">
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              onClick={() =>
+                                void handleCurateCreatorThread({
+                                  featured: !selectedCreatorThread.featured,
+                                  creatorCurated: true,
+                                })
+                              }
+                              disabled={feedbackSubmitting}
+                              className="rounded-full"
+                            >
+                              {selectedCreatorThread.featured ? "Unfeature" : "Feature"}
+                            </Button>
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              onClick={() =>
+                                void handleCurateCreatorThread({
+                                  visibility: selectedCreatorThread.visibility === "public" ? "private" : "public",
+                                  creatorCurated: true,
+                                })
+                              }
+                              disabled={feedbackSubmitting}
+                              className="rounded-full"
+                            >
+                              Make {selectedCreatorThread.visibility === "public" ? "private" : "public"}
+                            </Button>
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              onClick={() =>
+                                void handleCurateCreatorThread({
+                                  status: selectedCreatorThread.status === "archived" ? "open" : "archived",
+                                })
+                              }
+                              disabled={feedbackSubmitting}
+                              className="rounded-full"
+                            >
+                              {selectedCreatorThread.status === "archived" ? "Reopen" : "Archive"}
+                            </Button>
+                          </div>
+                        </div>
+
+                        <div className="mt-3 max-h-[280px] space-y-3 overflow-y-auto pr-1">
+                          {selectedCreatorThreadLoading ? (
+                            <div className="flex items-center justify-center py-10">
+                              <Loader2 className="h-5 w-5 animate-spin text-primary" />
+                            </div>
+                          ) : selectedCreatorThreadMessages.length === 0 ? (
+                            <p className="py-8 text-center text-sm text-muted-foreground">No messages yet.</p>
+                          ) : (
+                            selectedCreatorThreadMessages.map((message) => {
+                              const isOwn = message.sender_wallet.toLowerCase() === (address || "").toLowerCase();
+                              return (
+                                <div
+                                  key={message.id}
+                                  className={`rounded-2xl px-4 py-3 text-sm ${
+                                    isOwn ? "ml-10 bg-[#eff6ff] text-foreground" : "mr-10 bg-white text-foreground"
+                                  }`}
+                                >
+                                  <p className="whitespace-pre-wrap leading-6">{message.body}</p>
+                                  <p className="mt-2 text-[11px] text-muted-foreground">
+                                    {message.sender_role === "creator" ? "You" : "Collector"}
+                                  </p>
+                                </div>
+                              );
+                            })
+                          )}
+                        </div>
+
+                        <div className="mt-3 flex items-end gap-2">
+                          <textarea
+                            value={creatorReplyDraft}
+                            onChange={(event) => setCreatorReplyDraft(event.target.value)}
+                            className="min-h-[96px] flex-1 rounded-2xl border border-border bg-background px-3 py-3 text-sm"
+                            placeholder="Reply to the collector, thank them, or ask a follow-up..."
+                          />
+                          <Button
+                            onClick={() => void handleReplyToCreatorThread()}
+                            disabled={feedbackSubmitting || !creatorReplyDraft.trim()}
+                            className="h-11 rounded-full"
+                          >
+                            {feedbackSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : "Reply"}
+                          </Button>
+                        </div>
+                      </>
+                    ) : (
+                      <div className="flex min-h-[260px] items-center justify-center text-sm text-muted-foreground">
+                        Select a thread to manage creator feedback.
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <div className="rounded-2xl border border-dashed p-6 text-sm text-muted-foreground">
+                  No verified collector feedback has landed on this release yet. Public reviews and private creator notes will appear here as soon as collectors respond from ownership.
+                </div>
+              )
+            ) : feedbackOverview?.can_leave_feedback ? (
               <>
                 <div className="flex flex-wrap gap-2">
                   <Button
@@ -730,18 +1044,89 @@ export function ProductDetailPage() {
                 {feedbackOverview.viewer_threads.length > 0 ? (
                   <div className="rounded-2xl border bg-secondary/20 p-4">
                     <p className="text-sm font-semibold text-foreground">Your active feedback threads</p>
-                    <div className="mt-3 space-y-3">
-                      {feedbackOverview.viewer_threads.map((thread) => (
-                        <div key={thread.id} className="rounded-2xl bg-background px-4 py-3">
-                          <div className="flex flex-wrap gap-2">
-                            <Badge variant="outline">{thread.visibility}</Badge>
-                            <Badge variant="outline">{thread.feedback_type}</Badge>
-                            {thread.subscriber_priority ? <Badge className="bg-[#ecfeff] text-[#0f766e]">Subscriber priority</Badge> : null}
+                    <div className="mt-3 grid gap-4 lg:grid-cols-[220px_minmax(0,1fr)]">
+                      <div className="space-y-2">
+                        {feedbackOverview.viewer_threads.map((thread) => (
+                          <button
+                            key={thread.id}
+                            type="button"
+                            onClick={() => setSelectedViewerThreadId(thread.id)}
+                            className={`w-full rounded-2xl px-4 py-3 text-left transition-colors ${
+                              selectedViewerThreadId === thread.id ? "bg-primary/10" : "bg-background"
+                            }`}
+                          >
+                            <div className="flex flex-wrap gap-2">
+                              <Badge variant="outline">{thread.visibility}</Badge>
+                              <Badge variant="outline">{thread.feedback_type}</Badge>
+                              {thread.subscriber_priority ? <Badge className="bg-[#ecfeff] text-[#0f766e]">Subscriber priority</Badge> : null}
+                            </div>
+                            <p className="mt-2 text-sm font-semibold text-foreground">{thread.title || "Feedback thread"}</p>
+                            <p className="mt-1 line-clamp-2 text-sm text-muted-foreground">{thread.latest_message?.body || "Open feedback thread"}</p>
+                          </button>
+                        ))}
+                      </div>
+
+                      <div className="rounded-2xl bg-background p-4">
+                        {selectedViewerThreadId ? (
+                          <>
+                            <div className="border-b border-border pb-3">
+                              <p className="text-sm font-semibold text-foreground">
+                                {feedbackOverview.viewer_threads.find((thread) => thread.id === selectedViewerThreadId)?.title || "Feedback thread"}
+                              </p>
+                              <p className="mt-1 text-xs text-muted-foreground">
+                                Continue the conversation with the creator here.
+                              </p>
+                            </div>
+
+                            <div className="mt-3 max-h-[280px] space-y-3 overflow-y-auto pr-1">
+                              {selectedViewerThreadLoading ? (
+                                <div className="flex items-center justify-center py-10">
+                                  <Loader2 className="h-5 w-5 animate-spin text-primary" />
+                                </div>
+                              ) : selectedViewerThreadMessages.length === 0 ? (
+                                <p className="py-8 text-center text-sm text-muted-foreground">No replies yet.</p>
+                              ) : (
+                                selectedViewerThreadMessages.map((message) => {
+                                  const isOwn = message.sender_wallet.toLowerCase() === (address || "").toLowerCase();
+                                  return (
+                                    <div
+                                      key={message.id}
+                                      className={`rounded-2xl px-4 py-3 text-sm ${
+                                        isOwn ? "ml-10 bg-[#eff6ff] text-foreground" : "mr-10 bg-white text-foreground"
+                                      }`}
+                                    >
+                                      <p className="whitespace-pre-wrap leading-6">{message.body}</p>
+                                      <p className="mt-2 text-[11px] text-muted-foreground">
+                                        {message.sender_role === "creator" ? "Creator" : "You"}
+                                      </p>
+                                    </div>
+                                  );
+                                })
+                              )}
+                            </div>
+
+                            <div className="mt-3 flex items-end gap-2">
+                              <textarea
+                                value={viewerReplyDraft}
+                                onChange={(event) => setViewerReplyDraft(event.target.value)}
+                                className="min-h-[96px] flex-1 rounded-2xl border border-border bg-background px-3 py-3 text-sm"
+                                placeholder="Reply with more context, a follow-up, or a thank you..."
+                              />
+                              <Button
+                                onClick={() => void handleReplyToViewerThread()}
+                                disabled={feedbackSubmitting || !viewerReplyDraft.trim()}
+                                className="h-11 rounded-full"
+                              >
+                                {feedbackSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : "Reply"}
+                              </Button>
+                            </div>
+                          </>
+                        ) : (
+                          <div className="flex min-h-[260px] items-center justify-center text-sm text-muted-foreground">
+                            Select a thread to read creator replies.
                           </div>
-                          <p className="mt-2 text-sm font-semibold text-foreground">{thread.title || "Feedback thread"}</p>
-                          <p className="mt-1 text-sm text-muted-foreground">{thread.latest_message?.body || "Open feedback thread"}</p>
-                        </div>
-                      ))}
+                        )}
+                      </div>
                     </div>
                   </div>
                 ) : null}

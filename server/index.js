@@ -222,6 +222,7 @@ const DROP_MAINTENANCE_INTERVAL_MS = Math.max(
   5 * 60 * 1000,
   Number(process.env.DROP_MAINTENANCE_INTERVAL_MS || 30 * 60 * 1000),
 );
+const isVerboseServerLogging = NODE_ENV !== "production" && !process.env.VERCEL;
 
 if (!appJwtSecret) {
   throw new Error("APP_JWT_SECRET or JWT_SECRET is required");
@@ -231,15 +232,13 @@ if (!SUPABASE_URL || !SUPABASE_SERVER_KEY) {
   throw new Error("SUPABASE_URL and SUPABASE_SECRET_KEY or SUPABASE_SERVICE_ROLE_KEY are required");
 }
 
-// Log startup configuration
-console.log("═══════════════════════════════════════════════════════════");
-console.log("🚀 PopUp API Starting");
-console.log("═══════════════════════════════════════════════════════════");
-console.log("📍 Environment:", NODE_ENV);
-console.log("🌐 Frontend Origin:", FRONTEND_ORIGIN);
-console.log("🔐 Admin Wallets:", ADMIN_WALLETS || "none");
-console.log("🧷 Pinata Auth:", getPinataAuthMode(process.env) || "none");
-console.log("═══════════════════════════════════════════════════════════");
+if (isVerboseServerLogging) {
+  console.log("PopUp API starting", {
+    environment: NODE_ENV,
+    frontendOrigin: FRONTEND_ORIGIN,
+    pinataAuth: getPinataAuthMode(process.env) || "none",
+  });
+}
 
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVER_KEY, {
@@ -1588,37 +1587,21 @@ app.use(express.static(frontendDistPath, {
 // ═════════════════════════════════════════════════════════════════════════════
 
 app.use((req, res, next) => {
-  // Log EVERY request with full details
-  console.log(`\n${'═'.repeat(80)}`);
-  console.log(`📥 INCOMING REQUEST`);
-  console.log(`   method: ${req.method}`);
-  console.log(`   originalUrl: ${req.originalUrl}`);
-  console.log(`   url: ${req.url}`);
-  console.log(`   path: ${req.path}`);
-  console.log(`   baseUrl: ${req.baseUrl}`);
-  console.log(`   hostname: ${req.hostname}`);
-  console.log(`   protocol: ${req.protocol}`);
-  
   // Strip /api prefix - required for Vercel routing
   if (req.originalUrl?.startsWith('/api/')) {
     const newUrl = req.originalUrl.substring(4); // Remove '/api' (4 chars)
-    console.log(`   ⚙️ REWRITING: ${req.originalUrl} → ${newUrl}`);
+    if (isVerboseServerLogging) {
+      console.log(`Rewriting request URL from ${req.originalUrl} to ${newUrl}`);
+    }
     req.url = newUrl;
     // Force Express to re-parse the new URL for routing
   } else if (req.url?.startsWith('/api/')) {
     const newUrl = req.url.substring(4);
-    console.log(`   ⚙️ REWRITING url: ${req.url} → ${newUrl}`);
+    if (isVerboseServerLogging) {
+      console.log(`Rewriting request URL from ${req.url} to ${newUrl}`);
+    }
     req.url = newUrl;
   }
-  
-  console.log(`   AFTER REWRITE: url=${req.url}, path=${req.path}`);
-  console.log(`${'═'.repeat(80)}\n`);
-  next();
-});
-
-// Log all requests right before routing
-app.use((req, res, next) => {
-  console.log(`📨 ROUTING: ${req.method} ${req.url} (original path was ${req.path})`);
   next();
 });
 
@@ -1776,7 +1759,7 @@ const authVerifyImpl = async (req, res) => {
     const recovered = normalizeWallet(ethers.verifyMessage(message, signature));
 
     if (recovered !== wallet) {
-      console.warn(`🔓 Failed signature verification for ${wallet} from ${req.ip}`);
+      console.warn("Failed signature verification for an auth request");
       return res.status(401).json({ error: "Signature verification failed" });
     }
 
@@ -1794,7 +1777,9 @@ const authVerifyImpl = async (req, res) => {
     const apiToken = issueAppToken({ wallet, role });
     const supabaseToken = issueSupabaseToken({ wallet, role });
 
-    console.log(`✅ Auth verified for ${wallet} (role: ${role})`);
+    if (isVerboseServerLogging) {
+      console.log(`Auth verified for wallet ${wallet} with role ${role}`);
+    }
     return res.json({
       wallet,
       role,
