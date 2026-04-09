@@ -39,6 +39,7 @@ const ProductDetailPage = lazy(() => import("./pages/ProductDetailPage").then((m
 const CartPage = lazy(() => import("./pages/CartPage").then((module) => ({ default: module.CartPage })));
 const CheckoutPage = lazy(() => import("./pages/CheckoutPage").then((module) => ({ default: module.CheckoutPage })));
 const OrderHistoryPage = lazy(() => import("./pages/OrderHistoryPage").then((module) => ({ default: module.OrderHistoryPage })));
+const UnifiedDiscoverFeed = lazy(() => import("./pages/UnifiedDiscoverFeed").then((module) => ({ default: module.UnifiedDiscoverFeed })));
 const CatalogPage = lazy(() => import("./pages/CatalogPage").then((module) => ({ default: module.CatalogPage })));
 const CreatorDashboard = lazy(() => import("./pages/CreatorDashboard").then((module) => ({ default: module.CreatorDashboard })));
 
@@ -91,6 +92,7 @@ const App = () => {
                       <Route path="/collection" element={<WalletCollectionRoute />} />
                       <Route path="/poaps" element={<WalletPOAPsRoute />} />
                       <Route path="/subscriptions" element={<WalletSubscriptionsRoute />} />
+                      <Route path="/discover" element={<UnifiedDiscoverFeed />} />
                       <Route path="/products" element={<SocialMediaFeedReleases />} />
                       <Route path="/feed" element={<SocialMediaFeedReleases />} />
                       <Route path="/products/:id" element={<ProductDetailPage />} />
