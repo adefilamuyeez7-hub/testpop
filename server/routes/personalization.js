@@ -26,6 +26,39 @@ export default function createPersonalizationRoutes(supabase) {
     return '';
   }
 
+  function normalizeBaseUrl(value) {
+    const normalized = String(value || "").trim().replace(/\/+$/, "");
+    return normalized || "";
+  }
+
+  function resolveShareBaseUrl(req) {
+    const configuredBase = normalizeBaseUrl(
+      process.env.SHARE_BASE_URL ||
+      process.env.VITE_SHARE_BASE_URL ||
+      process.env.FRONTEND_PUBLIC_URL
+    );
+
+    if (configuredBase) {
+      return configuredBase;
+    }
+
+    const forwardedProto = String(req.headers["x-forwarded-proto"] || "").split(",")[0].trim();
+    const forwardedHost = String(req.headers["x-forwarded-host"] || "").split(",")[0].trim();
+    const host = forwardedHost || String(req.headers.host || "").trim();
+    const protocol = forwardedProto || req.protocol || "https";
+
+    if (host) {
+      return `${protocol}://${host}`;
+    }
+
+    const frontendOrigin = String(process.env.FRONTEND_ORIGIN || "")
+      .split(",")
+      .map((origin) => normalizeBaseUrl(origin))
+      .find(Boolean);
+
+    return frontendOrigin || "https://testpop-one.vercel.app";
+  }
+
   // ============================================
   // FAVORITES ENDPOINTS
   // ============================================
@@ -329,7 +362,7 @@ export default function createPersonalizationRoutes(supabase) {
       if (error) throw error;
 
       const shareId = data?.[0]?.id;
-      const baseUrl = process.env.VITE_SHARE_BASE_URL || 'https://testpop-one.vercel.app';
+      const baseUrl = resolveShareBaseUrl(req);
       const params = new URLSearchParams();
       if (shareId) params.set('share', shareId);
       if (userWallet) params.set('ref', userWallet);

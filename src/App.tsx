@@ -80,6 +80,7 @@ const App = () => {
               <BrowserRouter>
                 <Suspense fallback={<LoadingSpinner />}>
                   <Routes>
+                    <Route path="/share/:type/:id" element={<ShareLandingPage />} />
                     <Route element={<AppLayout />}>
                       <Route path="/" element={<WalletIndexRoute />} />
                       <Route path="/apply" element={<WalletArtistApplicationRoute />} />
@@ -94,7 +95,6 @@ const App = () => {
                       <Route path="/poaps" element={<WalletPOAPsRoute />} />
                       <Route path="/subscriptions" element={<WalletSubscriptionsRoute />} />
                       <Route path="/discover" element={<UnifiedDiscoverFeed />} />
-                      <Route path="/share/:type/:id" element={<ShareLandingPage />} />
                       <Route path="/products" element={<SocialMediaFeedReleases />} />
                       <Route path="/feed" element={<SocialMediaFeedReleases />} />
                       <Route path="/products/:id" element={<ProductDetailPage />} />

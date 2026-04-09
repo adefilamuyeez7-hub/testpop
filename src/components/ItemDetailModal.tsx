@@ -7,7 +7,7 @@ import {
   DialogTitle,
   DialogDescription
 } from '@/components/ui/dialog';
-import { X, Loader2, ShoppingCart, Heart } from 'lucide-react';
+import { X, Loader2, ShoppingCart } from 'lucide-react';
 import { supabase } from '@/lib/db';
 import {
   CatalogItem,
@@ -36,7 +36,6 @@ export function ItemDetailModal({
   const [item, setItem] = useState<CatalogItem | null>(null);
   const [comments, setComments] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
-  const [isFavorited, setIsFavorited] = useState(false);
   const [activeTab, setActiveTab] = useState<'details' | 'comments'>('details');
 
   useEffect(() => {
@@ -245,15 +244,6 @@ export function ItemDetailModal({
                   Get Now
                 </button>
               )}
-              <button
-                onClick={() => setIsFavorited(!isFavorited)}
-                className="flex-1 border border-gray-300 font-semibold py-3 rounded-lg hover:bg-gray-50 transition-colors flex items-center justify-center gap-2"
-              >
-                <Heart
-                  className={`w-5 h-5 ${isFavorited ? 'fill-red-500 text-red-500' : ''}`}
-                />
-                {isFavorited ? 'Favorited' : 'Add to Favorites'}
-              </button>
             </div>
           </div>
         )}

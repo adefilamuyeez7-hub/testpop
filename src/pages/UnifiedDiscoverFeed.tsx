@@ -414,10 +414,12 @@ function FeedHeader({
 function ShareMenuButton({
   item,
   compact = false,
+  fullWidth = false,
   onShared,
 }: {
   item: DiscoverPost;
   compact?: boolean;
+  fullWidth?: boolean;
   onShared?: () => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -490,14 +492,14 @@ function ShareMenuButton({
   }
 
   return (
-    <div className="relative">
+    <div className={`relative ${fullWidth ? "w-full" : ""}`}>
       <button
         type="button"
         onClick={() => setOpen((current) => !current)}
         className={`inline-flex items-center justify-center gap-2 rounded-full transition ${
           compact
             ? "h-10 w-10 border border-slate-200 bg-white text-slate-700 hover:bg-slate-100"
-            : "h-10 px-4 text-sm font-medium text-slate-700 hover:bg-slate-100"
+            : `${fullWidth ? "h-11 w-full px-4" : "h-10 px-4"} border border-slate-200 bg-white text-sm font-medium text-slate-700 hover:bg-slate-100`
         }`}
       >
         <Share2 className="h-4 w-4" />
@@ -553,85 +555,6 @@ function ShareMenuButton({
   );
 }
 
-function InlineCommentComposer({
-  post,
-  disabled,
-  disabledLabel,
-  onCommentCreated,
-  onRequireWallet,
-}: {
-  post: DiscoverPost;
-  disabled: boolean;
-  disabledLabel: string;
-  onCommentCreated: (thread: FeedbackThread) => void;
-  onRequireWallet: () => Promise<void>;
-}) {
-  const [value, setValue] = useState("");
-  const [sending, setSending] = useState(false);
-
-  async function handleSubmit() {
-    const body = value.trim();
-    if (!body) return;
-
-    const token = getRuntimeApiToken();
-    if (!token) {
-      await onRequireWallet();
-      return;
-    }
-
-    try {
-      setSending(true);
-      const thread = await postPublicComment(post, body, token);
-
-      await trackItemEvent(post, "comment", { source: "discover_feed" });
-      setValue("");
-      onCommentCreated(toFeedbackThread(thread));
-      toast({
-        title: "Comment posted",
-        description: "Your public reply is now part of the thread.",
-      });
-    } catch (error) {
-      toast({
-        title: "Unable to post comment",
-        description: error instanceof Error ? error.message : "Try again in a moment.",
-        variant: "destructive",
-      });
-    } finally {
-      setSending(false);
-    }
-  }
-
-  return (
-    <div className="rounded-2xl border border-slate-200 bg-slate-50/80 p-3">
-      <div className="flex gap-3">
-        <input
-          type="text"
-          value={value}
-          onChange={(event) => setValue(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === "Enter" && !event.shiftKey) {
-              event.preventDefault();
-              void handleSubmit();
-            }
-          }}
-          placeholder={disabled ? disabledLabel : "Add a public comment to this drop"}
-          disabled={disabled || sending}
-          className="h-11 flex-1 rounded-full border border-slate-200 bg-white px-4 text-sm text-slate-900 outline-none transition focus:border-slate-300 disabled:cursor-not-allowed disabled:bg-slate-100"
-        />
-        <button
-          type="button"
-          onClick={() => void handleSubmit()}
-          disabled={disabled || sending || !value.trim()}
-          className="inline-flex h-11 items-center gap-2 rounded-full bg-slate-950 px-4 text-sm font-medium text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300"
-        >
-          {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-          Send
-        </button>
-      </div>
-    </div>
-  );
-}
-
 function DiscoverCard({
   post,
   creator,
@@ -644,7 +567,6 @@ function DiscoverCard({
   onOpenComments: (post: DiscoverPost) => void;
 }) {
   const navigate = useNavigate();
-  const { isConnected, connectWallet } = useWallet();
   const addItem = useCartStore((state) => state.addItem);
   const [comments, setComments] = useState<FeedbackThread[]>([]);
   const [commentsLoading, setCommentsLoading] = useState(true);
@@ -669,27 +591,7 @@ function DiscoverCard({
   const primaryCta = getPrimaryCta(post);
   const PrimaryCtaIcon = primaryCta.icon;
   const typePill = getTypePill(post);
-  const commentDisabled = !isConnected || !getRuntimeApiToken();
-  const commentDisabledLabel = !isConnected
-    ? "Connect your wallet to comment"
-    : "Secure session is still syncing";
   const creatorAvatarUrl = creator?.avatar_url || undefined;
-
-  async function handleRequireWallet() {
-    if (!isConnected) {
-      await connectWallet();
-      toast({
-        title: "Wallet connection requested",
-        description: "Connect your wallet and wait a moment for the secure session to finish.",
-      });
-      return;
-    }
-
-    toast({
-      title: "Secure session pending",
-      description: "Your wallet is connected. Give POPUP a moment to finish secure sign-in.",
-    });
-  }
 
   async function handlePrimaryAction() {
     try {
@@ -749,10 +651,6 @@ function DiscoverCard({
     } finally {
       setCtaBusy(false);
     }
-  }
-
-  function handleCommentCreated(thread: FeedbackThread) {
-    setComments((current) => mergeFeedbackThreads(current, thread));
   }
 
   return (
@@ -822,36 +720,28 @@ function DiscoverCard({
           </div>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2 border-y border-slate-100 py-3">
+        <div className="grid grid-cols-3 gap-2 border-y border-slate-100 py-3">
           <button
             type="button"
             onClick={() => onOpenComments(post)}
-            className="inline-flex h-10 items-center gap-2 rounded-full bg-slate-100 px-4 text-sm font-medium text-slate-700 transition hover:bg-slate-200"
+            className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-full border border-slate-200 bg-slate-100 px-4 text-sm font-medium text-slate-700 transition hover:bg-slate-200"
           >
             <MessageCircle className="h-4 w-4" />
             Conversation
           </button>
 
-          <ShareMenuButton item={post} />
-
           <button
             type="button"
             onClick={() => void handlePrimaryAction()}
             disabled={ctaBusy}
-            className={`ml-auto inline-flex h-11 items-center gap-2 rounded-full px-5 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-70 ${primaryCta.className}`}
+            className={`inline-flex h-11 w-full items-center justify-center gap-2 rounded-full px-5 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-70 ${primaryCta.className}`}
           >
             {ctaBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <PrimaryCtaIcon className="h-4 w-4" />}
             {primaryCta.label}
           </button>
-        </div>
 
-        <InlineCommentComposer
-          post={post}
-          disabled={commentDisabled}
-          disabledLabel={commentDisabledLabel}
-          onRequireWallet={handleRequireWallet}
-          onCommentCreated={handleCommentCreated}
-        />
+          <ShareMenuButton item={post} fullWidth />
+        </div>
 
         <div className="space-y-3">
           {commentsLoading ? (
@@ -1084,7 +974,7 @@ function DetailsModal({
             </div>
 
             <div className="rounded-[24px] border border-slate-200 p-5">
-              <div className="flex items-center justify-between gap-4">
+              <div className="flex items-center gap-4">
                 <div className="flex items-center gap-3">
                   <div className="flex h-12 w-12 items-center justify-center overflow-hidden rounded-full bg-gradient-to-br from-[#1d4ed8] to-[#0f172a] text-sm font-semibold text-white">
                     {creator?.avatar_url ? (
@@ -1099,15 +989,6 @@ function DetailsModal({
                   <p className="text-sm text-slate-500">{getCreatorHandle(post, creator)}</p>
                   </div>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => void handlePrimaryAction()}
-                  disabled={ctaBusy}
-                  className={`inline-flex h-11 items-center gap-2 rounded-full px-5 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-70 ${primaryCta.className}`}
-                >
-                  {ctaBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <PrimaryIcon className="h-4 w-4" />}
-                  {primaryCta.label}
-                </button>
               </div>
 
               <div className="mt-5 grid gap-3 sm:grid-cols-3">
@@ -1141,10 +1022,30 @@ function DetailsModal({
                   <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Social signal</p>
                   <p className="mt-1 text-lg font-semibold text-slate-950">Collector momentum</p>
                 </div>
-                <ShareMenuButton item={post} compact />
               </div>
 
-              <div className="mt-5 grid grid-cols-2 gap-3">
+              <div className="mt-5 grid grid-cols-3 gap-2">
+                <button
+                  type="button"
+                  onClick={() => onOpenComments(post)}
+                  className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 text-sm font-medium text-slate-700 transition hover:bg-slate-100"
+                >
+                  <MessageCircle className="h-4 w-4" />
+                  Conversation
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void handlePrimaryAction()}
+                  disabled={ctaBusy}
+                  className={`inline-flex h-11 w-full items-center justify-center gap-2 rounded-full px-5 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-70 ${primaryCta.className}`}
+                >
+                  {ctaBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <PrimaryIcon className="h-4 w-4" />}
+                  {primaryCta.label}
+                </button>
+                <ShareMenuButton item={post} fullWidth />
+              </div>
+
+              <div className="mt-5 grid grid-cols-3 gap-3">
                 <div className="rounded-2xl bg-slate-50 px-4 py-3">
                   <p className="text-xs uppercase tracking-[0.18em] text-slate-400">Views</p>
                   <p className="mt-1 text-lg font-semibold text-slate-950">{analytics?.views || 0}</p>
@@ -1154,25 +1055,12 @@ function DetailsModal({
                   <p className="mt-1 text-lg font-semibold text-slate-950">{analytics?.shares || 0}</p>
                 </div>
                 <div className="rounded-2xl bg-slate-50 px-4 py-3">
-                  <p className="text-xs uppercase tracking-[0.18em] text-slate-400">Likes</p>
-                  <p className="mt-1 text-lg font-semibold text-slate-950">{analytics?.likes || 0}</p>
-                </div>
-                <div className="rounded-2xl bg-slate-50 px-4 py-3">
                   <p className="text-xs uppercase tracking-[0.18em] text-slate-400">Avg rating</p>
                   <p className="mt-1 text-lg font-semibold text-slate-950">
                     {post.avg_rating || analytics?.avg_rating ? (post.avg_rating || analytics?.avg_rating || 0).toFixed(1) : "N/A"}
                   </p>
                 </div>
               </div>
-
-              <button
-                type="button"
-                onClick={() => onOpenComments(post)}
-                className="mt-4 inline-flex h-11 w-full items-center justify-center gap-2 rounded-full border border-slate-200 bg-white text-sm font-medium text-slate-700 transition hover:bg-slate-100"
-              >
-                <MessageCircle className="h-4 w-4" />
-                Open conversation
-              </button>
             </div>
 
             <div className="rounded-[24px] border border-slate-200 p-5">

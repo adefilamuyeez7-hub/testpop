@@ -7,10 +7,24 @@ type MobileWebAppGateProps = {
   children: ReactNode;
 };
 
+function shouldBypassGateForSharedFlow() {
+  if (typeof window === "undefined") {
+    return false;
+  }
+
+  const { pathname, search } = window.location;
+  if (pathname.startsWith("/share/")) {
+    return true;
+  }
+
+  const params = new URLSearchParams(search);
+  return params.has("share") || params.get("from") === "share" || params.get("entry") === "share";
+}
+
 const MobileWebAppGate = ({ children }: MobileWebAppGateProps) => {
   const { deferredPrompt, isAppleMobile, promptInstall, shouldGateMobileApp } = useMobileWebAppGate();
 
-  if (!shouldGateMobileApp) {
+  if (!shouldGateMobileApp || shouldBypassGateForSharedFlow()) {
     return <>{children}</>;
   }
 

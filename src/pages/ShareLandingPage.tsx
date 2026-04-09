@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { ArrowRight, ExternalLink, Gavel, Heart, Loader2, MessageCircle, Share2, ShoppingBag } from "lucide-react";
+import { ArrowRight, ExternalLink, Gavel, Loader2, MessageCircle, Share2, ShoppingBag } from "lucide-react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { supabase } from "@/lib/db";
 import { SECURE_API_BASE } from "@/lib/apiBase";
@@ -88,6 +88,19 @@ function getPrimaryCta(item: ShareCatalogItem) {
   }
 }
 
+function buildShareFlowSearch(searchParams: URLSearchParams) {
+  const nextParams = new URLSearchParams();
+  const shareId = searchParams.get("share");
+  const ref = searchParams.get("ref");
+
+  if (shareId) nextParams.set("share", shareId);
+  if (ref) nextParams.set("ref", ref);
+  nextParams.set("from", "share");
+
+  const serialized = nextParams.toString();
+  return serialized ? `?${serialized}` : "";
+}
+
 const ShareLandingPage = () => {
   const navigate = useNavigate();
   const addItem = useCartStore((state) => state.addItem);
@@ -99,6 +112,7 @@ const ShareLandingPage = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [ctaBusy, setCtaBusy] = useState(false);
+  const shareFlowSearch = useMemo(() => buildShareFlowSearch(searchParams), [searchParams]);
 
   useEffect(() => {
     const shareId = searchParams.get("share");
@@ -221,11 +235,11 @@ const ShareLandingPage = () => {
           product.preview_uri || product.image_url || product.image_ipfs_uri || item.image_url || "",
         );
 
-        navigate("/cart");
+        navigate(`/cart${shareFlowSearch}`);
         return;
       }
 
-      navigate(getItemRoute(item));
+      navigate(`${getItemRoute(item)}${shareFlowSearch}`);
     } catch (actionError) {
       setError(actionError instanceof Error ? actionError.message : "Unable to continue.");
     } finally {
@@ -252,7 +266,7 @@ const ShareLandingPage = () => {
           <p className="mt-3 text-sm leading-6 text-slate-600">{error || "The item may have moved or is no longer public."}</p>
           <button
             type="button"
-            onClick={() => navigate("/discover")}
+            onClick={() => navigate(`/discover${shareFlowSearch}`)}
             className="mt-6 inline-flex h-11 items-center gap-2 rounded-full bg-slate-950 px-5 text-sm font-medium text-white transition hover:bg-slate-800"
           >
             Back to Discover
@@ -338,11 +352,11 @@ const ShareLandingPage = () => {
                 </button>
                 <button
                   type="button"
-                  onClick={() => navigate("/discover")}
+                  onClick={() => navigate(`/discover${shareFlowSearch}`)}
                   className="inline-flex h-12 items-center gap-2 rounded-full border border-slate-200 bg-white px-6 text-sm font-medium text-slate-700 transition hover:bg-slate-100"
                 >
-                  <Heart className="h-4 w-4" />
-                  Open Discover
+                  <ExternalLink className="h-4 w-4" />
+                  Open POPUP
                 </button>
               </div>
             </div>
@@ -387,7 +401,7 @@ const ShareLandingPage = () => {
               </div>
               <button
                 type="button"
-                onClick={() => navigate("/discover")}
+                onClick={() => navigate(`/discover${shareFlowSearch}`)}
                 className="inline-flex h-10 items-center gap-2 rounded-full border border-slate-200 bg-white px-4 text-sm font-medium text-slate-700 transition hover:bg-slate-100"
               >
                 Join the feed
