@@ -515,6 +515,8 @@ export interface ProductFeedbackThread {
 export interface ProductFeedbackOverview {
   product: Pick<Product, "id" | "artist_id" | "creator_wallet" | "name" | "image_url" | "image_ipfs_uri" | "preview_uri" | "status">;
   can_leave_feedback: boolean;
+  can_publish_public_review: boolean;
+  feedback_gate: "collector" | "subscriber" | "locked";
   is_creator_viewer: boolean;
   viewer_relationship: {
     is_subscriber: boolean;

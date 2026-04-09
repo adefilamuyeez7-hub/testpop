@@ -341,6 +341,19 @@ export function ProductDetailPage() {
     }, 120);
   }, [location.hash, feedbackOverview]);
 
+  useEffect(() => {
+    if (!feedbackOverview || feedbackOverview.can_publish_public_review) {
+      return;
+    }
+
+    setFeedbackForm((prev) => ({
+      ...prev,
+      visibility: "private",
+      feedbackType: "question",
+      rating: 5,
+    }));
+  }, [feedbackOverview]);
+
   const isOnchainReady =
     (product?.contractKind === "creativeReleaseEscrow" &&
       typeof product.contractListingId === "number" &&
@@ -380,6 +393,9 @@ export function ProductDetailPage() {
     : null;
   const artMetadataUrl = creativeRelease?.art_metadata_uri ? ipfsToHttp(creativeRelease.art_metadata_uri) : null;
   const isCreatorViewer = feedbackOverview?.is_creator_viewer ?? false;
+  const canLeaveFeedback = feedbackOverview?.can_leave_feedback ?? false;
+  const canPublishPublicReview = feedbackOverview?.can_publish_public_review ?? false;
+  const feedbackGate = feedbackOverview?.feedback_gate ?? "locked";
   const selectedCreatorThread =
     feedbackOverview?.creator_threads?.find((thread) => thread.id === selectedCreatorThreadId) || null;
 
@@ -424,18 +440,23 @@ export function ProductDetailPage() {
       await establishSecureSession(address);
       await createProductFeedbackThread({
         productId: id,
-        feedbackType: feedbackForm.visibility === "public" ? "review" : feedbackForm.feedbackType,
-        visibility: feedbackForm.visibility,
-        rating: feedbackForm.visibility === "public" ? feedbackForm.rating : null,
+        feedbackType:
+          canPublishPublicReview && feedbackForm.visibility === "public"
+            ? "review"
+            : feedbackForm.feedbackType,
+        visibility: canPublishPublicReview ? feedbackForm.visibility : "private",
+        rating: canPublishPublicReview && feedbackForm.visibility === "public" ? feedbackForm.rating : null,
         title: feedbackForm.title,
         body: feedbackForm.body,
       });
       setFeedbackForm((prev) => ({ ...prev, title: "", body: "" }));
       setFeedbackOverview(await getProductFeedbackOverview(id));
       toast.success(
-        feedbackForm.visibility === "public"
+        canPublishPublicReview && feedbackForm.visibility === "public"
           ? "Your verified collector review is live."
-          : "Your private feedback is in the creator inbox."
+          : feedbackGate === "subscriber"
+            ? "Your gated subscriber thread is now open with the creator."
+            : "Your private feedback is in the creator inbox."
       );
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to send feedback");
@@ -809,7 +830,7 @@ export function ProductDetailPage() {
 
         <Card>
           <CardHeader>
-            <CardTitle className="text-xl">Verified Feedback</CardTitle>
+            <CardTitle className="text-xl">Release Threads</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
             {isCreatorViewer ? (
@@ -927,7 +948,11 @@ export function ProductDetailPage() {
                                 >
                                   <p className="whitespace-pre-wrap leading-6">{message.body}</p>
                                   <p className="mt-2 text-[11px] text-muted-foreground">
-                                    {message.sender_role === "creator" ? "You" : "Collector"}
+                                    {message.sender_role === "creator"
+                                      ? "You"
+                                      : selectedCreatorThread.metadata?.thread_gate === "subscriber"
+                                        ? "Subscriber"
+                                        : "Collector"}
                                   </p>
                                 </div>
                               );
@@ -960,38 +985,44 @@ export function ProductDetailPage() {
                 </div>
               ) : (
                 <div className="rounded-2xl border border-dashed p-6 text-sm text-muted-foreground">
-                  No verified collector feedback has landed on this release yet. Public reviews and private creator notes will appear here as soon as collectors respond from ownership.
+                  No release threads have landed yet. Collector reviews, subscriber notes, and private creator conversations will appear here as soon as someone opens the first thread.
                 </div>
               )
-            ) : feedbackOverview?.can_leave_feedback ? (
+            ) : canLeaveFeedback ? (
               <>
-                <div className="flex flex-wrap gap-2">
-                  <Button
-                    type="button"
-                    variant={feedbackForm.visibility === "public" ? "default" : "outline"}
-                    onClick={() =>
-                      setFeedbackForm((prev) => ({ ...prev, visibility: "public", feedbackType: "review" }))
-                    }
-                    className="rounded-full"
-                  >
-                    Public review
-                  </Button>
-                  <Button
-                    type="button"
-                    variant={feedbackForm.visibility === "private" ? "default" : "outline"}
-                    onClick={() =>
-                      setFeedbackForm((prev) => ({ ...prev, visibility: "private", feedbackType: "feedback" }))
-                    }
-                    className="rounded-full"
-                  >
-                    Private feedback
-                  </Button>
-                  {feedbackOverview.viewer_relationship.active_subscription ? (
-                    <Badge className="bg-[#ecfeff] text-[#0f766e]">Subscriber priority</Badge>
-                  ) : null}
-                </div>
+                {canPublishPublicReview ? (
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      type="button"
+                      variant={feedbackForm.visibility === "public" ? "default" : "outline"}
+                      onClick={() =>
+                        setFeedbackForm((prev) => ({ ...prev, visibility: "public", feedbackType: "review" }))
+                      }
+                      className="rounded-full"
+                    >
+                      Public review
+                    </Button>
+                    <Button
+                      type="button"
+                      variant={feedbackForm.visibility === "private" ? "default" : "outline"}
+                      onClick={() =>
+                        setFeedbackForm((prev) => ({ ...prev, visibility: "private", feedbackType: "feedback" }))
+                      }
+                      className="rounded-full"
+                    >
+                      Private feedback
+                    </Button>
+                    {feedbackOverview?.viewer_relationship.active_subscription ? (
+                      <Badge className="bg-[#ecfeff] text-[#0f766e]">Subscriber priority</Badge>
+                    ) : null}
+                  </div>
+                ) : (
+                  <div className="rounded-2xl border border-[#99f6e4] bg-[#f0fdfa] p-4 text-sm text-[#0f766e]">
+                    Your active subscription unlocks a gated private release thread with the creator. Subscriber comments stay private unless the creator later curates them public.
+                  </div>
+                )}
 
-                {feedbackForm.visibility === "private" ? (
+                {feedbackForm.visibility === "private" || !canPublishPublicReview ? (
                   <select
                     value={feedbackForm.feedbackType}
                     onChange={(event) =>
@@ -1004,7 +1035,7 @@ export function ProductDetailPage() {
                   >
                     <option value="feedback">Feedback</option>
                     <option value="question">Question</option>
-                    <option value="review">Collector note</option>
+                    {canPublishPublicReview ? <option value="review">Collector note</option> : null}
                   </select>
                 ) : (
                   <div className="flex items-center gap-2 text-sm">
@@ -1029,9 +1060,11 @@ export function ProductDetailPage() {
                   value={feedbackForm.title}
                   onChange={(event) => setFeedbackForm((prev) => ({ ...prev, title: event.target.value }))}
                   placeholder={
-                    feedbackForm.visibility === "public"
+                    canPublishPublicReview && feedbackForm.visibility === "public"
                       ? "Review title"
-                      : "Optional subject for the creator"
+                      : feedbackGate === "subscriber"
+                        ? "Optional subject for your subscriber thread"
+                        : "Optional subject for the creator"
                   }
                   className="rounded-xl"
                 />
@@ -1040,9 +1073,11 @@ export function ProductDetailPage() {
                   onChange={(event) => setFeedbackForm((prev) => ({ ...prev, body: event.target.value }))}
                   className="min-h-[140px] w-full rounded-2xl border border-border bg-background px-3 py-3 text-sm"
                   placeholder={
-                    feedbackForm.visibility === "public"
+                    canPublishPublicReview && feedbackForm.visibility === "public"
                       ? "Tell future collectors what this product felt like to own or use."
-                      : "Send the creator a verified note, request, bug report, or idea from your collection."
+                      : feedbackGate === "subscriber"
+                        ? "Ask a subscriber-only question, leave a note, or start a gated conversation about this release."
+                        : "Send the creator a verified note, request, bug report, or idea from your collection."
                   }
                 />
                 <Button
@@ -1050,7 +1085,13 @@ export function ProductDetailPage() {
                   disabled={feedbackSubmitting || !feedbackForm.body.trim()}
                   className="w-full rounded-full"
                 >
-                  {feedbackSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : "Send verified feedback"}
+                  {feedbackSubmitting ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : canPublishPublicReview ? (
+                    "Send verified feedback"
+                  ) : (
+                    "Open subscriber thread"
+                  )}
                 </Button>
 
                 {feedbackOverview.viewer_threads.length > 0 ? (
@@ -1109,7 +1150,11 @@ export function ProductDetailPage() {
                                     >
                                       <p className="whitespace-pre-wrap leading-6">{message.body}</p>
                                       <p className="mt-2 text-[11px] text-muted-foreground">
-                                        {message.sender_role === "creator" ? "Creator" : "You"}
+                                        {message.sender_role === "creator"
+                                          ? "Creator"
+                                          : feedbackOverview.viewer_threads.find((thread) => thread.id === selectedViewerThreadId)?.metadata?.thread_gate === "subscriber"
+                                            ? "You · Subscriber"
+                                            : "You"}
                                       </p>
                                     </div>
                                   );
@@ -1145,7 +1190,7 @@ export function ProductDetailPage() {
               </>
             ) : (
               <div className="rounded-2xl border border-dashed p-6 text-sm text-muted-foreground">
-                Verified feedback opens after this product reaches your collection. Collectors can publish reviews or send the creator private notes from ownership.
+                Verified reviews open after this product reaches your collection, and active subscribers can open a gated private thread from the release page even before they collect.
               </div>
             )}
           </CardContent>

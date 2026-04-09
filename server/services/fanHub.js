@@ -990,6 +990,8 @@ export async function getProductFeedback(productId, wallet = "") {
   const collectedOrderItem = normalizedWallet
     ? await getCollectedOrderItemForWalletProduct(normalizedWallet, productId)
     : null;
+  const canPublishPublicReview = Boolean(collectedOrderItem);
+  const canLeaveFeedback = Boolean(collectedOrderItem || relationship?.active_subscription);
 
   const { data: publicThreads, error } = await supabase
     .from("product_feedback_threads")
@@ -1078,7 +1080,13 @@ export async function getProductFeedback(productId, wallet = "") {
 
   return {
     product,
-    can_leave_feedback: Boolean(collectedOrderItem),
+    can_leave_feedback: canLeaveFeedback,
+    can_publish_public_review: canPublishPublicReview,
+    feedback_gate: canPublishPublicReview
+      ? "collector"
+      : relationship?.active_subscription
+        ? "subscriber"
+        : "locked",
     is_creator_viewer: isCreatorViewer,
     viewer_relationship: relationship
       ? {
@@ -1114,21 +1122,31 @@ export async function createProductFeedbackThread({
   }
 
   const collectedOrderItem = await getCollectedOrderItemForWalletProduct(normalizedWallet, productId);
-  if (!collectedOrderItem) {
-    throw new Error("Only collectors can leave feedback on products in their collection.");
+  const relationship = await getRelationshipSnapshot(normalizedWallet, product.artist_id);
+  const canPublishPublicReview = Boolean(collectedOrderItem);
+  const canOpenSubscriberThread = Boolean(relationship?.active_subscription);
+
+  if (!canPublishPublicReview && !canOpenSubscriberThread) {
+    throw new Error("Only collectors or active subscribers can open release threads.");
   }
 
-  const relationship = await getRelationshipSnapshot(normalizedWallet, product.artist_id);
-  const normalizedVisibility = visibility === "public" ? "public" : "private";
+  const normalizedVisibility = canPublishPublicReview && visibility === "public" ? "public" : "private";
   const normalizedFeedbackType = ["review", "feedback", "question"].includes(String(feedbackType))
     ? feedbackType
     : normalizedVisibility === "public"
       ? "review"
-      : "feedback";
+      : canPublishPublicReview
+        ? "feedback"
+        : "question";
   const ratingValue = Number(rating);
-  const safeRating = Number.isFinite(ratingValue) && ratingValue >= 1 && ratingValue <= 5
-    ? Math.round(ratingValue)
-    : null;
+  const safeRating =
+    canPublishPublicReview &&
+    normalizedVisibility === "public" &&
+    Number.isFinite(ratingValue) &&
+    ratingValue >= 1 &&
+    ratingValue <= 5
+      ? Math.round(ratingValue)
+      : null;
   const subject = String(title || "").trim() || null;
   const openingMessage = String(body || "").trim();
 
@@ -1160,8 +1178,8 @@ export async function createProductFeedbackThread({
       .insert({
         product_id: productId,
         artist_id: product.artist_id,
-        order_id: collectedOrderItem.order_id,
-        order_item_id: collectedOrderItem.id,
+        order_id: collectedOrderItem?.order_id || null,
+        order_item_id: collectedOrderItem?.id || null,
         buyer_wallet: normalizedWallet,
         creator_wallet: normalizeWallet(product.creator_wallet),
         feedback_type: normalizedFeedbackType,
@@ -1173,9 +1191,10 @@ export async function createProductFeedbackThread({
         metadata: {
           product_name: product.name,
           product_image_url: product.preview_uri || product.image_url || product.image_ipfs_uri || null,
-          quantity: Number(collectedOrderItem.quantity || 1),
-          line_total_eth: toNumber(collectedOrderItem.line_total_eth),
-          source: "my_collection",
+          quantity: Number(collectedOrderItem?.quantity || 1),
+          line_total_eth: toNumber(collectedOrderItem?.line_total_eth),
+          source: collectedOrderItem ? "my_collection" : "subscriber_release_thread",
+          thread_gate: canPublishPublicReview ? "collector" : "subscriber",
           subscriber_perks: relationship?.active_subscription
             ? ["priority-feedback", "subscriber-badge", "creator-priority-inbox"]
             : [],
