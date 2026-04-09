@@ -107,8 +107,46 @@ CREATE TABLE IF NOT EXISTS public.social_shares (
   click_count INT DEFAULT 0,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
   CONSTRAINT social_shares_platform_check
-    CHECK (share_platform IN ('twitter', 'facebook', 'linkedin', 'telegram', 'whatsapp', 'reddit'))
+    CHECK (
+      share_platform IN (
+        'twitter',
+        'facebook',
+        'linkedin',
+        'telegram',
+        'whatsapp',
+        'reddit',
+        'copy',
+        'native'
+      )
+    )
 );
+
+ALTER TABLE public.social_shares
+  ADD COLUMN IF NOT EXISTS item_id UUID;
+
+ALTER TABLE public.social_shares
+  ADD COLUMN IF NOT EXISTS item_type VARCHAR(50);
+
+ALTER TABLE public.social_shares
+  ADD COLUMN IF NOT EXISTS share_platform VARCHAR(50);
+
+ALTER TABLE public.social_shares
+  ADD COLUMN IF NOT EXISTS shared_by_wallet TEXT;
+
+ALTER TABLE public.social_shares
+  ADD COLUMN IF NOT EXISTS share_url TEXT;
+
+ALTER TABLE public.social_shares
+  ADD COLUMN IF NOT EXISTS click_count INT DEFAULT 0;
+
+ALTER TABLE public.social_shares
+  ADD COLUMN IF NOT EXISTS created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW();
+
+UPDATE public.social_shares
+SET click_count = COALESCE(click_count, 0),
+    created_at = COALESCE(created_at, NOW())
+WHERE click_count IS NULL
+   OR created_at IS NULL;
 
 CREATE INDEX IF NOT EXISTS idx_social_shares_item
 ON public.social_shares(item_id, item_type, created_at DESC);

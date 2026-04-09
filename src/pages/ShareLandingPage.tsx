@@ -4,6 +4,7 @@ import { parseEther } from "viem";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { supabase } from "@/lib/db";
 import { SECURE_API_BASE } from "@/lib/apiBase";
+import { resolveMediaUrl } from "@/lib/pinata";
 import { getRuntimeApiToken } from "@/lib/runtimeSession";
 import { useWallet } from "@/hooks/useContracts";
 import { useMintArtist } from "@/hooks/useContractsArtist";
@@ -104,6 +105,14 @@ function truncateWallet(wallet?: string | null, start = 6, end = 4) {
   if (!value) return "Creator";
   if (value.length <= start + end) return value;
   return `${value.slice(0, start)}...${value.slice(-end)}`;
+}
+
+function getShareItemPreviewImage(item?: Pick<ShareCatalogItem, "image_url"> | null) {
+  return resolveMediaUrl(item?.image_url || "");
+}
+
+function getCreatorAvatarUrl(creator?: CreatorProfile | null) {
+  return resolveMediaUrl(creator?.avatar_url || "");
 }
 
 function getItemRoute(item: ShareCatalogItem) {
@@ -237,6 +246,8 @@ const ShareLandingPage = () => {
   const shareFlowSearch = useMemo(() => buildShareFlowSearch(searchParams), [searchParams]);
   const shareId = searchParams.get("share");
   const referrerWallet = searchParams.get("ref");
+  const previewImageUrl = useMemo(() => getShareItemPreviewImage(item), [item]);
+  const creatorAvatarUrl = useMemo(() => getCreatorAvatarUrl(creator), [creator]);
 
   useEffect(() => {
     if (!shareId) return;
@@ -343,7 +354,7 @@ const ShareLandingPage = () => {
       const resolvedAction = await resolveDiscoverPrimaryAction(item);
 
       if (resolvedAction.kind === "cart") {
-        addProductToCart(addItem, resolvedAction.product, item.title, item.image_url || undefined);
+        addProductToCart(addItem, resolvedAction.product, item.title, previewImageUrl || undefined);
         await trackShareLandingEvent(item, "purchase", {
           source: "share_landing",
           action: resolvedAction.analyticsAction,
@@ -487,8 +498,8 @@ const ShareLandingPage = () => {
                 <Share2 className="h-3.5 w-3.5" />
                 Shared action link
               </div>
-              {item.image_url ? (
-                <img src={item.image_url} alt={item.title} className="h-full min-h-[320px] w-full object-cover" />
+              {previewImageUrl ? (
+                <img src={previewImageUrl} alt={item.title} className="h-full min-h-[320px] w-full object-cover" />
               ) : (
                 <div className="flex min-h-[320px] items-center justify-center text-sm text-white/60">No preview image</div>
               )}
@@ -506,8 +517,8 @@ const ShareLandingPage = () => {
 
                 <div className="mt-6 flex items-center gap-3">
                   <div className="flex h-12 w-12 items-center justify-center overflow-hidden rounded-full bg-gradient-to-br from-sky-600 to-slate-900 text-sm font-semibold text-white">
-                    {creator?.avatar_url ? (
-                      <img src={creator.avatar_url} alt={creator.name || item.title} className="h-full w-full object-cover" />
+                    {creatorAvatarUrl ? (
+                      <img src={creatorAvatarUrl} alt={creator.name || item.title} className="h-full w-full object-cover" />
                     ) : (
                       (creator?.name || creator?.handle || creator?.wallet || item.creator_wallet || "P").charAt(0).toUpperCase()
                     )}

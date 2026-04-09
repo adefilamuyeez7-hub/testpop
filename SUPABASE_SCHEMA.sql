@@ -1,5 +1,5 @@
 -- Generated bootstrap schema
--- Generated at 2026-04-09T14:19:40.724Z
+-- Generated at 2026-04-09T16:27:17.225Z
 -- Source: supabase/migrations/*.sql in lexical order
 -- Apply this entire file to a fresh Supabase project to bootstrap the current app schema.
 -- ============================================================================
@@ -6008,3 +6008,30 @@ CREATE POLICY "social_shares_own_write" ON public.social_shares
     OR lower(shared_by_wallet) = lower(auth.jwt() ->> 'wallet_address'))
   WITH CHECK (lower(shared_by_wallet) = lower(auth.jwt() ->> 'sub')
     OR lower(shared_by_wallet) = lower(auth.jwt() ->> 'wallet_address'));
+
+-- ============================================================================
+-- Migration: 20260409_share_platform_support.sql
+-- ============================================================================
+-- ============================================================================
+-- Migration: 20260409_share_platform_support.sql
+-- Purpose: Allow first-party share actions like copy/native to be tracked in
+--          the social_shares table without breaking share-link generation.
+-- ============================================================================
+
+ALTER TABLE public.social_shares
+  DROP CONSTRAINT IF EXISTS social_shares_platform_check;
+
+ALTER TABLE public.social_shares
+  ADD CONSTRAINT social_shares_platform_check
+  CHECK (
+    share_platform IN (
+      'twitter',
+      'facebook',
+      'linkedin',
+      'telegram',
+      'whatsapp',
+      'reddit',
+      'copy',
+      'native'
+    )
+  );

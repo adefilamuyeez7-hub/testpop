@@ -11,6 +11,24 @@ import { verifyApiBearerToken } from '../requestAuth.js';
  */
 export default function createPersonalizationRoutes(supabase) {
   const router = Router();
+  const TRACKED_SHARE_PLATFORMS = new Set([
+    'twitter',
+    'facebook',
+    'linkedin',
+    'telegram',
+    'whatsapp',
+    'reddit',
+    'copy',
+    'native',
+  ]);
+  const PERSISTED_SHARE_PLATFORMS = new Set([
+    'twitter',
+    'facebook',
+    'linkedin',
+    'telegram',
+    'whatsapp',
+    'reddit',
+  ]);
 
   function resolveOptionalWallet(req) {
     if (req.user?.wallet) return req.user.wallet;
@@ -29,6 +47,29 @@ export default function createPersonalizationRoutes(supabase) {
   function normalizeBaseUrl(value) {
     const normalized = String(value || "").trim().replace(/\/+$/, "");
     return normalized || "";
+  }
+
+  function normalizeIpfsUrl(value) {
+    const normalized = String(value || '').trim();
+    if (!normalized) return '';
+    if (normalized.startsWith('ipfs://ipfs/')) {
+      return `https://ipfs.io/ipfs/${normalized.slice('ipfs://ipfs/'.length)}`;
+    }
+    if (normalized.startsWith('ipfs://')) {
+      return `https://ipfs.io/ipfs/${normalized.slice('ipfs://'.length)}`;
+    }
+    return normalized;
+  }
+
+  function normalizeCatalogItem(item) {
+    if (!item || typeof item !== 'object') {
+      return item;
+    }
+
+    return {
+      ...item,
+      image_url: normalizeIpfsUrl(item.image_url),
+    };
   }
 
   function resolveShareBaseUrl(req) {
@@ -347,21 +388,32 @@ export default function createPersonalizationRoutes(supabase) {
       if (!item_id || !item_type || !share_platform) {
         return res.status(400).json({ error: 'Missing required fields' });
       }
+      if (!TRACKED_SHARE_PLATFORMS.has(share_platform)) {
+        return res.status(400).json({ error: 'Unsupported share platform' });
+      }
 
-      // Generate share URL
-      const { data, error } = await supabase
-        .from('social_shares')
-        .insert({
-          item_id,
-          item_type,
-          share_platform,
-          shared_by_wallet: userWallet || null,
-        })
-        .select();
+      let shareRecord = null;
+      const persistedPlatform = PERSISTED_SHARE_PLATFORMS.has(share_platform) ? share_platform : null;
+      if (persistedPlatform) {
+        const { data, error } = await supabase
+          .from('social_shares')
+          .insert({
+            item_id,
+            item_type,
+            share_platform: persistedPlatform,
+            shared_by_wallet: userWallet || null,
+          })
+          .select()
+          .maybeSingle();
 
-      if (error) throw error;
+        if (error) {
+          console.warn('[POST /api/personalization/share] Failed to persist share analytics:', error);
+        } else {
+          shareRecord = data || null;
+        }
+      }
 
-      const shareId = data?.[0]?.id;
+      const shareId = shareRecord?.id || null;
       const baseUrl = resolveShareBaseUrl(req);
       const params = new URLSearchParams();
       if (shareId) params.set('share', shareId);
@@ -382,14 +434,19 @@ export default function createPersonalizationRoutes(supabase) {
       const shareMessage = `${shareText} Open the sales card: ${shareUrl}`;
 
       if (shareId) {
-        await supabase
+        const { error: updateError } = await supabase
           .from('social_shares')
           .update({ share_url: shareUrl })
           .eq('id', shareId);
+        if (updateError) {
+          console.warn('[POST /api/personalization/share] Failed to save generated share URL:', updateError);
+        }
       }
 
       res.json({
-        ...data?.[0],
+        ...(shareRecord || {}),
+        share_platform,
+        tracked: Boolean(shareId),
         share_url: shareUrl,
         share_message: shareMessage,
         platform_urls: {
@@ -570,7 +627,7 @@ export default function createPersonalizationRoutes(supabase) {
       }
 
       return res.json({
-        data: data || [],
+        data: (data || []).map(normalizeCatalogItem),
         count: count || 0,
         page: pageNumber,
         limit: pageSize

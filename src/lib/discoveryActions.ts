@@ -1,6 +1,8 @@
 import type { Drop, Product } from "@/lib/db";
 import { getProductsByCreativeRelease } from "@/lib/db";
+import { SECURE_API_BASE } from "@/lib/apiBase";
 import { resolveDropBehavior } from "@/lib/dropBehavior";
+import { resolveMediaUrl } from "@/lib/pinata";
 import { fetchDropByIdFromSupabase, fetchProductByIdFromSupabase } from "@/lib/supabaseStore";
 import type { CollectedDropItem } from "@/stores/collectionStore";
 import { getCatalogPrimaryAction } from "@/utils/catalogUtils";
@@ -10,6 +12,8 @@ export type DiscoverActionItemType = "drop" | "product" | "release";
 export type ActionableDiscoverDrop = Drop & {
   artists?: { name?: string | null } | null;
 };
+
+const DISCOVER_API_BASE = SECURE_API_BASE || "/api";
 
 type DiscoverActionInput = {
   id: string;
@@ -64,6 +68,17 @@ export async function resolveDiscoverCheckoutProduct(
   itemId: string,
   itemType: Exclude<DiscoverActionItemType, "drop">,
 ): Promise<Product> {
+  try {
+    const response = await fetch(`${DISCOVER_API_BASE}/catalog/${itemType}/${itemId}`);
+    const payload = await response.json();
+
+    if (response.ok && payload?.checkout_product?.id) {
+      return payload.checkout_product as Product;
+    }
+  } catch (_error) {
+    // Fall back to direct Supabase reads when the public API is unavailable.
+  }
+
   if (itemType === "product") {
     const product = await fetchProductByIdFromSupabase(itemId);
     if (!product) {
@@ -263,6 +278,6 @@ export function addProductToCart(
     1,
     priceWei,
     product.name || fallbackTitle || "Untitled Product",
-    product.preview_uri || product.image_url || product.image_ipfs_uri || fallbackImage || "",
+    resolveMediaUrl(product.preview_uri, product.image_url, product.image_ipfs_uri, fallbackImage || ""),
   );
 }

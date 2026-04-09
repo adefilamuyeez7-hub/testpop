@@ -14,6 +14,7 @@ import {
 import { parseEther } from "viem";
 import { supabase } from "@/lib/db";
 import { SECURE_API_BASE } from "@/lib/apiBase";
+import { resolveMediaUrl } from "@/lib/pinata";
 import { getRuntimeApiToken } from "@/lib/runtimeSession";
 import { useWallet } from "@/hooks/useContracts";
 import { useMintArtist } from "@/hooks/useContractsArtist";
@@ -266,6 +267,14 @@ function getAvatarLabel(post: DiscoverPost, creator?: CreatorProfile | null) {
 
 function getCreatorHandle(post: DiscoverPost, creator?: CreatorProfile | null) {
   return creator?.handle ? `@${creator.handle}` : truncateWallet(creator?.wallet || post.creator_wallet, 8, 4);
+}
+
+function getPostPreviewImage(post: Pick<DiscoverPost, "image_url">) {
+  return resolveMediaUrl(post.image_url || "");
+}
+
+function getCreatorAvatarUrl(creator?: CreatorProfile | null) {
+  return resolveMediaUrl(creator?.avatar_url || "");
 }
 
 function getItemRoute(post: DiscoverPost) {
@@ -620,7 +629,8 @@ function DiscoverCard({
   const primaryCta = getPrimaryCta(post);
   const PrimaryCtaIcon = primaryCta.icon;
   const typePill = getTypePill(post);
-  const creatorAvatarUrl = creator?.avatar_url || undefined;
+  const creatorAvatarUrl = getCreatorAvatarUrl(creator) || undefined;
+  const previewImageUrl = getPostPreviewImage(post);
 
   async function handlePrimaryAction() {
     try {
@@ -629,7 +639,7 @@ function DiscoverCard({
       const resolvedAction = await resolveDiscoverPrimaryAction(post);
 
       if (resolvedAction.kind === "cart") {
-        addProductToCart(addItem, resolvedAction.product, post.title, post.image_url);
+        addProductToCart(addItem, resolvedAction.product, post.title, previewImageUrl || undefined);
         await trackItemEvent(post, "purchase", {
           source: "discover_feed",
           action: resolvedAction.analyticsAction,
@@ -688,9 +698,9 @@ function DiscoverCard({
         className="group relative block w-full overflow-hidden bg-slate-950 text-left"
       >
         <div className="min-h-[320px] w-full overflow-hidden bg-gradient-to-br from-slate-900 via-slate-800 to-slate-700 md:min-h-[420px]">
-          {post.image_url ? (
+          {previewImageUrl ? (
             <img
-              src={post.image_url}
+              src={previewImageUrl}
               alt={post.title}
               className="h-full w-full object-cover transition duration-300 group-hover:scale-[1.02]"
             />
@@ -938,7 +948,7 @@ function DetailsModal({
       const resolvedAction = await resolveDiscoverPrimaryAction(post);
 
       if (resolvedAction.kind === "cart") {
-        addProductToCart(addItem, resolvedAction.product, post.title, post.image_url);
+        addProductToCart(addItem, resolvedAction.product, post.title, previewImageUrl || undefined);
         await trackItemEvent(post, "purchase", {
           source: "discover_modal",
           action: resolvedAction.analyticsAction,
@@ -995,6 +1005,8 @@ function DetailsModal({
   const primaryCta = getPrimaryCta(post);
   const PrimaryIcon = primaryCta.icon;
   const commentsCount = Math.max(post.comment_count || 0, analytics?.comments || 0, comments.length);
+  const previewImageUrl = getPostPreviewImage(post);
+  const creatorAvatarUrl = getCreatorAvatarUrl(creator);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/65 p-4 backdrop-blur-sm">
@@ -1016,8 +1028,8 @@ function DetailsModal({
         <div className="grid gap-6 p-5 md:grid-cols-[1.2fr_0.8fr] md:p-6">
           <div className="space-y-5">
             <div className="overflow-hidden rounded-[24px] bg-slate-950">
-              {post.image_url ? (
-                <img src={post.image_url} alt={post.title} className="h-full max-h-[420px] w-full object-cover" />
+              {previewImageUrl ? (
+                <img src={previewImageUrl} alt={post.title} className="h-full max-h-[420px] w-full object-cover" />
               ) : (
                 <div className="flex h-[320px] items-center justify-center text-sm text-white/60">No preview image</div>
               )}
@@ -1027,8 +1039,8 @@ function DetailsModal({
               <div className="flex items-center gap-4">
                 <div className="flex items-center gap-3">
                   <div className="flex h-12 w-12 items-center justify-center overflow-hidden rounded-full bg-gradient-to-br from-[#1d4ed8] to-[#0f172a] text-sm font-semibold text-white">
-                    {creator?.avatar_url ? (
-                      <img src={creator.avatar_url} alt={getDisplayName(post, creator)} className="h-full w-full object-cover" />
+                    {creatorAvatarUrl ? (
+                      <img src={creatorAvatarUrl} alt={getDisplayName(post, creator)} className="h-full w-full object-cover" />
                     ) : (
                       getAvatarLabel(post, creator)
                     )}
