@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Route, Routes } from "react-router-dom";
+import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -40,9 +40,9 @@ const CartPage = lazy(() => import("./pages/CartPage").then((module) => ({ defau
 const CheckoutPage = lazy(() => import("./pages/CheckoutPage").then((module) => ({ default: module.CheckoutPage })));
 const OrderHistoryPage = lazy(() => import("./pages/OrderHistoryPage").then((module) => ({ default: module.OrderHistoryPage })));
 const UnifiedDiscoverFeed = lazy(() => import("./pages/UnifiedDiscoverFeed").then((module) => ({ default: module.UnifiedDiscoverFeed })));
-const CatalogPage = lazy(() => import("./pages/CatalogPage").then((module) => ({ default: module.CatalogPage })));
 const CreatorDashboard = lazy(() => import("./pages/CreatorDashboard").then((module) => ({ default: module.CreatorDashboard })));
 const ShareLandingPage = lazy(() => import("./pages/ShareLandingPage"));
+const LegacyCatalogItemRoute = lazy(() => import("./pages/LegacyCatalogItemRoute"));
 
 // Heavy routes (studio, admin) - load on demand only
 const WalletStudioRoute = lazy(() => import("./routes/WalletStudioRoute"));
@@ -95,11 +95,12 @@ const App = () => {
                       <Route path="/poaps" element={<WalletPOAPsRoute />} />
                       <Route path="/subscriptions" element={<WalletSubscriptionsRoute />} />
                       <Route path="/discover" element={<UnifiedDiscoverFeed />} />
+                      <Route path="/catalog" element={<Navigate to="/discover" replace />} />
+                      <Route path="/catalog/:type/:id" element={<LegacyCatalogItemRoute />} />
+                      <Route path="/releases/:id" element={<LegacyCatalogItemRoute forcedType="release" />} />
                       <Route path="/products" element={<SocialMediaFeedReleases />} />
                       <Route path="/feed" element={<SocialMediaFeedReleases />} />
                       <Route path="/products/:id" element={<ProductDetailPage />} />
-                      <Route path="/catalog" element={<CatalogPage />} />
-                      <Route path="/catalog/:type/:id" element={<CatalogPage />} />
                       <Route path="/creator/analytics" element={<CreatorDashboard />} />
                       <Route path="/cart" element={<CartPage />} />
                       <Route path="/checkout" element={<CheckoutPage />} />

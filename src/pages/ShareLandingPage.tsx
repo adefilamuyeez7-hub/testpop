@@ -1,10 +1,23 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { ArrowRight, ExternalLink, Gavel, Loader2, MessageCircle, Share2, ShoppingBag } from "lucide-react";
+import { parseEther } from "viem";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { supabase } from "@/lib/db";
 import { SECURE_API_BASE } from "@/lib/apiBase";
+import { useWallet } from "@/hooks/useContracts";
+import { useMintArtist } from "@/hooks/useContractsArtist";
+import { toast } from "@/components/ui/use-toast";
 import { useCartStore } from "@/stores/cartStore";
+import { useCollectionStore } from "@/stores/collectionStore";
 import { formatPrice, formatSupply, getCatalogPrimaryAction } from "@/utils/catalogUtils";
+import { ACTIVE_CHAIN } from "@/lib/wagmi";
+import {
+  addProductToCart,
+  buildCollectionRecord,
+  resolveDiscoverCheckoutProduct,
+  resolveDiscoverDrop,
+  type ActionableDiscoverDrop,
+} from "@/lib/discoveryActions";
 
 type ShareCatalogItem = {
   id: string;
@@ -64,7 +77,7 @@ function getItemRoute(item: ShareCatalogItem) {
       return `/products/${item.id}`;
     case "release":
     default:
-      return `/catalog/${item.item_type}/${item.id}`;
+      return `/releases/${item.id}`;
   }
 }
 
@@ -101,9 +114,38 @@ function buildShareFlowSearch(searchParams: URLSearchParams) {
   return serialized ? `?${serialized}` : "";
 }
 
+async function trackShareLandingEvent(
+  item: Pick<ShareCatalogItem, "id" | "item_type">,
+  eventType: "view" | "purchase",
+  data: Record<string, unknown> = {},
+) {
+  try {
+    await fetch(buildApiUrl("/personalization/analytics"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        item_id: item.id,
+        item_type: item.item_type,
+        event_type: eventType,
+        data,
+      }),
+    });
+  } catch (error) {
+    console.warn(`Failed to track share landing ${eventType}:`, error);
+  }
+}
+
 const ShareLandingPage = () => {
   const navigate = useNavigate();
+  const { address, chain, isConnected, connectWallet, requestActiveChainSwitch, isSwitchingNetwork } = useWallet();
   const addItem = useCartStore((state) => state.addItem);
+  const addCollectedDrop = useCollectionStore((state) => state.addCollectedDrop);
+  const {
+    mint: mintArtist,
+    mintedTokenId,
+    isConfirming: isMintConfirming,
+    isSuccess: isMintSuccess,
+  } = useMintArtist();
   const { type, id } = useParams();
   const [searchParams] = useSearchParams();
   const [item, setItem] = useState<ShareCatalogItem | null>(null);
@@ -112,16 +154,18 @@ const ShareLandingPage = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [ctaBusy, setCtaBusy] = useState(false);
+  const [collectingDrop, setCollectingDrop] = useState<ActionableDiscoverDrop | null>(null);
   const shareFlowSearch = useMemo(() => buildShareFlowSearch(searchParams), [searchParams]);
+  const shareId = searchParams.get("share");
+  const referrerWallet = searchParams.get("ref");
 
   useEffect(() => {
-    const shareId = searchParams.get("share");
     if (!shareId) return;
 
     fetch(buildApiUrl(`/personalization/share/${shareId}/click`)).catch((clickError) => {
       console.warn("Failed to track share click:", clickError);
     });
-  }, [searchParams]);
+  }, [shareId]);
 
   useEffect(() => {
     if (!type || !id) return;
@@ -145,17 +189,10 @@ const ShareLandingPage = () => {
         setComments(payload.comments || []);
 
         if (payload.item) {
-          void fetch(buildApiUrl("/personalization/analytics"), {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              item_id: payload.item.id,
-              item_type: payload.item.item_type,
-              event_type: "view",
-              data: { source: "share_landing" },
-            }),
-          }).catch((analyticsError) => {
-            console.warn("Failed to track share landing view:", analyticsError);
+          void trackShareLandingEvent(payload.item, "view", {
+            source: "share_landing",
+            share_id: shareId,
+            ref: referrerWallet,
           });
         }
       } catch (loadError) {
@@ -171,7 +208,7 @@ const ShareLandingPage = () => {
     return () => {
       active = false;
     };
-  }, [id, type]);
+  }, [id, referrerWallet, shareId, type]);
 
   useEffect(() => {
     if (!item?.creator_id) return;
@@ -197,6 +234,25 @@ const ShareLandingPage = () => {
     };
   }, [item?.creator_id]);
 
+  useEffect(() => {
+    if (!item || !isMintSuccess || !address || !collectingDrop) {
+      return;
+    }
+
+    addCollectedDrop(buildCollectionRecord(collectingDrop, address, mintedTokenId));
+    void trackShareLandingEvent(item, "purchase", {
+      source: "share_landing",
+      action: "collect",
+      share_id: shareId,
+      ref: referrerWallet,
+    });
+    toast({
+      title: "Collected",
+      description: "This collectible was claimed directly from the shared link.",
+    });
+    setCollectingDrop(null);
+  }, [addCollectedDrop, address, collectingDrop, isMintSuccess, item, mintedTokenId, referrerWallet, shareId]);
+
   const primaryCta = useMemo(() => (item ? getPrimaryCta(item) : null), [item]);
 
   async function handlePrimaryAction() {
@@ -205,43 +261,59 @@ const ShareLandingPage = () => {
     try {
       setCtaBusy(true);
 
-      if (primaryCta.action === "cart") {
-        const { data: product, error: productError } = await supabase
-          .from("products")
-          .select("id, creative_release_id, contract_kind, contract_listing_id, contract_product_id, price_eth, name, preview_uri, image_url, image_ipfs_uri")
-          .eq("id", item.id)
-          .maybeSingle();
-
-        if (productError) {
-          throw productError;
-        }
-
-        if (!product) {
-          throw new Error("This product is unavailable right now.");
-        }
-
-        const resolvedPriceEth = Number(product.price_eth ?? item.price_eth ?? 0);
-        const priceWei = BigInt(Math.max(0, Math.round(resolvedPriceEth * 1e18)));
-
-        addItem(
-          product.id,
-          product.creative_release_id ?? null,
-          (product.contract_kind as "artDrop" | "productStore" | "creativeReleaseEscrow" | null) ?? "productStore",
-          Number.isFinite(Number(product.contract_listing_id)) ? Number(product.contract_listing_id) : null,
-          Number.isFinite(Number(product.contract_product_id)) ? Number(product.contract_product_id) : null,
-          1,
-          priceWei,
-          product.name || item.title || "Untitled Product",
-          product.preview_uri || product.image_url || product.image_ipfs_uri || item.image_url || "",
+      if (primaryCta.action === "cart" || (primaryCta.action === "collect" && item.item_type === "release")) {
+        const product = await resolveDiscoverCheckoutProduct(
+          item.id,
+          item.item_type === "release" ? "release" : "product",
         );
 
-        navigate(`/cart${shareFlowSearch}`);
+        addProductToCart(addItem, product, item.title, item.image_url || undefined);
+        await trackShareLandingEvent(item, "purchase", {
+          source: "share_landing",
+          action: primaryCta.action,
+          share_id: shareId,
+          ref: referrerWallet,
+        });
+        toast({
+          title: "Ready to check out",
+          description:
+            item.item_type === "release"
+              ? "This release is now in your cart directly from the shared link."
+              : "This product is now in your cart directly from the shared link.",
+        });
+        return;
+      }
+
+      if (primaryCta.action === "collect" && item.item_type === "drop") {
+        if (!isConnected) {
+          await connectWallet();
+          return;
+        }
+
+        if (chain?.id !== ACTIVE_CHAIN.id) {
+          await requestActiveChainSwitch(`Collecting this drop requires ${ACTIVE_CHAIN.name}.`);
+        }
+
+        const drop = await resolveDiscoverDrop(item.id);
+        const contractDropId =
+          drop.contract_drop_id !== null && drop.contract_drop_id !== undefined ? Number(drop.contract_drop_id) : null;
+
+        if (!drop.contract_address || contractDropId === null || drop.contract_kind !== "artDrop") {
+          throw new Error("This shared drop is live, but its collect contract is not ready yet.");
+        }
+
+        setCollectingDrop(drop);
+        mintArtist(contractDropId, parseEther(String(drop.price_eth || item.price_eth || 0)), drop.contract_address);
         return;
       }
 
       navigate(`${getItemRoute(item)}${shareFlowSearch}`);
     } catch (actionError) {
-      setError(actionError instanceof Error ? actionError.message : "Unable to continue.");
+      toast({
+        title: "Action unavailable",
+        description: actionError instanceof Error ? actionError.message : "Unable to continue from this shared link.",
+        variant: "destructive",
+      });
     } finally {
       setCtaBusy(false);
     }
@@ -252,7 +324,7 @@ const ShareLandingPage = () => {
       <div className="flex min-h-screen items-center justify-center bg-[radial-gradient(circle_at_top,rgba(14,165,233,0.18),transparent_30%),linear-gradient(180deg,#f8fbff_0%,#eef5ff_100%)]">
         <div className="rounded-[2rem] border border-white/80 bg-white/92 px-8 py-10 text-center shadow-[0_35px_120px_rgba(15,23,42,0.12)]">
           <Loader2 className="mx-auto h-6 w-6 animate-spin text-sky-600" />
-          <p className="mt-4 text-sm text-slate-600">Loading shared drop...</p>
+          <p className="mt-4 text-sm text-slate-600">Loading shared collectible...</p>
         </div>
       </div>
     );
@@ -278,6 +350,11 @@ const ShareLandingPage = () => {
   }
 
   const PrimaryIcon = primaryCta.icon;
+  const actionLabel = isSwitchingNetwork
+    ? "Switching..."
+    : isMintConfirming
+      ? "Collecting..."
+      : primaryCta.label;
 
   return (
     <div className="min-h-screen bg-[radial-gradient(circle_at_top,rgba(14,165,233,0.18),transparent_25%),linear-gradient(180deg,#f8fbff_0%,#eef5ff_100%)] px-4 py-6 md:px-6 md:py-8">
@@ -287,7 +364,7 @@ const ShareLandingPage = () => {
             <div className="relative bg-slate-950">
               <div className="absolute left-5 top-5 z-10 inline-flex items-center gap-2 rounded-full bg-black/45 px-4 py-2 text-xs font-semibold uppercase tracking-[0.22em] text-white/90 backdrop-blur">
                 <Share2 className="h-3.5 w-3.5" />
-                Shared on POPUP
+                Shared action link
               </div>
               {item.image_url ? (
                 <img src={item.image_url} alt={item.title} className="h-full min-h-[320px] w-full object-cover" />
@@ -299,11 +376,11 @@ const ShareLandingPage = () => {
             <div className="flex flex-col justify-between p-6 md:p-8">
               <div>
                 <p className="text-xs font-semibold uppercase tracking-[0.24em] text-sky-700">
-                  {item.item_type === "release" ? "drop spotlight" : `${item.item_type} spotlight`}
+                  {item.item_type === "release" ? "creative release" : `${item.item_type} spotlight`}
                 </p>
                 <h1 className="mt-3 text-4xl font-semibold tracking-tight text-slate-950">{item.title}</h1>
                 <p className="mt-4 text-base leading-8 text-slate-600">
-                  {item.description || "A shared collectible from the POPUP discovery feed. Open it to explore the full drop deck, public conversation, and creator context."}
+                  {item.description || "A public POPUP action page with enough context to collect, add to cart, or open the deeper thread without losing momentum."}
                 </p>
 
                 <div className="mt-6 flex items-center gap-3">
@@ -340,23 +417,27 @@ const ShareLandingPage = () => {
                 </div>
               </div>
 
-              <div className="mt-8 flex flex-wrap gap-3">
+              <div className="mt-8 space-y-3">
                 <button
                   type="button"
                   onClick={() => void handlePrimaryAction()}
-                  disabled={ctaBusy}
-                  className="inline-flex h-12 items-center gap-2 rounded-full bg-slate-950 px-6 text-sm font-medium text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-70"
+                  disabled={ctaBusy || isMintConfirming || isSwitchingNetwork}
+                  className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-full bg-slate-950 px-6 text-sm font-medium text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-70"
                 >
-                  {ctaBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <PrimaryIcon className="h-4 w-4" />}
-                  {primaryCta.label}
+                  {ctaBusy || isMintConfirming || isSwitchingNetwork ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <PrimaryIcon className="h-4 w-4" />
+                  )}
+                  {actionLabel}
                 </button>
                 <button
                   type="button"
                   onClick={() => navigate(`/discover${shareFlowSearch}`)}
-                  className="inline-flex h-12 items-center gap-2 rounded-full border border-slate-200 bg-white px-6 text-sm font-medium text-slate-700 transition hover:bg-slate-100"
+                  className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-6 text-sm font-medium text-slate-700 transition hover:bg-slate-100"
                 >
                   <ExternalLink className="h-4 w-4" />
-                  Open POPUP
+                  Open full discover thread
                 </button>
               </div>
             </div>
@@ -365,29 +446,29 @@ const ShareLandingPage = () => {
 
         <section className="grid gap-6 lg:grid-cols-[0.9fr_1.1fr]">
           <div className="rounded-[2rem] border border-white/80 bg-white/92 p-6 shadow-[0_30px_90px_rgba(15,23,42,0.10)]">
-            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-400">Why this page exists</p>
-            <h2 className="mt-3 text-2xl font-semibold text-slate-950">Shared links that still convert</h2>
+            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-400">Action-link behavior</p>
+            <h2 className="mt-3 text-2xl font-semibold text-slate-950">Built to convert outside the app</h2>
             <p className="mt-3 text-sm leading-7 text-slate-600">
-              This landing page preserves the story, creator identity, and social proof before someone commits to collecting, bidding, or opening the full product deck inside POPUP.
+              This page keeps media, creator identity, public proof, and the right commerce action together so a shared POPUP link behaves more like an onchain action card than a dead-end redirect.
             </p>
 
             <div className="mt-6 space-y-3">
               <div className="rounded-[1.4rem] bg-slate-50 px-4 py-4">
                 <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
-                  <MessageCircle className="h-4 w-4 text-sky-600" />
-                  Social context
+                  <ShoppingBag className="h-4 w-4 text-sky-600" />
+                  Immediate CTA
                 </div>
                 <p className="mt-2 text-sm leading-6 text-slate-600">
-                  Public comments and ratings travel with the link so off-platform visitors immediately understand why collectors care.
+                  Collectible drops can mint here, and commerce-backed products or releases can enter cart here, without forcing the visitor through a catalog detour first.
                 </p>
               </div>
               <div className="rounded-[1.4rem] bg-slate-50 px-4 py-4">
                 <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
-                  <ShoppingBag className="h-4 w-4 text-sky-600" />
-                  Direct CTA
+                  <MessageCircle className="h-4 w-4 text-sky-600" />
+                  Public social proof
                 </div>
                 <p className="mt-2 text-sm leading-6 text-slate-600">
-                  The primary action stays close to the media so someone coming from X, Telegram, or WhatsApp can move straight into the right drop flow.
+                  Conversation previews stay visible on the shared page, so the link carries context the way a strong social action link should.
                 </p>
               </div>
             </div>
@@ -412,7 +493,7 @@ const ShareLandingPage = () => {
             <div className="mt-5 space-y-3">
               {comments.length === 0 ? (
                 <div className="rounded-[1.4rem] border border-dashed border-slate-200 px-4 py-6 text-sm text-slate-500">
-                  No public comments yet. Open this item on POPUP to be the first voice in the thread.
+                  No public comments yet. Open this collectible in discover to start the thread.
                 </div>
               ) : (
                 comments.map((comment) => (

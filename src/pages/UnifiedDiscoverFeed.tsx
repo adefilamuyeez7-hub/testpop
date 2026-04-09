@@ -11,14 +11,24 @@ import {
   Sparkles,
   X,
 } from "lucide-react";
-import { useNavigate } from "react-router-dom";
+import { parseEther } from "viem";
 import { supabase } from "@/lib/db";
 import { SECURE_API_BASE } from "@/lib/apiBase";
 import { getRuntimeApiToken } from "@/lib/runtimeSession";
 import { useWallet } from "@/hooks/useContracts";
+import { useMintArtist } from "@/hooks/useContractsArtist";
 import { toast } from "@/components/ui/use-toast";
 import { useCartStore } from "@/stores/cartStore";
+import { useCollectionStore } from "@/stores/collectionStore";
 import { CatalogItem, formatPrice, formatSupply, getCatalogPrimaryAction } from "@/utils/catalogUtils";
+import { ACTIVE_CHAIN } from "@/lib/wagmi";
+import {
+  addProductToCart,
+  buildCollectionRecord,
+  resolveDiscoverCheckoutProduct,
+  resolveDiscoverDrop,
+  type ActionableDiscoverDrop,
+} from "@/lib/discoveryActions";
 
 const FEED_PAGE_SIZE = 10;
 const API_BASE = SECURE_API_BASE || "/api";
@@ -103,14 +113,11 @@ async function requestJson<T>(path: string, init?: RequestInit, token?: string):
   return payload as T;
 }
 
-type CatalogResponse = {
+type DiscoverFeedResponse = {
   data: DiscoverPost[];
-  pagination?: {
-    page: number;
-    limit: number;
-    total?: number;
-    pages?: number;
-  };
+  count?: number;
+  page?: number;
+  limit?: number;
 };
 
 async function trackItemEvent(
@@ -269,7 +276,7 @@ function getItemRoute(post: DiscoverPost) {
       return `/products/${post.id}`;
     case "release":
     default:
-      return `/catalog/${post.item_type}/${post.id}`;
+      return `/releases/${post.id}`;
   }
 }
 
@@ -566,11 +573,19 @@ function DiscoverCard({
   onOpenDetails: (post: DiscoverPost) => void;
   onOpenComments: (post: DiscoverPost) => void;
 }) {
-  const navigate = useNavigate();
+  const { address, chain, isConnected, connectWallet, requestActiveChainSwitch, isSwitchingNetwork } = useWallet();
   const addItem = useCartStore((state) => state.addItem);
+  const addCollectedDrop = useCollectionStore((state) => state.addCollectedDrop);
+  const {
+    mint: mintArtist,
+    mintedTokenId,
+    isConfirming: isMintConfirming,
+    isSuccess: isMintSuccess,
+  } = useMintArtist();
   const [comments, setComments] = useState<FeedbackThread[]>([]);
   const [commentsLoading, setCommentsLoading] = useState(true);
   const [ctaBusy, setCtaBusy] = useState(false);
+  const [collectingDrop, setCollectingDrop] = useState<ActionableDiscoverDrop | null>(null);
 
   async function loadComments() {
     try {
@@ -588,6 +603,20 @@ function DiscoverCard({
     void loadComments();
   }, [post.id, post.item_type]);
 
+  useEffect(() => {
+    if (!isMintSuccess || !address || !collectingDrop) {
+      return;
+    }
+
+    addCollectedDrop(buildCollectionRecord(collectingDrop, address, mintedTokenId));
+    void trackItemEvent(post, "purchase", { source: "discover_feed", action: "collect" });
+    toast({
+      title: "Collected",
+      description: "This piece is now in your collection without leaving discover.",
+    });
+    setCollectingDrop(null);
+  }, [addCollectedDrop, address, collectingDrop, isMintSuccess, mintedTokenId, post]);
+
   const primaryCta = getPrimaryCta(post);
   const PrimaryCtaIcon = primaryCta.icon;
   const typePill = getTypePill(post);
@@ -597,41 +626,21 @@ function DiscoverCard({
     try {
       setCtaBusy(true);
 
-      if (primaryCta.action === "cart") {
-        const { data: product, error } = await supabase
-          .from("products")
-          .select("id, creative_release_id, contract_kind, contract_listing_id, contract_product_id, price_eth, name, preview_uri, image_url, image_ipfs_uri")
-          .eq("id", post.id)
-          .maybeSingle();
-
-        if (error) {
-          throw error;
-        }
-
-        if (!product) {
-          throw new Error("This product is unavailable right now.");
-        }
-
-        const resolvedPriceEth = Number(product.price_eth ?? post.price_eth ?? 0);
-        const priceWei = BigInt(Math.max(0, Math.round(resolvedPriceEth * 1e18)));
-
-        addItem(
-          product.id,
-          product.creative_release_id ?? null,
-          (product.contract_kind as "artDrop" | "productStore" | "creativeReleaseEscrow" | null) ?? "productStore",
-          Number.isFinite(Number(product.contract_listing_id)) ? Number(product.contract_listing_id) : null,
-          Number.isFinite(Number(product.contract_product_id)) ? Number(product.contract_product_id) : null,
-          1,
-          priceWei,
-          product.name || post.title || "Untitled Product",
-          product.preview_uri || product.image_url || product.image_ipfs_uri || post.image_url || "",
+      if (primaryCta.action === "cart" || (primaryCta.action === "collect" && post.item_type === "release")) {
+        const product = await resolveDiscoverCheckoutProduct(
+          post.id,
+          post.item_type === "release" ? "release" : "product",
         );
 
+        addProductToCart(addItem, product, post.title, post.image_url);
+        await trackItemEvent(post, "purchase", { source: "discover_feed", action: primaryCta.action });
         toast({
           title: "Added to cart",
-          description: "Your product is ready in checkout.",
+          description:
+            post.item_type === "release"
+              ? "This release is ready in your cart straight from discover."
+              : "This product is ready in your cart straight from discover.",
         });
-        navigate("/cart");
         return;
       }
 
@@ -640,8 +649,35 @@ function DiscoverCard({
         return;
       }
 
-      await trackItemEvent(post, "purchase", { source: "discover_feed", action: primaryCta.action });
-      navigate(getItemRoute(post));
+      if (primaryCta.action === "collect" && post.item_type === "drop") {
+        if (!isConnected) {
+          await connectWallet();
+          return;
+        }
+
+        if (chain?.id !== ACTIVE_CHAIN.id) {
+          await requestActiveChainSwitch(`Collecting this drop requires ${ACTIVE_CHAIN.name}.`);
+        }
+
+        const drop = await resolveDiscoverDrop(post.id);
+        const contractDropId =
+          drop.contract_drop_id !== null && drop.contract_drop_id !== undefined ? Number(drop.contract_drop_id) : null;
+
+        if (!drop.contract_address || contractDropId === null || drop.contract_kind !== "artDrop") {
+          throw new Error("This drop is visible in discover, but its collect contract is not ready yet.");
+        }
+
+        setCollectingDrop(drop);
+        mintArtist(contractDropId, parseEther(String(drop.price_eth || post.price_eth || 0)), drop.contract_address);
+        return;
+      }
+
+      if (primaryCta.action === "bid") {
+        onOpenDetails(post);
+        return;
+      }
+
+      onOpenDetails(post);
     } catch (error) {
       toast({
         title: "Action unavailable",
@@ -733,11 +769,15 @@ function DiscoverCard({
           <button
             type="button"
             onClick={() => void handlePrimaryAction()}
-            disabled={ctaBusy}
+            disabled={ctaBusy || isMintConfirming || isSwitchingNetwork}
             className={`inline-flex h-11 w-full items-center justify-center gap-2 rounded-full px-5 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-70 ${primaryCta.className}`}
           >
-            {ctaBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <PrimaryCtaIcon className="h-4 w-4" />}
-            {primaryCta.label}
+            {ctaBusy || isMintConfirming || isSwitchingNetwork ? <Loader2 className="h-4 w-4 animate-spin" /> : <PrimaryCtaIcon className="h-4 w-4" />}
+            {isSwitchingNetwork
+              ? "Switching..."
+              : isMintConfirming
+                ? "Collecting..."
+                : primaryCta.label}
           </button>
 
           <ShareMenuButton item={post} fullWidth />
@@ -790,14 +830,21 @@ function DetailsModal({
   onClose: () => void;
   onOpenComments: (post: DiscoverPost) => void;
 }) {
-  const navigate = useNavigate();
-  const { isConnected, connectWallet } = useWallet();
+  const { address, chain, isConnected, connectWallet, requestActiveChainSwitch, isSwitchingNetwork } = useWallet();
   const addItem = useCartStore((state) => state.addItem);
+  const addCollectedDrop = useCollectionStore((state) => state.addCollectedDrop);
+  const {
+    mint: mintArtist,
+    mintedTokenId,
+    isConfirming: isMintConfirming,
+    isSuccess: isMintSuccess,
+  } = useMintArtist();
   const [analytics, setAnalytics] = useState<ItemAnalytics | null>(null);
   const [comments, setComments] = useState<FeedbackThread[]>([]);
   const [messageDraft, setMessageDraft] = useState("");
   const [messageBusy, setMessageBusy] = useState(false);
   const [ctaBusy, setCtaBusy] = useState(false);
+  const [collectingDrop, setCollectingDrop] = useState<ActionableDiscoverDrop | null>(null);
 
   useEffect(() => {
     void trackItemEvent(post, "view", { source: "discover_modal" });
@@ -819,6 +866,20 @@ function DetailsModal({
       cancelled = true;
     };
   }, [post.id, post.item_type]);
+
+  useEffect(() => {
+    if (!isMintSuccess || !address || !collectingDrop) {
+      return;
+    }
+
+    addCollectedDrop(buildCollectionRecord(collectingDrop, address, mintedTokenId));
+    void trackItemEvent(post, "purchase", { source: "discover_modal", action: "collect" });
+    toast({
+      title: "Collected",
+      description: "This piece is now in your collection without leaving discover.",
+    });
+    setCollectingDrop(null);
+  }, [addCollectedDrop, address, collectingDrop, isMintSuccess, mintedTokenId, post]);
 
   async function handleMessageCreator() {
     const body = messageDraft.trim();
@@ -885,52 +946,64 @@ function DetailsModal({
     try {
       setCtaBusy(true);
 
-      if (primaryCta.action === "cart") {
-        const { data: product, error } = await supabase
-          .from("products")
-          .select("id, creative_release_id, contract_kind, contract_listing_id, contract_product_id, price_eth, name, preview_uri, image_url, image_ipfs_uri")
-          .eq("id", post.id)
-          .maybeSingle();
-
-        if (error) {
-          throw error;
-        }
-
-        if (!product) {
-          throw new Error("This product is unavailable right now.");
-        }
-
-        const resolvedPriceEth = Number(product.price_eth ?? post.price_eth ?? 0);
-        const priceWei = BigInt(Math.max(0, Math.round(resolvedPriceEth * 1e18)));
-
-        addItem(
-          product.id,
-          product.creative_release_id ?? null,
-          (product.contract_kind as "artDrop" | "productStore" | "creativeReleaseEscrow" | null) ?? "productStore",
-          Number.isFinite(Number(product.contract_listing_id)) ? Number(product.contract_listing_id) : null,
-          Number.isFinite(Number(product.contract_product_id)) ? Number(product.contract_product_id) : null,
-          1,
-          priceWei,
-          product.name || post.title || "Untitled Product",
-          product.preview_uri || product.image_url || product.image_ipfs_uri || post.image_url || "",
+      if (primaryCta.action === "cart" || (primaryCta.action === "collect" && post.item_type === "release")) {
+        const product = await resolveDiscoverCheckoutProduct(
+          post.id,
+          post.item_type === "release" ? "release" : "product",
         );
 
+        addProductToCart(addItem, product, post.title, post.image_url);
+        await trackItemEvent(post, "purchase", { source: "discover_modal", action: primaryCta.action });
         toast({
           title: "Added to cart",
-          description: "Your product is ready in checkout.",
+          description:
+            post.item_type === "release"
+              ? "This release is ready in your cart straight from discover."
+              : "This product is ready in your cart straight from discover.",
         });
-        onClose();
-        navigate("/cart");
         return;
       }
 
       if (primaryCta.action === "details") {
-        navigate(getItemRoute(post));
+        onClose();
+        window.setTimeout(() => {
+          window.location.assign(getItemRoute(post));
+        }, 0);
         return;
       }
 
-      await trackItemEvent(post, "purchase", { source: "discover_modal", action: primaryCta.action });
-      navigate(getItemRoute(post));
+      if (primaryCta.action === "collect" && post.item_type === "drop") {
+        if (!isConnected) {
+          await connectWallet();
+          return;
+        }
+
+        if (chain?.id !== ACTIVE_CHAIN.id) {
+          await requestActiveChainSwitch(`Collecting this drop requires ${ACTIVE_CHAIN.name}.`);
+        }
+
+        const drop = await resolveDiscoverDrop(post.id);
+        const contractDropId =
+          drop.contract_drop_id !== null && drop.contract_drop_id !== undefined ? Number(drop.contract_drop_id) : null;
+
+        if (!drop.contract_address || contractDropId === null || drop.contract_kind !== "artDrop") {
+          throw new Error("This drop is visible in discover, but its collect contract is not ready yet.");
+        }
+
+        setCollectingDrop(drop);
+        mintArtist(contractDropId, parseEther(String(drop.price_eth || post.price_eth || 0)), drop.contract_address);
+        return;
+      }
+
+      if (primaryCta.action === "bid") {
+        onClose();
+        window.setTimeout(() => {
+          window.location.assign(getItemRoute(post));
+        }, 0);
+        return;
+      }
+
+      onClose();
     } catch (error) {
       toast({
         title: "Action unavailable",
@@ -1036,11 +1109,15 @@ function DetailsModal({
                 <button
                   type="button"
                   onClick={() => void handlePrimaryAction()}
-                  disabled={ctaBusy}
+                  disabled={ctaBusy || isMintConfirming || isSwitchingNetwork}
                   className={`inline-flex h-11 w-full items-center justify-center gap-2 rounded-full px-5 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-70 ${primaryCta.className}`}
                 >
-                  {ctaBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <PrimaryIcon className="h-4 w-4" />}
-                  {primaryCta.label}
+                  {ctaBusy || isMintConfirming || isSwitchingNetwork ? <Loader2 className="h-4 w-4 animate-spin" /> : <PrimaryIcon className="h-4 w-4" />}
+                  {isSwitchingNetwork
+                    ? "Switching..."
+                    : isMintConfirming
+                      ? "Collecting..."
+                      : primaryCta.label}
                 </button>
                 <ShareMenuButton item={post} fullWidth />
               </div>
@@ -1277,14 +1354,14 @@ export function UnifiedDiscoverFeed() {
         setLoading(true);
 
         const params = new URLSearchParams({
-          page: String(page),
+          page: String(Math.max(page - 1, 0)),
           limit: String(FEED_PAGE_SIZE),
           sort: "recent",
           ...(filterType !== 'all' && { type: filterType }),
           ...(searchQuery.trim() && { search: searchQuery.trim() })
         });
 
-        const result = await requestJson<CatalogResponse>(`/catalog?${params}`);
+        const result = await requestJson<DiscoverFeedResponse>(`/discover/feed?${params}`);
         const { data } = result;
 
         if (!data || !Array.isArray(data)) {
