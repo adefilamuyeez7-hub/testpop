@@ -486,5 +486,141 @@ export default function createPersonalizationRoutes(supabase) {
     }
   });
 
+  // ============================================
+  // DISCOVER FEED ENDPOINTS
+  // ============================================
+
+  /**
+   * GET /api/discover/feed
+   * Unified discover feed with all items
+   */
+  router.get('/discover/feed', async (req, res) => {
+    try {
+      const { page = '0', limit = '10', type = 'all', search = '' } = req.query;
+      const offset = Math.max(0, parseInt(page) * parseInt(limit));
+      const pageSize = Math.min(100, parseInt(limit));
+
+      // Try catalog_with_engagement view first, fallback to unified queries
+      let query = supabase
+        .from('catalog_with_engagement')
+        .select('*, creator_wallet', { count: 'exact' })
+        .order('created_at', { ascending: false })
+        .range(offset, offset + pageSize - 1);
+
+      // Apply filters
+      if (type && type !== 'all') {
+        query = query.eq('item_type', type);
+      }
+
+      // Apply search
+      if (search && search.trim()) {
+        const searchTerm = `%${search.trim()}%`;
+        query = query.or(`title.ilike.${searchTerm},description.ilike.${searchTerm}`);
+      }
+
+      const { data, error, count } = await query;
+
+      if (error) {
+        console.warn('catalog_with_engagement view query failed, trying fallback:', error);
+        
+        // Fallback: Query individual tables
+        const results = [];
+
+        // Query drops
+        if (!type || type === 'drop') {
+          const { data: drops } = await supabase
+            .from('drops')
+            .select('id, title, description, image_url, image_ipfs_uri, price_eth, artist_id, status, created_at, updated_at')
+            .eq('status', 'live')
+            .order('created_at', { ascending: false })
+            .limit(pageSize);
+
+          if (drops) {
+            results.push(...drops.map(d => ({
+              ...d,
+              item_type: 'drop',
+              image_url: d.image_url || d.image_ipfs_uri
+            })));
+          }
+        }
+
+        // Query products
+        if (!type || type === 'product') {
+          const { data: products } = await supabase
+            .from('products')
+            .select('id, name as title, description, preview_uri, image_url, image_ipfs_uri, price_eth, artist_id, status, created_at, updated_at')
+            .eq('status', 'published')
+            .order('created_at', { ascending: false })
+            .limit(pageSize);
+
+          if (products) {
+            results.push(...products.map(p => ({
+              ...p,
+              item_type: 'product',
+              image_url: p.preview_uri || p.image_url || p.image_ipfs_uri
+            })));
+          }
+        }
+
+        // Query releases
+        if (!type || type === 'release') {
+          const { data: releases } = await supabase
+            .from('creative_releases')
+            .select('id, title, description, cover_image_uri, price_eth, artist_id, status, created_at, updated_at')
+            .eq('status', 'published')
+            .order('created_at', { ascending: false })
+            .limit(pageSize);
+
+          if (releases) {
+            results.push(...releases.map(r => ({
+              ...r,
+              item_type: 'release',
+              image_url: r.cover_image_uri
+            })));
+          }
+        }
+
+        // Merge and sort
+        const merged = results
+          .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+          .slice(0, pageSize);
+
+        // Add creator wallets
+        const withCreators = await Promise.all(
+          merged.map(async (item) => {
+            const { data: artist } = await supabase
+              .from('artists')
+              .select('wallet')
+              .eq('id', item.artist_id)
+              .maybeSingle();
+            return {
+              ...item,
+              creator_wallet: artist?.wallet || '',
+              comment_count: 0,
+              avg_rating: 0
+            };
+          })
+        );
+
+        return res.json({
+          data: withCreators,
+          count: withCreators.length,
+          page: parseInt(page),
+          limit: pageSize
+        });
+      }
+
+      res.json({
+        data: data || [],
+        count: count || 0,
+        page: parseInt(page),
+        limit: pageSize
+      });
+    } catch (error) {
+      console.error('[GET /api/discover/feed] Error:', error);
+      res.status(500).json({ error: 'Failed to fetch discover feed', details: error.message });
+    }
+  });
+
   return router;
 }

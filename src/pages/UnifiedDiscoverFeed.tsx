@@ -1313,26 +1313,28 @@ export function UnifiedDiscoverFeed() {
       try {
         setLoading(true);
 
-        let query = supabase
-          .from("catalog_with_engagement")
-          .select("*")
-          .order("created_at", { ascending: false });
+        const params = new URLSearchParams({
+          page: String(page - 1),
+          limit: String(FEED_PAGE_SIZE),
+          ...(filterType !== 'all' && { type: filterType }),
+          ...(searchQuery.trim() && { search: searchQuery.trim() })
+        });
 
-        if (filterType !== "all") {
-          query = query.eq("item_type", filterType);
+        const response = await fetch(`/api/discover/feed?${params}`);
+        if (!response.ok) {
+          throw new Error(`API error: ${response.status}`);
         }
 
-        if (searchQuery.trim()) {
-          const escapedQuery = searchQuery.replace(/,/g, " ");
-          query = query.or(`title.ilike.%${escapedQuery}%,description.ilike.%${escapedQuery}%`);
-        }
+        const result = await response.json();
+        const { data } = result;
 
-        const { data, error } = await query.range((page - 1) * FEED_PAGE_SIZE, page * FEED_PAGE_SIZE - 1);
-        if (error) throw error;
+        if (!data || !Array.isArray(data)) {
+          throw new Error('Invalid response format');
+        }
 
         if (cancelled) return;
 
-        const nextPosts = (data || []) as DiscoverPost[];
+        const nextPosts = data as DiscoverPost[];
         setHasMore(nextPosts.length >= FEED_PAGE_SIZE);
         setPosts((current) => {
           const merged = page === 1 ? nextPosts : [...current, ...nextPosts];
