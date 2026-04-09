@@ -43,9 +43,19 @@ CREATE POLICY "Orders - Buyers read own orders only"
     auth.role() = 'service_role'
     OR lower(buyer_wallet) = lower(get_auth_wallet())
     OR EXISTS (
-      SELECT 1 FROM artists a
-      WHERE a.id = orders.seller_id
-      AND lower(a.wallet) = lower(get_auth_wallet())
+      SELECT 1
+      FROM public.products p
+      LEFT JOIN public.artists a ON a.id = p.artist_id
+      WHERE p.id = orders.product_id
+        AND lower(COALESCE(a.wallet, p.creator_wallet, '')) = lower(get_auth_wallet())
+    )
+    OR EXISTS (
+      SELECT 1
+      FROM public.order_items oi
+      JOIN public.products p ON p.id = oi.product_id
+      LEFT JOIN public.artists a ON a.id = p.artist_id
+      WHERE oi.order_id = orders.id
+        AND lower(COALESCE(a.wallet, p.creator_wallet, '')) = lower(get_auth_wallet())
     )
   );
 
@@ -63,18 +73,38 @@ CREATE POLICY "Orders - Order participants can update status"
     auth.role() = 'service_role'
     OR lower(buyer_wallet) = lower(get_auth_wallet())
     OR EXISTS (
-      SELECT 1 FROM artists a
-      WHERE a.id = orders.seller_id
-      AND lower(a.wallet) = lower(get_auth_wallet())
+      SELECT 1
+      FROM public.products p
+      LEFT JOIN public.artists a ON a.id = p.artist_id
+      WHERE p.id = orders.product_id
+        AND lower(COALESCE(a.wallet, p.creator_wallet, '')) = lower(get_auth_wallet())
+    )
+    OR EXISTS (
+      SELECT 1
+      FROM public.order_items oi
+      JOIN public.products p ON p.id = oi.product_id
+      LEFT JOIN public.artists a ON a.id = p.artist_id
+      WHERE oi.order_id = orders.id
+        AND lower(COALESCE(a.wallet, p.creator_wallet, '')) = lower(get_auth_wallet())
     )
   )
   WITH CHECK (
     auth.role() = 'service_role'
     OR lower(buyer_wallet) = lower(get_auth_wallet())
     OR EXISTS (
-      SELECT 1 FROM artists a
-      WHERE a.id = orders.seller_id
-      AND lower(a.wallet) = lower(get_auth_wallet())
+      SELECT 1
+      FROM public.products p
+      LEFT JOIN public.artists a ON a.id = p.artist_id
+      WHERE p.id = orders.product_id
+        AND lower(COALESCE(a.wallet, p.creator_wallet, '')) = lower(get_auth_wallet())
+    )
+    OR EXISTS (
+      SELECT 1
+      FROM public.order_items oi
+      JOIN public.products p ON p.id = oi.product_id
+      LEFT JOIN public.artists a ON a.id = p.artist_id
+      WHERE oi.order_id = orders.id
+        AND lower(COALESCE(a.wallet, p.creator_wallet, '')) = lower(get_auth_wallet())
     )
   );
 
@@ -88,13 +118,14 @@ DROP POLICY IF EXISTS "Artists - Anyone can update" ON artists;
 
 ALTER TABLE artists ENABLE ROW LEVEL SECURITY;
 
--- Anyone can read published artist profiles
-CREATE POLICY "Artists - Public read published profiles"
+-- Anyone can read approved/active artist profiles
+DROP POLICY IF EXISTS "Artists - Public read approved profiles" ON artists;
+CREATE POLICY "Artists - Public read approved profiles"
   ON artists
   FOR SELECT
   USING (
     auth.role() = 'service_role'
-    OR status = 'published'
+    OR status IN ('approved', 'active')
     OR lower(wallet) = lower(get_auth_wallet())
   );
 
@@ -122,12 +153,13 @@ DROP POLICY IF EXISTS "Drops - Anyone can update" ON drops;
 ALTER TABLE drops ENABLE ROW LEVEL SECURITY;
 
 -- Anyone can read published drops
+DROP POLICY IF EXISTS "Drops - Public read published drops" ON drops;
 CREATE POLICY "Drops - Public read published drops"
   ON drops
   FOR SELECT
   USING (
     auth.role() = 'service_role'
-    OR status = 'published'
+    OR status IN ('published', 'active', 'live')
     OR EXISTS (
       SELECT 1 FROM artists a
       WHERE a.id = drops.artist_id
@@ -181,6 +213,9 @@ CREATE POLICY "Drops - Service role creates drops"
 
 DROP POLICY IF EXISTS "Products - Anyone can read" ON products;
 DROP POLICY IF EXISTS "Products - Anyone can delete" ON products;
+DROP POLICY IF EXISTS "Products - Public read published products" ON products;
+DROP POLICY IF EXISTS "Products - Creator can update own products" ON products;
+DROP POLICY IF EXISTS "Products - Creator can delete own products" ON products;
 
 ALTER TABLE products ENABLE ROW LEVEL SECURITY;
 
@@ -189,12 +224,13 @@ CREATE POLICY "Products - Public read published products"
   FOR SELECT
   USING (
     auth.role() = 'service_role'
-    OR status = 'published'
+    OR status IN ('published', 'active')
     OR EXISTS (
       SELECT 1 FROM artists a
-      WHERE a.id = products.creator_id
+      WHERE a.id = products.artist_id
       AND lower(a.wallet) = lower(get_auth_wallet())
     )
+    OR lower(products.creator_wallet) = lower(get_auth_wallet())
   );
 
 CREATE POLICY "Products - Creator can update own products"
@@ -204,17 +240,19 @@ CREATE POLICY "Products - Creator can update own products"
     auth.role() = 'service_role'
     OR EXISTS (
       SELECT 1 FROM artists a
-      WHERE a.id = products.creator_id
+      WHERE a.id = products.artist_id
       AND lower(a.wallet) = lower(get_auth_wallet())
     )
+    OR lower(products.creator_wallet) = lower(get_auth_wallet())
   )
   WITH CHECK (
     auth.role() = 'service_role'
     OR EXISTS (
       SELECT 1 FROM artists a
-      WHERE a.id = products.creator_id
+      WHERE a.id = products.artist_id
       AND lower(a.wallet) = lower(get_auth_wallet())
     )
+    OR lower(products.creator_wallet) = lower(get_auth_wallet())
   );
 
 CREATE POLICY "Products - Creator can delete own products"
@@ -224,9 +262,10 @@ CREATE POLICY "Products - Creator can delete own products"
     auth.role() = 'service_role'
     OR EXISTS (
       SELECT 1 FROM artists a
-      WHERE a.id = products.creator_id
+      WHERE a.id = products.artist_id
       AND lower(a.wallet) = lower(get_auth_wallet())
     )
+    OR lower(products.creator_wallet) = lower(get_auth_wallet())
   );
 
 -- ============================================================================
@@ -263,32 +302,43 @@ CREATE POLICY "Subscriptions - Service role updates subscriptions"
 -- ARTIST_SHARES TABLE - Protect financial data
 -- ============================================================================
 
-DROP POLICY IF EXISTS "Artist Shares - Anyone can read" ON artist_shares;
-
-ALTER TABLE artist_shares ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY "Artist Shares - Artists read own shares"
-  ON artist_shares
-  FOR SELECT
-  USING (
-    auth.role() = 'service_role'
-    OR EXISTS (
-      SELECT 1 FROM artists a
-      WHERE a.id = artist_shares.artist_id
-      AND lower(a.wallet) = lower(get_auth_wallet())
-    )
-  );
-
-CREATE POLICY "Artist Shares - Service role manages shares"
-  ON artist_shares
-  FOR INSERT
-  WITH CHECK (auth.role() = 'service_role');
-
-CREATE POLICY "Artist Shares - Service role updates shares"
-  ON artist_shares
-  FOR UPDATE
-  USING (auth.role() = 'service_role')
-  WITH CHECK (auth.role() = 'service_role');
+DO $$
+BEGIN
+  IF to_regclass('public.artist_shares') IS NOT NULL THEN
+    EXECUTE 'DROP POLICY IF EXISTS "Artist Shares - Anyone can read" ON public.artist_shares';
+    EXECUTE 'DROP POLICY IF EXISTS "Artist Shares - Artists read own shares" ON public.artist_shares';
+    EXECUTE 'DROP POLICY IF EXISTS "Artist Shares - Service role manages shares" ON public.artist_shares';
+    EXECUTE 'DROP POLICY IF EXISTS "Artist Shares - Service role updates shares" ON public.artist_shares';
+    EXECUTE 'ALTER TABLE public.artist_shares ENABLE ROW LEVEL SECURITY';
+    EXECUTE $artist_shares_policy$
+      CREATE POLICY "Artist Shares - Artists read own shares"
+        ON public.artist_shares
+        FOR SELECT
+        USING (
+          auth.role() = 'service_role'
+          OR EXISTS (
+            SELECT 1
+            FROM public.artists a
+            WHERE a.id = artist_shares.artist_id
+              AND lower(a.wallet) = lower(get_auth_wallet())
+          )
+        )
+    $artist_shares_policy$;
+    EXECUTE $artist_shares_policy$
+      CREATE POLICY "Artist Shares - Service role manages shares"
+        ON public.artist_shares
+        FOR INSERT
+        WITH CHECK (auth.role() = 'service_role')
+    $artist_shares_policy$;
+    EXECUTE $artist_shares_policy$
+      CREATE POLICY "Artist Shares - Service role updates shares"
+        ON public.artist_shares
+        FOR UPDATE
+        USING (auth.role() = 'service_role')
+        WITH CHECK (auth.role() = 'service_role')
+    $artist_shares_policy$;
+  END IF;
+END $$;
 
 -- ============================================================================
 -- NONCES TABLE - Protect authentication
@@ -328,7 +378,12 @@ GRANT ALL ON artists TO service_role;
 GRANT ALL ON drops TO service_role;
 GRANT ALL ON products TO service_role;
 GRANT ALL ON subscriptions TO service_role;
-GRANT ALL ON artist_shares TO service_role;
+DO $$
+BEGIN
+  IF to_regclass('public.artist_shares') IS NOT NULL THEN
+    GRANT ALL ON public.artist_shares TO service_role;
+  END IF;
+END $$;
 GRANT ALL ON nonces TO service_role;
 
 -- Anonymous users can read published content only (read-only)

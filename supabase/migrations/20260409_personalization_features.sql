@@ -230,6 +230,8 @@ CREATE POLICY "social_shares_public_read" ON public.social_shares
 
 DROP POLICY IF EXISTS "social_shares_own_write" ON public.social_shares;
 CREATE POLICY "social_shares_own_write" ON public.social_shares
-  FOR INSERT, UPDATE, DELETE
+  FOR ALL
   USING (lower(shared_by_wallet) = lower(auth.jwt() ->> 'sub')
+    OR lower(shared_by_wallet) = lower(auth.jwt() ->> 'wallet_address'))
+  WITH CHECK (lower(shared_by_wallet) = lower(auth.jwt() ->> 'sub')
     OR lower(shared_by_wallet) = lower(auth.jwt() ->> 'wallet_address'));

@@ -1,5 +1,5 @@
 -- Generated bootstrap schema
--- Generated at 2026-04-05T17:51:05.981Z
+-- Generated at 2026-04-09T14:19:40.724Z
 -- Source: supabase/migrations/*.sql in lexical order
 -- Apply this entire file to a fresh Supabase project to bootstrap the current app schema.
 -- ============================================================================
@@ -3286,3 +3286,2725 @@ BEGIN
     $policy$;
   END IF;
 END $$;
+
+-- ============================================================================
+-- Migration: 20260405_rls_policies_production.sql
+-- ============================================================================
+-- Supabase Migration: RLS Policies for Production Security
+-- Date: April 5, 2026
+-- Purpose: Implement Row-Level Security to prevent unauthorized data access
+
+-- ============================================
+-- Enable RLS on all sensitive tables
+-- ============================================
+
+ALTER TABLE IF EXISTS drops ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS orders ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS subscriptions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS products ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS ip_campaigns ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS artists ENABLE ROW LEVEL SECURITY;
+
+-- ============================================
+-- DROPS TABLE POLICIES
+-- ============================================
+
+-- Public can read published drops
+DROP POLICY IF EXISTS "drops_select_published" ON drops;
+CREATE POLICY "drops_select_published"
+  ON drops
+  FOR SELECT
+  USING (status IN ('published', 'active', 'live'));
+
+-- Artists can manage their own drops (via artist_id -> artists.wallet join)
+DROP POLICY IF EXISTS "drops_manage_own" ON drops;
+CREATE POLICY "drops_manage_own"
+  ON drops
+  FOR ALL
+  USING (
+    EXISTS (
+      SELECT 1 FROM artists 
+      WHERE artists.id = drops.artist_id 
+      AND (artists.wallet = auth.jwt() ->> 'wallet' OR artists.wallet = auth.jwt() ->> 'address')
+    )
+  )
+  WITH CHECK (
+    EXISTS (
+      SELECT 1 FROM artists 
+      WHERE artists.id = drops.artist_id 
+      AND (artists.wallet = auth.jwt() ->> 'wallet' OR artists.wallet = auth.jwt() ->> 'address')
+    )
+  );
+
+-- ============================================
+-- ORDERS TABLE POLICIES
+-- ============================================
+
+-- Users can read their own orders
+DROP POLICY IF EXISTS "orders_select_own" ON orders;
+CREATE POLICY "orders_select_own"
+  ON orders
+  FOR SELECT
+  USING (
+    buyer_wallet = auth.jwt() ->> 'wallet' OR 
+    buyer_wallet = auth.jwt() ->> 'address'
+  );
+
+-- Orders cannot be modified (immutable)
+DROP POLICY IF EXISTS "orders_prevent_update" ON orders;
+CREATE POLICY "orders_prevent_update"
+  ON orders
+  FOR UPDATE
+  USING (false);
+
+DROP POLICY IF EXISTS "orders_prevent_delete" ON orders;
+CREATE POLICY "orders_prevent_delete"
+  ON orders
+  FOR DELETE
+  USING (false);
+
+-- ============================================
+-- SUBSCRIPTIONS TABLE POLICIES
+-- ============================================
+
+-- Users can read their own subscriptions
+DROP POLICY IF EXISTS "subscriptions_select_own" ON subscriptions;
+CREATE POLICY "subscriptions_select_own"
+  ON subscriptions
+  FOR SELECT
+  USING (
+    subscriber_wallet = auth.jwt() ->> 'wallet' OR
+    subscriber_wallet = auth.jwt() ->> 'address'
+  );
+
+-- Subscriptions cannot be modified by users
+DROP POLICY IF EXISTS "subscriptions_prevent_update" ON subscriptions;
+CREATE POLICY "subscriptions_prevent_update"
+  ON subscriptions
+  FOR UPDATE
+  USING (false);
+
+DROP POLICY IF EXISTS "subscriptions_prevent_delete" ON subscriptions;
+CREATE POLICY "subscriptions_prevent_delete"
+  ON subscriptions
+  FOR DELETE
+  USING (false);
+
+-- ============================================
+-- PRODUCTS TABLE POLICIES
+-- ============================================
+
+-- Public can read published products
+DROP POLICY IF EXISTS "products_select_published" ON products;
+CREATE POLICY "products_select_published"
+  ON products
+  FOR SELECT
+  USING (status IN ('published', 'active'));
+
+-- Creators can manage their products
+DROP POLICY IF EXISTS "products_manage_own" ON products;
+CREATE POLICY "products_manage_own"
+  ON products
+  FOR ALL
+  USING (
+    creator_wallet = auth.jwt() ->> 'wallet' OR 
+    creator_wallet = auth.jwt() ->> 'address'
+  )
+  WITH CHECK (
+    creator_wallet = auth.jwt() ->> 'wallet' OR 
+    creator_wallet = auth.jwt() ->> 'address'
+  );
+
+-- ============================================
+-- IP_CAMPAIGNS TABLE POLICIES
+-- ============================================
+
+-- Public can read active campaigns
+DROP POLICY IF EXISTS "campaigns_select_active" ON ip_campaigns;
+CREATE POLICY "campaigns_select_active"
+  ON ip_campaigns
+  FOR SELECT
+  USING (status IN ('active', 'published', 'live'));
+
+-- Artists can manage their campaigns (joins to artists table via artist_id)
+DROP POLICY IF EXISTS "campaigns_manage_own" ON ip_campaigns;
+CREATE POLICY "campaigns_manage_own"
+  ON ip_campaigns
+  FOR ALL
+  USING (
+    EXISTS (
+      SELECT 1 FROM artists 
+      WHERE artists.id = ip_campaigns.artist_id 
+      AND (artists.wallet = auth.jwt() ->> 'wallet' OR artists.wallet = auth.jwt() ->> 'address')
+    )
+  )
+  WITH CHECK (
+    EXISTS (
+      SELECT 1 FROM artists 
+      WHERE artists.id = ip_campaigns.artist_id 
+      AND (artists.wallet = auth.jwt() ->> 'wallet' OR artists.wallet = auth.jwt() ->> 'address')
+    )
+  );
+
+-- ============================================
+-- ARTISTS TABLE POLICIES
+-- ============================================
+
+-- Everyone can read public artist profiles
+DROP POLICY IF EXISTS "artists_select_public" ON artists;
+CREATE POLICY "artists_select_public"
+  ON artists
+  FOR SELECT
+  USING (true);
+
+-- Artists can update their own profile
+DROP POLICY IF EXISTS "artists_update_own" ON artists;
+CREATE POLICY "artists_update_own"
+  ON artists
+  FOR UPDATE
+  USING (
+    wallet = auth.jwt() ->> 'wallet' OR 
+    wallet = auth.jwt() ->> 'address'
+  )
+  WITH CHECK (
+    wallet = auth.jwt() ->> 'wallet' OR 
+    wallet = auth.jwt() ->> 'address'
+  );
+
+-- ============================================
+-- GRANT PERMISSIONS
+-- ============================================
+
+-- Public (anon) users can read public data
+GRANT SELECT ON drops TO anon;
+GRANT SELECT ON artists TO anon;
+GRANT SELECT ON products TO anon;
+GRANT SELECT ON ip_campaigns TO anon;
+
+-- Authenticated users can access tables (RLS controls what they see)
+GRANT ALL ON drops TO authenticated;
+GRANT ALL ON orders TO authenticated;
+GRANT ALL ON subscriptions TO authenticated;
+GRANT ALL ON products TO authenticated;
+GRANT ALL ON ip_campaigns TO authenticated;
+GRANT ALL ON artists TO authenticated;
+
+-- Backend service use has full access (RLS bypassed for service role)
+GRANT ALL ON ALL TABLES IN SCHEMA public TO service_role;
+
+-- ============================================
+-- VERIFICATION
+-- ============================================
+
+-- Run this to verify RLS is enabled:
+-- SELECT schemaname, tablename, rowsecurity 
+-- FROM pg_tables 
+-- WHERE schemaname = 'public'
+-- AND tablename IN ('artists', 'drops', 'orders', 'subscriptions', 'products', 'ip_campaigns')
+-- ORDER BY tablename;
+
+-- All rows should show rowsecurity = true
+
+-- ============================================================================
+-- Migration: 20260405_security_lockdown.sql
+-- ============================================================================
+-- ============================================================================
+-- Migration: 20260405_security_lockdown.sql
+-- ============================================================================
+-- Locks down public application/IP commerce exposure and aligns RLS with POPUP auth JWT claims.
+
+CREATE OR REPLACE FUNCTION public.popup_jwt_wallet()
+RETURNS TEXT
+LANGUAGE sql
+STABLE
+AS $$
+  SELECT lower(
+    nullif(
+      coalesce(
+        auth.jwt() ->> 'sub',
+        auth.jwt() ->> 'wallet_address',
+        auth.jwt() ->> 'wallet',
+        ''
+      ),
+      ''
+    )
+  );
+$$;
+
+CREATE OR REPLACE FUNCTION public.popup_is_admin()
+RETURNS BOOLEAN
+LANGUAGE sql
+STABLE
+AS $$
+  SELECT
+    coalesce(lower(auth.jwt() ->> 'app_role'), '') = 'admin'
+    OR coalesce(lower(auth.jwt() ->> 'role_name'), '') = 'admin'
+    OR auth.role() = 'service_role';
+$$;
+
+GRANT EXECUTE ON FUNCTION public.popup_jwt_wallet() TO anon, authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.popup_is_admin() TO anon, authenticated, service_role;
+
+DROP POLICY IF EXISTS "applications_public_select" ON public.artist_applications;
+DROP POLICY IF EXISTS "applications_admin_update" ON public.artist_applications;
+DROP POLICY IF EXISTS "applications_owner_or_admin_select" ON public.artist_applications;
+DROP POLICY IF EXISTS "applications_admin_update_only" ON public.artist_applications;
+
+CREATE POLICY "applications_owner_or_admin_select" ON public.artist_applications
+  FOR SELECT
+  USING (
+    public.popup_is_admin()
+    OR lower(wallet_address) = public.popup_jwt_wallet()
+  );
+
+CREATE POLICY "applications_admin_update_only" ON public.artist_applications
+  FOR UPDATE
+  USING (public.popup_is_admin())
+  WITH CHECK (public.popup_is_admin());
+
+ALTER TABLE public.product_assets ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.entitlements ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.fulfillments ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.ip_campaigns ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.ip_investments ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.royalty_distributions ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "product_assets_select_guarded" ON public.product_assets;
+DROP POLICY IF EXISTS "product_assets_insert_owner_or_admin" ON public.product_assets;
+DROP POLICY IF EXISTS "product_assets_update_owner_or_admin" ON public.product_assets;
+DROP POLICY IF EXISTS "product_assets_delete_owner_or_admin" ON public.product_assets;
+
+CREATE POLICY "product_assets_select_guarded" ON public.product_assets
+  FOR SELECT
+  USING (
+    public.popup_is_admin()
+    OR EXISTS (
+      SELECT 1
+      FROM public.products p
+      WHERE p.id = product_assets.product_id
+        AND lower(p.creator_wallet) = public.popup_jwt_wallet()
+    )
+    OR (
+      visibility = 'public'
+      AND EXISTS (
+        SELECT 1
+        FROM public.products p
+        WHERE p.id = product_assets.product_id
+          AND p.status IN ('published', 'active')
+      )
+    )
+    OR EXISTS (
+      SELECT 1
+      FROM public.entitlements e
+      WHERE e.product_id = product_assets.product_id
+        AND (e.asset_id = product_assets.id OR e.asset_id IS NULL)
+        AND lower(e.buyer_wallet) = public.popup_jwt_wallet()
+        AND e.status = 'granted'
+        AND e.revoked_at IS NULL
+        AND (e.expires_at IS NULL OR e.expires_at > now())
+    )
+  );
+
+CREATE POLICY "product_assets_insert_owner_or_admin" ON public.product_assets
+  FOR INSERT
+  WITH CHECK (
+    public.popup_is_admin()
+    OR EXISTS (
+      SELECT 1
+      FROM public.products p
+      WHERE p.id = product_assets.product_id
+        AND lower(p.creator_wallet) = public.popup_jwt_wallet()
+    )
+  );
+
+CREATE POLICY "product_assets_update_owner_or_admin" ON public.product_assets
+  FOR UPDATE
+  USING (
+    public.popup_is_admin()
+    OR EXISTS (
+      SELECT 1
+      FROM public.products p
+      WHERE p.id = product_assets.product_id
+        AND lower(p.creator_wallet) = public.popup_jwt_wallet()
+    )
+  )
+  WITH CHECK (
+    public.popup_is_admin()
+    OR EXISTS (
+      SELECT 1
+      FROM public.products p
+      WHERE p.id = product_assets.product_id
+        AND lower(p.creator_wallet) = public.popup_jwt_wallet()
+    )
+  );
+
+CREATE POLICY "product_assets_delete_owner_or_admin" ON public.product_assets
+  FOR DELETE
+  USING (
+    public.popup_is_admin()
+    OR EXISTS (
+      SELECT 1
+      FROM public.products p
+      WHERE p.id = product_assets.product_id
+        AND lower(p.creator_wallet) = public.popup_jwt_wallet()
+    )
+  );
+
+DROP POLICY IF EXISTS "entitlements_select_guarded" ON public.entitlements;
+DROP POLICY IF EXISTS "entitlements_insert_owner_or_admin" ON public.entitlements;
+DROP POLICY IF EXISTS "entitlements_update_owner_or_admin" ON public.entitlements;
+DROP POLICY IF EXISTS "entitlements_delete_owner_or_admin" ON public.entitlements;
+
+CREATE POLICY "entitlements_select_guarded" ON public.entitlements
+  FOR SELECT
+  USING (
+    public.popup_is_admin()
+    OR lower(buyer_wallet) = public.popup_jwt_wallet()
+    OR EXISTS (
+      SELECT 1
+      FROM public.products p
+      WHERE p.id = entitlements.product_id
+        AND lower(p.creator_wallet) = public.popup_jwt_wallet()
+    )
+  );
+
+CREATE POLICY "entitlements_insert_owner_or_admin" ON public.entitlements
+  FOR INSERT
+  WITH CHECK (
+    public.popup_is_admin()
+    OR EXISTS (
+      SELECT 1
+      FROM public.products p
+      WHERE p.id = entitlements.product_id
+        AND lower(p.creator_wallet) = public.popup_jwt_wallet()
+    )
+  );
+
+CREATE POLICY "entitlements_update_owner_or_admin" ON public.entitlements
+  FOR UPDATE
+  USING (
+    public.popup_is_admin()
+    OR EXISTS (
+      SELECT 1
+      FROM public.products p
+      WHERE p.id = entitlements.product_id
+        AND lower(p.creator_wallet) = public.popup_jwt_wallet()
+    )
+  )
+  WITH CHECK (
+    public.popup_is_admin()
+    OR EXISTS (
+      SELECT 1
+      FROM public.products p
+      WHERE p.id = entitlements.product_id
+        AND lower(p.creator_wallet) = public.popup_jwt_wallet()
+    )
+  );
+
+CREATE POLICY "entitlements_delete_owner_or_admin" ON public.entitlements
+  FOR DELETE
+  USING (
+    public.popup_is_admin()
+    OR EXISTS (
+      SELECT 1
+      FROM public.products p
+      WHERE p.id = entitlements.product_id
+        AND lower(p.creator_wallet) = public.popup_jwt_wallet()
+    )
+  );
+
+DROP POLICY IF EXISTS "fulfillments_select_guarded" ON public.fulfillments;
+DROP POLICY IF EXISTS "fulfillments_insert_owner_or_admin" ON public.fulfillments;
+DROP POLICY IF EXISTS "fulfillments_update_owner_or_admin" ON public.fulfillments;
+DROP POLICY IF EXISTS "fulfillments_delete_owner_or_admin" ON public.fulfillments;
+
+CREATE POLICY "fulfillments_select_guarded" ON public.fulfillments
+  FOR SELECT
+  USING (
+    public.popup_is_admin()
+    OR lower(coalesce(creator_wallet, '')) = public.popup_jwt_wallet()
+    OR EXISTS (
+      SELECT 1
+      FROM public.orders o
+      WHERE o.id = fulfillments.order_id
+        AND lower(o.buyer_wallet) = public.popup_jwt_wallet()
+    )
+  );
+
+CREATE POLICY "fulfillments_insert_owner_or_admin" ON public.fulfillments
+  FOR INSERT
+  WITH CHECK (
+    public.popup_is_admin()
+    OR lower(coalesce(creator_wallet, '')) = public.popup_jwt_wallet()
+  );
+
+CREATE POLICY "fulfillments_update_owner_or_admin" ON public.fulfillments
+  FOR UPDATE
+  USING (
+    public.popup_is_admin()
+    OR lower(coalesce(creator_wallet, '')) = public.popup_jwt_wallet()
+  )
+  WITH CHECK (
+    public.popup_is_admin()
+    OR lower(coalesce(creator_wallet, '')) = public.popup_jwt_wallet()
+  );
+
+CREATE POLICY "fulfillments_delete_owner_or_admin" ON public.fulfillments
+  FOR DELETE
+  USING (
+    public.popup_is_admin()
+    OR lower(coalesce(creator_wallet, '')) = public.popup_jwt_wallet()
+  );
+
+DROP POLICY IF EXISTS "ip_campaigns_select_guarded" ON public.ip_campaigns;
+DROP POLICY IF EXISTS "ip_campaigns_insert_owner_or_admin" ON public.ip_campaigns;
+DROP POLICY IF EXISTS "ip_campaigns_update_owner_or_admin" ON public.ip_campaigns;
+DROP POLICY IF EXISTS "ip_campaigns_delete_owner_or_admin" ON public.ip_campaigns;
+
+CREATE POLICY "ip_campaigns_select_guarded" ON public.ip_campaigns
+  FOR SELECT
+  USING (
+    public.popup_is_admin()
+    OR EXISTS (
+      SELECT 1
+      FROM public.artists a
+      WHERE a.id = ip_campaigns.artist_id
+        AND lower(a.wallet) = public.popup_jwt_wallet()
+    )
+    OR EXISTS (
+      SELECT 1
+      FROM public.ip_investments i
+      WHERE i.campaign_id = ip_campaigns.id
+        AND lower(i.investor_wallet) = public.popup_jwt_wallet()
+    )
+    OR (
+      visibility = 'listed'
+      AND status IN ('active', 'funded', 'settled', 'closed')
+    )
+  );
+
+CREATE POLICY "ip_campaigns_insert_owner_or_admin" ON public.ip_campaigns
+  FOR INSERT
+  WITH CHECK (
+    public.popup_is_admin()
+    OR EXISTS (
+      SELECT 1
+      FROM public.artists a
+      WHERE a.id = ip_campaigns.artist_id
+        AND lower(a.wallet) = public.popup_jwt_wallet()
+    )
+  );
+
+CREATE POLICY "ip_campaigns_update_owner_or_admin" ON public.ip_campaigns
+  FOR UPDATE
+  USING (
+    public.popup_is_admin()
+    OR EXISTS (
+      SELECT 1
+      FROM public.artists a
+      WHERE a.id = ip_campaigns.artist_id
+        AND lower(a.wallet) = public.popup_jwt_wallet()
+    )
+  )
+  WITH CHECK (
+    public.popup_is_admin()
+    OR EXISTS (
+      SELECT 1
+      FROM public.artists a
+      WHERE a.id = ip_campaigns.artist_id
+        AND lower(a.wallet) = public.popup_jwt_wallet()
+    )
+  );
+
+CREATE POLICY "ip_campaigns_delete_owner_or_admin" ON public.ip_campaigns
+  FOR DELETE
+  USING (
+    public.popup_is_admin()
+    OR EXISTS (
+      SELECT 1
+      FROM public.artists a
+      WHERE a.id = ip_campaigns.artist_id
+        AND lower(a.wallet) = public.popup_jwt_wallet()
+    )
+  );
+
+DROP POLICY IF EXISTS "ip_investments_select_guarded" ON public.ip_investments;
+DROP POLICY IF EXISTS "ip_investments_insert_self_or_admin" ON public.ip_investments;
+DROP POLICY IF EXISTS "ip_investments_update_owner_or_admin" ON public.ip_investments;
+DROP POLICY IF EXISTS "ip_investments_delete_owner_or_admin" ON public.ip_investments;
+
+CREATE POLICY "ip_investments_select_guarded" ON public.ip_investments
+  FOR SELECT
+  USING (
+    public.popup_is_admin()
+    OR lower(investor_wallet) = public.popup_jwt_wallet()
+    OR EXISTS (
+      SELECT 1
+      FROM public.ip_campaigns c
+      JOIN public.artists a ON a.id = c.artist_id
+      WHERE c.id = ip_investments.campaign_id
+        AND lower(a.wallet) = public.popup_jwt_wallet()
+    )
+  );
+
+CREATE POLICY "ip_investments_insert_self_or_admin" ON public.ip_investments
+  FOR INSERT
+  WITH CHECK (
+    public.popup_is_admin()
+    OR lower(investor_wallet) = public.popup_jwt_wallet()
+  );
+
+CREATE POLICY "ip_investments_update_owner_or_admin" ON public.ip_investments
+  FOR UPDATE
+  USING (
+    public.popup_is_admin()
+    OR EXISTS (
+      SELECT 1
+      FROM public.ip_campaigns c
+      JOIN public.artists a ON a.id = c.artist_id
+      WHERE c.id = ip_investments.campaign_id
+        AND lower(a.wallet) = public.popup_jwt_wallet()
+    )
+  )
+  WITH CHECK (
+    public.popup_is_admin()
+    OR EXISTS (
+      SELECT 1
+      FROM public.ip_campaigns c
+      JOIN public.artists a ON a.id = c.artist_id
+      WHERE c.id = ip_investments.campaign_id
+        AND lower(a.wallet) = public.popup_jwt_wallet()
+    )
+  );
+
+CREATE POLICY "ip_investments_delete_owner_or_admin" ON public.ip_investments
+  FOR DELETE
+  USING (
+    public.popup_is_admin()
+    OR EXISTS (
+      SELECT 1
+      FROM public.ip_campaigns c
+      JOIN public.artists a ON a.id = c.artist_id
+      WHERE c.id = ip_investments.campaign_id
+        AND lower(a.wallet) = public.popup_jwt_wallet()
+    )
+  );
+
+DROP POLICY IF EXISTS "royalty_distributions_select_guarded" ON public.royalty_distributions;
+DROP POLICY IF EXISTS "royalty_distributions_insert_owner_or_admin" ON public.royalty_distributions;
+DROP POLICY IF EXISTS "royalty_distributions_update_owner_or_admin" ON public.royalty_distributions;
+DROP POLICY IF EXISTS "royalty_distributions_delete_owner_or_admin" ON public.royalty_distributions;
+
+CREATE POLICY "royalty_distributions_select_guarded" ON public.royalty_distributions
+  FOR SELECT
+  USING (
+    public.popup_is_admin()
+    OR lower(recipient_wallet) = public.popup_jwt_wallet()
+    OR EXISTS (
+      SELECT 1
+      FROM public.ip_campaigns c
+      JOIN public.artists a ON a.id = c.artist_id
+      WHERE c.id = royalty_distributions.campaign_id
+        AND lower(a.wallet) = public.popup_jwt_wallet()
+    )
+  );
+
+CREATE POLICY "royalty_distributions_insert_owner_or_admin" ON public.royalty_distributions
+  FOR INSERT
+  WITH CHECK (
+    public.popup_is_admin()
+    OR EXISTS (
+      SELECT 1
+      FROM public.ip_campaigns c
+      JOIN public.artists a ON a.id = c.artist_id
+      WHERE c.id = royalty_distributions.campaign_id
+        AND lower(a.wallet) = public.popup_jwt_wallet()
+    )
+  );
+
+CREATE POLICY "royalty_distributions_update_owner_or_admin" ON public.royalty_distributions
+  FOR UPDATE
+  USING (
+    public.popup_is_admin()
+    OR EXISTS (
+      SELECT 1
+      FROM public.ip_campaigns c
+      JOIN public.artists a ON a.id = c.artist_id
+      WHERE c.id = royalty_distributions.campaign_id
+        AND lower(a.wallet) = public.popup_jwt_wallet()
+    )
+  )
+  WITH CHECK (
+    public.popup_is_admin()
+    OR EXISTS (
+      SELECT 1
+      FROM public.ip_campaigns c
+      JOIN public.artists a ON a.id = c.artist_id
+      WHERE c.id = royalty_distributions.campaign_id
+        AND lower(a.wallet) = public.popup_jwt_wallet()
+    )
+  );
+
+CREATE POLICY "royalty_distributions_delete_owner_or_admin" ON public.royalty_distributions
+  FOR DELETE
+  USING (
+    public.popup_is_admin()
+    OR EXISTS (
+      SELECT 1
+      FROM public.ip_campaigns c
+      JOIN public.artists a ON a.id = c.artist_id
+      WHERE c.id = royalty_distributions.campaign_id
+        AND lower(a.wallet) = public.popup_jwt_wallet()
+    )
+  );
+
+-- ============================================================================
+-- Migration: 20260406_creator_notifications.sql
+-- ============================================================================
+-- Supabase Migration: Creator Interaction Notification System
+-- Date: April 6, 2026
+-- Purpose: Implement real-time notifications for creator interactions (subscriptions, purchases, investments)
+
+-- ============================================
+-- Notifications Table - Store all notifications
+-- ============================================
+CREATE TABLE IF NOT EXISTS notifications (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  
+  -- Recipient
+  creator_id UUID NOT NULL REFERENCES artists(id) ON DELETE CASCADE,
+  creator_wallet TEXT NOT NULL,
+  
+  -- Event Details
+  event_type VARCHAR(50) NOT NULL, -- subscription, purchase, investment, milestone
+  event_id VARCHAR(255) UNIQUE, -- tx hash or order ID for deduplication
+  
+  -- Notification Content
+  title VARCHAR(255) NOT NULL,
+  description TEXT,
+  message TEXT,
+  
+  -- Structured Data
+  interactor_wallet TEXT,
+  interactor_display_name VARCHAR(255),
+  product_id UUID,
+  product_name VARCHAR(255),
+  campaign_id UUID,
+  campaign_title VARCHAR(255),
+  drop_id UUID,
+  drop_title VARCHAR(255),
+  
+  -- Financial Data
+  amount_eth DECIMAL(18, 8),
+  amount_usd DECIMAL(18, 2),
+  currency VARCHAR(10) DEFAULT 'ETH',
+  
+  -- Quantity
+  quantity INT,
+  
+  -- Status & Engagement
+  "read" BOOLEAN DEFAULT FALSE,
+  actioned BOOLEAN DEFAULT FALSE,
+  action_url TEXT,
+  
+  -- Metadata
+  metadata JSONB DEFAULT '{}',
+  
+  -- Timestamps
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_notifications_creator_id ON notifications(creator_id);
+CREATE INDEX IF NOT EXISTS idx_notifications_creator_wallet ON notifications(creator_wallet);
+CREATE INDEX IF NOT EXISTS idx_notifications_event_type ON notifications(event_type);
+CREATE INDEX IF NOT EXISTS idx_notifications_read ON notifications("read");
+CREATE INDEX IF NOT EXISTS idx_notifications_created_at ON notifications(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_notifications_event_id ON notifications(event_id);
+
+-- ============================================
+-- Notification Preferences - Creator settings
+-- ============================================
+CREATE TABLE IF NOT EXISTS notification_preferences (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  creator_id UUID NOT NULL UNIQUE REFERENCES artists(id) ON DELETE CASCADE,
+  creator_wallet TEXT NOT NULL UNIQUE,
+  
+  -- Event Toggles
+  notify_subscriptions BOOLEAN DEFAULT TRUE,
+  notify_purchases BOOLEAN DEFAULT TRUE,
+  notify_investments BOOLEAN DEFAULT TRUE,
+  notify_milestones BOOLEAN DEFAULT TRUE,
+  notify_comments BOOLEAN DEFAULT TRUE, -- Future: for community features
+  
+  -- Delivery Channels
+  enable_in_app BOOLEAN DEFAULT TRUE,
+  enable_web_push BOOLEAN DEFAULT TRUE,
+  enable_email BOOLEAN DEFAULT FALSE,
+  email_address TEXT,
+  
+  -- Notification Frequency
+  digest_frequency VARCHAR(50) DEFAULT 'real_time', -- real_time, hourly, daily, weekly, none
+  quiet_hours_enabled BOOLEAN DEFAULT FALSE,
+  quiet_hours_start TIME, -- e.g., 22:00
+  quiet_hours_end TIME, -- e.g., 08:00
+  timezone VARCHAR(50) DEFAULT 'UTC',
+  
+  -- Batching
+  batch_similar_events BOOLEAN DEFAULT FALSE,
+  batch_window_minutes INT DEFAULT 5,
+  
+  -- Metadata
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_prefs_creator_wallet ON notification_preferences(creator_wallet);
+CREATE INDEX IF NOT EXISTS idx_prefs_creator_id ON notification_preferences(creator_id);
+
+-- ============================================
+-- Push Subscriptions - Web push endpoints
+-- ============================================
+CREATE TABLE IF NOT EXISTS push_subscriptions (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  creator_wallet TEXT NOT NULL,
+  
+  -- Push API subscription object (JSON)
+  subscription JSONB NOT NULL, -- { endpoint, keys: { auth, p256dh } }
+  browser_info VARCHAR(100), -- Chrome, Firefox, Safari, Edge
+  device_id VARCHAR(255),
+  
+  -- Status
+  active BOOLEAN DEFAULT TRUE,
+  last_used_at TIMESTAMP WITH TIME ZONE,
+  
+  -- Metadata
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_push_sub_creator ON push_subscriptions(creator_wallet);
+CREATE INDEX IF NOT EXISTS idx_push_sub_active ON push_subscriptions(active);
+
+-- ============================================
+-- Notification Delivery Log - Tracking
+-- ============================================
+CREATE TABLE IF NOT EXISTS notification_delivery_log (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  notification_id UUID NOT NULL REFERENCES notifications(id) ON DELETE CASCADE,
+  
+  -- Channel
+  channel VARCHAR(50) NOT NULL, -- in_app, email, web_push
+  
+  -- Status
+  status VARCHAR(50) DEFAULT 'pending', -- pending, sent, delivered, failed, bounced
+  error_message TEXT,
+  retry_count INT DEFAULT 0,
+  last_retry_at TIMESTAMP WITH TIME ZONE,
+  
+  -- Recipient Info
+  recipient_email TEXT,
+  push_endpoint TEXT,
+  device_id VARCHAR(255),
+  
+  -- Timestamps
+  sent_at TIMESTAMP WITH TIME ZONE,
+  delivered_at TIMESTAMP WITH TIME ZONE,
+  viewed_at TIMESTAMP WITH TIME ZONE,
+  clicked_at TIMESTAMP WITH TIME ZONE,
+  
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_delivery_notification ON notification_delivery_log(notification_id);
+CREATE INDEX IF NOT EXISTS idx_delivery_status ON notification_delivery_log(status);
+CREATE INDEX IF NOT EXISTS idx_delivery_channel ON notification_delivery_log(channel);
+CREATE INDEX IF NOT EXISTS idx_delivery_created ON notification_delivery_log(created_at DESC);
+
+-- ============================================
+-- RLS Policies for Notifications
+-- ============================================
+
+-- Enable RLS
+ALTER TABLE IF EXISTS notifications ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS notification_preferences ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS push_subscriptions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS notification_delivery_log ENABLE ROW LEVEL SECURITY;
+
+-- Creators can read their own notifications
+DROP POLICY IF EXISTS "notifications_select_own" ON notifications;
+CREATE POLICY "notifications_select_own"
+  ON notifications
+  FOR SELECT
+  USING (
+    creator_wallet = auth.jwt() ->> 'wallet' OR 
+    creator_wallet = auth.jwt() ->> 'address'
+  );
+
+-- Creators can update read status
+DROP POLICY IF EXISTS "notifications_update_own" ON notifications;
+CREATE POLICY "notifications_update_own"
+  ON notifications
+  FOR UPDATE
+  USING (
+    creator_wallet = auth.jwt() ->> 'wallet' OR 
+    creator_wallet = auth.jwt() ->> 'address'
+  )
+  WITH CHECK (
+    creator_wallet = auth.jwt() ->> 'wallet' OR 
+    creator_wallet = auth.jwt() ->> 'address'
+  );
+
+-- Creators can manage their notification preferences
+DROP POLICY IF EXISTS "prefs_select_own" ON notification_preferences;
+CREATE POLICY "prefs_select_own"
+  ON notification_preferences
+  FOR SELECT
+  USING (
+    creator_wallet = auth.jwt() ->> 'wallet' OR 
+    creator_wallet = auth.jwt() ->> 'address'
+  );
+
+DROP POLICY IF EXISTS "prefs_update_own" ON notification_preferences;
+CREATE POLICY "prefs_update_own"
+  ON notification_preferences
+  FOR UPDATE
+  USING (
+    creator_wallet = auth.jwt() ->> 'wallet' OR 
+    creator_wallet = auth.jwt() ->> 'address'
+  )
+  WITH CHECK (
+    creator_wallet = auth.jwt() ->> 'wallet' OR 
+    creator_wallet = auth.jwt() ->> 'address'
+  );
+
+DROP POLICY IF EXISTS "prefs_insert_own" ON notification_preferences;
+CREATE POLICY "prefs_insert_own"
+  ON notification_preferences
+  FOR INSERT
+  WITH CHECK (
+    creator_wallet = auth.jwt() ->> 'wallet' OR 
+    creator_wallet = auth.jwt() ->> 'address'
+  );
+
+-- Creators can manage push subscriptions
+DROP POLICY IF EXISTS "push_sub_select_own" ON push_subscriptions;
+CREATE POLICY "push_sub_select_own"
+  ON push_subscriptions
+  FOR SELECT
+  USING (
+    creator_wallet = auth.jwt() ->> 'wallet' OR 
+    creator_wallet = auth.jwt() ->> 'address'
+  );
+
+DROP POLICY IF EXISTS "push_sub_insert_own" ON push_subscriptions;
+CREATE POLICY "push_sub_insert_own"
+  ON push_subscriptions
+  FOR INSERT
+  WITH CHECK (
+    creator_wallet = auth.jwt() ->> 'wallet' OR 
+    creator_wallet = auth.jwt() ->> 'address'
+  );
+
+DROP POLICY IF EXISTS "push_sub_delete_own" ON push_subscriptions;
+CREATE POLICY "push_sub_delete_own"
+  ON push_subscriptions
+  FOR DELETE
+  USING (
+    creator_wallet = auth.jwt() ->> 'wallet' OR 
+    creator_wallet = auth.jwt() ->> 'address'
+  );
+
+-- Service role has full access for server-side operations
+-- (No policy needed - service_role bypasses RLS)
+
+-- ============================================
+-- Grant Permissions
+-- ============================================
+
+-- Authenticated users
+GRANT SELECT, UPDATE ON notifications TO authenticated;
+GRANT SELECT, INSERT, UPDATE ON notification_preferences TO authenticated;
+GRANT SELECT, INSERT, DELETE ON push_subscriptions TO authenticated;
+GRANT SELECT ON notification_delivery_log TO authenticated;
+
+-- Service role (backend API)
+GRANT ALL ON notifications TO service_role;
+GRANT ALL ON notification_preferences TO service_role;
+GRANT ALL ON push_subscriptions TO service_role;
+GRANT ALL ON notification_delivery_log TO service_role;
+
+-- ============================================
+-- Helper Function: Get Unread Count
+-- ============================================
+CREATE OR REPLACE FUNCTION get_unread_notification_count(creator_wallet_input TEXT)
+RETURNS INTEGER AS $$
+BEGIN
+  RETURN (
+    SELECT COUNT(*)
+    FROM notifications
+    WHERE creator_wallet = creator_wallet_input
+    AND "read" = FALSE
+  );
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- ============================================
+-- Helper Function: Mark All as Read
+-- ============================================
+CREATE OR REPLACE FUNCTION mark_all_notifications_read(creator_wallet_input TEXT)
+RETURNS INTEGER AS $$
+DECLARE
+  updated_count INTEGER;
+BEGIN
+  UPDATE notifications
+  SET "read" = TRUE, updated_at = NOW()
+  WHERE creator_wallet = creator_wallet_input
+  AND "read" = FALSE;
+  
+  GET DIAGNOSTICS updated_count = ROW_COUNT;
+  RETURN updated_count;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- ============================================
+-- Helper Function: Create Default Preferences
+-- ============================================
+CREATE OR REPLACE FUNCTION create_default_notification_preferences(
+  input_creator_id UUID,
+  input_creator_wallet TEXT
+)
+RETURNS notification_preferences AS $$
+DECLARE
+  new_prefs notification_preferences;
+BEGIN
+  INSERT INTO notification_preferences (
+    creator_id,
+    creator_wallet,
+    notify_subscriptions,
+    notify_purchases,
+    notify_investments,
+    notify_milestones,
+    enable_in_app,
+    enable_web_push,
+    enable_email,
+    digest_frequency
+  )
+  VALUES (
+    input_creator_id,
+    input_creator_wallet,
+    TRUE, TRUE, TRUE, TRUE,
+    TRUE, TRUE, FALSE,
+    'real_time'
+  )
+  RETURNING * INTO new_prefs;
+  
+  RETURN new_prefs;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- ============================================
+-- Audit: View Recent Creator Activity
+-- ============================================
+CREATE OR REPLACE VIEW creator_recent_interactions AS
+SELECT 
+  creator_wallet,
+  COUNT(*) as total_interactions,
+  COUNT(CASE WHEN event_type = 'subscription' THEN 1 END) as subscriptions,
+  COUNT(CASE WHEN event_type = 'purchase' THEN 1 END) as purchases,
+  COUNT(CASE WHEN event_type = 'investment' THEN 1 END) as investments,
+  SUM(amount_eth) FILTER (WHERE amount_eth IS NOT NULL) as total_eth,
+  MAX(created_at) as last_interaction
+FROM notifications
+WHERE created_at > NOW() - INTERVAL '30 days'
+GROUP BY creator_wallet;
+
+-- ============================================
+-- Verification
+-- ============================================
+-- Run this to verify tables are created:
+-- SELECT table_name FROM information_schema.tables 
+-- WHERE table_schema = 'public' 
+-- AND table_name IN ('notifications', 'notification_preferences', 'push_subscriptions', 'notification_delivery_log')
+-- ORDER BY table_name;
+
+-- ============================================================================
+-- Migration: 20260408_add_missing_constraints.sql
+-- ============================================================================
+-- ============================================================================
+-- Migration: 20260408_add_missing_constraints.sql
+-- Purpose: Add UNIQUE and FK constraints for data integrity
+-- Date: April 8, 2026
+-- ============================================================================
+
+-- Wallet is already unique in the base schema. Keep this migration idempotent by
+-- only adding the named constraint when older environments somehow missed it.
+DO $$
+BEGIN
+  IF to_regclass('public.artists') IS NOT NULL
+     AND NOT EXISTS (
+       SELECT 1
+       FROM pg_constraint
+       WHERE conrelid = 'public.artists'::regclass
+         AND conname IN ('artists_wallet_unique', 'artists_wallet_key')
+     ) THEN
+    ALTER TABLE public.artists
+      ADD CONSTRAINT artists_wallet_unique UNIQUE (wallet);
+  END IF;
+END $$;
+
+-- ============================================================================
+-- ORDERS TABLE - Add unique constraint on tx_hash
+-- ============================================================================
+
+DO $$
+BEGIN
+  IF to_regclass('public.orders') IS NOT NULL
+     AND NOT EXISTS (
+       SELECT 1
+       FROM pg_constraint
+       WHERE conrelid = 'public.orders'::regclass
+         AND conname = 'orders_tx_hash_unique'
+     )
+     AND NOT EXISTS (
+       SELECT tx_hash
+       FROM public.orders
+       WHERE tx_hash IS NOT NULL
+       GROUP BY tx_hash
+       HAVING COUNT(*) > 1
+     ) THEN
+    ALTER TABLE public.orders
+      ADD CONSTRAINT orders_tx_hash_unique UNIQUE (tx_hash);
+  END IF;
+END $$;
+
+-- ============================================================================
+-- NONCES TABLE - Add unique constraint + indexes for auth
+-- ============================================================================
+
+DO $$
+BEGIN
+  IF to_regclass('public.nonces') IS NOT NULL
+     AND NOT EXISTS (
+       SELECT 1
+       FROM pg_constraint
+       WHERE conrelid = 'public.nonces'::regclass
+         AND conname = 'nonces_wallet_nonce_unique'
+     )
+     AND NOT EXISTS (
+       SELECT wallet, nonce
+       FROM public.nonces
+       GROUP BY wallet, nonce
+       HAVING COUNT(*) > 1
+     ) THEN
+    ALTER TABLE public.nonces
+      ADD CONSTRAINT nonces_wallet_nonce_unique UNIQUE (wallet, nonce);
+  END IF;
+END $$;
+
+-- Compound index for fast nonce lookup
+CREATE INDEX IF NOT EXISTS idx_nonces_wallet_used 
+  ON nonces(wallet, used, created_at DESC);
+
+-- ============================================================================
+-- ORDERS TABLE - Add foreign key to order_items
+-- ============================================================================
+
+-- Ensure order_items properly references orders
+DO $$
+BEGIN
+  IF to_regclass('public.order_items') IS NOT NULL
+     AND to_regclass('public.orders') IS NOT NULL
+     AND NOT EXISTS (
+       SELECT 1
+       FROM pg_constraint
+       WHERE conrelid = 'public.order_items'::regclass
+         AND conname = 'fk_order_items_orders'
+     ) THEN
+    ALTER TABLE public.order_items
+      ADD CONSTRAINT fk_order_items_orders FOREIGN KEY (order_id)
+      REFERENCES public.orders(id) ON DELETE CASCADE;
+  END IF;
+END $$;
+
+-- ============================================================================
+-- ARTIST_SHARES TABLE - Add constraints
+-- ============================================================================
+
+DO $$
+BEGIN
+  IF to_regclass('public.artist_shares') IS NOT NULL
+     AND NOT EXISTS (
+       SELECT 1
+       FROM pg_constraint
+       WHERE conrelid = 'public.artist_shares'::regclass
+         AND conname = 'artist_shares_artist_id_token_unique'
+     )
+     AND NOT EXISTS (
+       SELECT artist_id, token_address
+       FROM public.artist_shares
+       GROUP BY artist_id, token_address
+       HAVING COUNT(*) > 1
+     ) THEN
+    ALTER TABLE public.artist_shares
+      ADD CONSTRAINT artist_shares_artist_id_token_unique
+      UNIQUE (artist_id, token_address);
+  END IF;
+END $$;
+
+-- ============================================================================
+-- SUBSCRIPTIONS TABLE - Add constraints
+-- ============================================================================
+
+-- The subscriptions table already defines a uniqueness guarantee in the base
+-- schema (`UNIQUE (artist_id, subscriber_wallet)`). Keep a supporting lookup
+-- index without trying to add an invalid duplicate constraint.
+CREATE INDEX IF NOT EXISTS idx_subscriptions_subscriber_artist_lookup
+  ON public.subscriptions(subscriber_wallet, artist_id);
+
+-- ============================================================================
+-- DROPS TABLE - Add constraints
+-- ============================================================================
+
+DO $$
+BEGIN
+  IF to_regclass('public.drops') IS NOT NULL
+     AND NOT EXISTS (
+       SELECT artist_id, contract_address
+       FROM public.drops
+       WHERE contract_address IS NOT NULL
+       GROUP BY artist_id, contract_address
+       HAVING COUNT(*) > 1
+     ) THEN
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_drops_artist_contract_unique
+      ON public.drops(artist_id, contract_address)
+      WHERE contract_address IS NOT NULL;
+  END IF;
+END $$;
+
+-- ============================================================================
+-- PRODUCTS TABLE - Add constraints
+-- ============================================================================
+
+DO $$
+BEGIN
+  IF to_regclass('public.products') IS NOT NULL
+     AND NOT EXISTS (
+       SELECT creator_wallet, lower(name)
+       FROM public.products
+       WHERE creator_wallet IS NOT NULL
+         AND name IS NOT NULL
+       GROUP BY creator_wallet, lower(name)
+       HAVING COUNT(*) > 1
+     ) THEN
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_products_creator_wallet_name_unique
+      ON public.products(creator_wallet, lower(name));
+  END IF;
+END $$;
+
+-- ============================================================================
+-- VERIFICATION QUERIES
+-- ============================================================================
+
+-- Check constraints are working
+-- SELECT constraint_name, constraint_type 
+-- FROM information_schema.constraint_column_usage 
+-- WHERE table_name IN ('artists', 'orders', 'nonces');
+
+-- Verify unique constraints prevent duplicates
+-- INSERT INTO artists (wallet, name) VALUES ('0xtest', 'Test') 
+--   ON CONFLICT (wallet) DO NOTHING;
+
+-- ============================================================================
+-- PERFORMANCE NOTES
+-- ============================================================================
+-- These constraints improve query performance by:
+-- 1. Preventing duplicate artists for same wallet
+-- 2. Preventing double-charging for same transaction
+-- 3. Preventing authentication token reuse attacks
+-- 4. Enabling unique indexes for fast lookups
+
+-- ============================================================================
+-- Migration: 20260408_creator_fan_hub_foundation.sql
+-- ============================================================================
+-- ============================================================================
+-- Migration: 20260408_creator_fan_hub_foundation.sql
+-- Description:
+--   * Adds the creator <-> fan relationship graph
+--   * Introduces gated creator channels + posts
+--   * Introduces creator/fan direct threads
+--   * Locks the new community layer down with wallet-based RLS
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS public.creator_fans (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  artist_id UUID NOT NULL REFERENCES public.artists(id) ON DELETE CASCADE,
+  fan_wallet TEXT NOT NULL,
+  is_subscriber BOOLEAN NOT NULL DEFAULT FALSE,
+  active_subscription BOOLEAN NOT NULL DEFAULT FALSE,
+  is_collector BOOLEAN NOT NULL DEFAULT FALSE,
+  is_backer BOOLEAN NOT NULL DEFAULT FALSE,
+  subscription_expires_at TIMESTAMP WITH TIME ZONE,
+  collected_releases_count INT NOT NULL DEFAULT 0,
+  orders_count INT NOT NULL DEFAULT 0,
+  total_spent_eth NUMERIC NOT NULL DEFAULT 0,
+  backed_campaigns_count INT NOT NULL DEFAULT 0,
+  total_invested_eth NUMERIC NOT NULL DEFAULT 0,
+  relationship_score INT NOT NULL DEFAULT 0,
+  last_interacted_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  source_snapshot JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  CONSTRAINT creator_fans_artist_wallet_unique UNIQUE (artist_id, fan_wallet)
+);
+
+CREATE INDEX IF NOT EXISTS idx_creator_fans_artist_id
+ON public.creator_fans(artist_id);
+
+CREATE INDEX IF NOT EXISTS idx_creator_fans_fan_wallet
+ON public.creator_fans(lower(fan_wallet));
+
+CREATE INDEX IF NOT EXISTS idx_creator_fans_score
+ON public.creator_fans(artist_id, relationship_score DESC);
+
+CREATE TABLE IF NOT EXISTS public.creator_channels (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  artist_id UUID NOT NULL REFERENCES public.artists(id) ON DELETE CASCADE,
+  slug TEXT NOT NULL,
+  name TEXT NOT NULL,
+  description TEXT,
+  access_level VARCHAR(50) NOT NULL DEFAULT 'public',
+  created_by_wallet TEXT NOT NULL,
+  is_default BOOLEAN NOT NULL DEFAULT FALSE,
+  metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  CONSTRAINT creator_channels_artist_slug_unique UNIQUE (artist_id, slug),
+  CONSTRAINT creator_channels_access_level_check
+    CHECK (access_level IN ('public', 'fan', 'subscriber', 'collector', 'backer'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_creator_channels_artist_id
+ON public.creator_channels(artist_id);
+
+CREATE INDEX IF NOT EXISTS idx_creator_channels_access_level
+ON public.creator_channels(access_level);
+
+CREATE TABLE IF NOT EXISTS public.creator_posts (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  channel_id UUID NOT NULL REFERENCES public.creator_channels(id) ON DELETE CASCADE,
+  artist_id UUID NOT NULL REFERENCES public.artists(id) ON DELETE CASCADE,
+  author_wallet TEXT NOT NULL,
+  post_kind VARCHAR(50) NOT NULL DEFAULT 'update',
+  title TEXT,
+  body TEXT NOT NULL,
+  metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+  published_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  CONSTRAINT creator_posts_kind_check
+    CHECK (post_kind IN ('update', 'drop', 'release', 'reward', 'event', 'poll'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_creator_posts_channel_id
+ON public.creator_posts(channel_id, published_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_creator_posts_artist_id
+ON public.creator_posts(artist_id, published_at DESC);
+
+CREATE TABLE IF NOT EXISTS public.creator_threads (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  artist_id UUID NOT NULL REFERENCES public.artists(id) ON DELETE CASCADE,
+  creator_wallet TEXT NOT NULL,
+  fan_wallet TEXT NOT NULL,
+  subject TEXT,
+  status VARCHAR(50) NOT NULL DEFAULT 'open',
+  metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+  last_message_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  CONSTRAINT creator_threads_artist_fan_unique UNIQUE (artist_id, fan_wallet),
+  CONSTRAINT creator_threads_status_check
+    CHECK (status IN ('open', 'archived', 'blocked'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_creator_threads_creator_wallet
+ON public.creator_threads(lower(creator_wallet), last_message_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_creator_threads_fan_wallet
+ON public.creator_threads(lower(fan_wallet), last_message_at DESC);
+
+CREATE TABLE IF NOT EXISTS public.creator_thread_messages (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  thread_id UUID NOT NULL REFERENCES public.creator_threads(id) ON DELETE CASCADE,
+  sender_wallet TEXT NOT NULL,
+  sender_role VARCHAR(20) NOT NULL DEFAULT 'fan',
+  body TEXT NOT NULL,
+  metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  CONSTRAINT creator_thread_messages_sender_role_check
+    CHECK (sender_role IN ('creator', 'fan', 'admin'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_creator_thread_messages_thread_id
+ON public.creator_thread_messages(thread_id, created_at ASC);
+
+CREATE OR REPLACE FUNCTION public.popup_jwt_wallet()
+RETURNS TEXT
+LANGUAGE sql
+STABLE
+AS $$
+  SELECT lower(
+    nullif(
+      coalesce(
+        auth.jwt() ->> 'sub',
+        auth.jwt() ->> 'wallet_address',
+        auth.jwt() ->> 'wallet',
+        auth.jwt() ->> 'address',
+        ''
+      ),
+      ''
+    )
+  );
+$$;
+
+CREATE OR REPLACE FUNCTION public.popup_is_admin()
+RETURNS BOOLEAN
+LANGUAGE sql
+STABLE
+AS $$
+  SELECT
+    coalesce(lower(auth.jwt() ->> 'app_role'), '') = 'admin'
+    OR coalesce(lower(auth.jwt() ->> 'role_name'), '') = 'admin'
+    OR auth.role() = 'service_role';
+$$;
+
+CREATE OR REPLACE FUNCTION public.popup_wallet_owns_artist(target_artist_id UUID)
+RETURNS BOOLEAN
+LANGUAGE sql
+STABLE
+AS $$
+  SELECT
+    public.popup_is_admin()
+    OR EXISTS (
+      SELECT 1
+      FROM public.artists a
+      WHERE a.id = target_artist_id
+        AND lower(a.wallet) = public.popup_jwt_wallet()
+    );
+$$;
+
+CREATE OR REPLACE FUNCTION public.popup_wallet_can_access_artist_channel(target_channel_id UUID)
+RETURNS BOOLEAN
+LANGUAGE sql
+STABLE
+AS $$
+  SELECT EXISTS (
+    SELECT 1
+    FROM public.creator_channels c
+    LEFT JOIN public.creator_fans f
+      ON f.artist_id = c.artist_id
+     AND lower(f.fan_wallet) = public.popup_jwt_wallet()
+    WHERE c.id = target_channel_id
+      AND (
+        public.popup_is_admin()
+        OR public.popup_wallet_owns_artist(c.artist_id)
+        OR c.access_level = 'public'
+        OR (
+          public.popup_jwt_wallet() IS NOT NULL
+          AND public.popup_jwt_wallet() <> ''
+          AND c.access_level = 'fan'
+          AND f.id IS NOT NULL
+        )
+        OR (c.access_level = 'subscriber' AND coalesce(f.active_subscription, false))
+        OR (c.access_level = 'collector' AND coalesce(f.is_collector, false))
+        OR (c.access_level = 'backer' AND coalesce(f.is_backer, false))
+      )
+  );
+$$;
+
+GRANT EXECUTE ON FUNCTION public.popup_jwt_wallet() TO anon, authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.popup_is_admin() TO anon, authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.popup_wallet_owns_artist(UUID) TO anon, authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.popup_wallet_can_access_artist_channel(UUID) TO anon, authenticated, service_role;
+
+ALTER TABLE public.creator_fans ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.creator_channels ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.creator_posts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.creator_threads ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.creator_thread_messages ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "creator_fans_select_owner_or_self" ON public.creator_fans;
+CREATE POLICY "creator_fans_select_owner_or_self" ON public.creator_fans
+  FOR SELECT
+  USING (
+    public.popup_is_admin()
+    OR public.popup_wallet_owns_artist(artist_id)
+    OR lower(fan_wallet) = public.popup_jwt_wallet()
+  );
+
+DROP POLICY IF EXISTS "creator_fans_mutate_owner_or_admin" ON public.creator_fans;
+CREATE POLICY "creator_fans_mutate_owner_or_admin" ON public.creator_fans
+  FOR ALL
+  USING (
+    public.popup_is_admin()
+    OR public.popup_wallet_owns_artist(artist_id)
+  )
+  WITH CHECK (
+    public.popup_is_admin()
+    OR public.popup_wallet_owns_artist(artist_id)
+  );
+
+DROP POLICY IF EXISTS "creator_channels_select_accessible" ON public.creator_channels;
+CREATE POLICY "creator_channels_select_accessible" ON public.creator_channels
+  FOR SELECT
+  USING (public.popup_wallet_can_access_artist_channel(id));
+
+DROP POLICY IF EXISTS "creator_channels_mutate_owner_or_admin" ON public.creator_channels;
+CREATE POLICY "creator_channels_mutate_owner_or_admin" ON public.creator_channels
+  FOR ALL
+  USING (
+    public.popup_is_admin()
+    OR public.popup_wallet_owns_artist(artist_id)
+  )
+  WITH CHECK (
+    public.popup_is_admin()
+    OR public.popup_wallet_owns_artist(artist_id)
+  );
+
+DROP POLICY IF EXISTS "creator_posts_select_accessible" ON public.creator_posts;
+CREATE POLICY "creator_posts_select_accessible" ON public.creator_posts
+  FOR SELECT
+  USING (
+    public.popup_is_admin()
+    OR public.popup_wallet_owns_artist(artist_id)
+    OR public.popup_wallet_can_access_artist_channel(channel_id)
+  );
+
+DROP POLICY IF EXISTS "creator_posts_mutate_owner_or_admin" ON public.creator_posts;
+CREATE POLICY "creator_posts_mutate_owner_or_admin" ON public.creator_posts
+  FOR ALL
+  USING (
+    public.popup_is_admin()
+    OR public.popup_wallet_owns_artist(artist_id)
+  )
+  WITH CHECK (
+    public.popup_is_admin()
+    OR public.popup_wallet_owns_artist(artist_id)
+  );
+
+DROP POLICY IF EXISTS "creator_threads_select_participant" ON public.creator_threads;
+CREATE POLICY "creator_threads_select_participant" ON public.creator_threads
+  FOR SELECT
+  USING (
+    public.popup_is_admin()
+    OR public.popup_wallet_owns_artist(artist_id)
+    OR lower(fan_wallet) = public.popup_jwt_wallet()
+  );
+
+DROP POLICY IF EXISTS "creator_threads_insert_participant" ON public.creator_threads;
+CREATE POLICY "creator_threads_insert_participant" ON public.creator_threads
+  FOR INSERT
+  WITH CHECK (
+    public.popup_is_admin()
+    OR public.popup_wallet_owns_artist(artist_id)
+    OR lower(fan_wallet) = public.popup_jwt_wallet()
+  );
+
+DROP POLICY IF EXISTS "creator_threads_update_participant" ON public.creator_threads;
+CREATE POLICY "creator_threads_update_participant" ON public.creator_threads
+  FOR UPDATE
+  USING (
+    public.popup_is_admin()
+    OR public.popup_wallet_owns_artist(artist_id)
+    OR lower(fan_wallet) = public.popup_jwt_wallet()
+  )
+  WITH CHECK (
+    public.popup_is_admin()
+    OR public.popup_wallet_owns_artist(artist_id)
+    OR lower(fan_wallet) = public.popup_jwt_wallet()
+  );
+
+DROP POLICY IF EXISTS "creator_thread_messages_select_participant" ON public.creator_thread_messages;
+CREATE POLICY "creator_thread_messages_select_participant" ON public.creator_thread_messages
+  FOR SELECT
+  USING (
+    EXISTS (
+      SELECT 1
+      FROM public.creator_threads t
+      WHERE t.id = creator_thread_messages.thread_id
+        AND (
+          public.popup_is_admin()
+          OR public.popup_wallet_owns_artist(t.artist_id)
+          OR lower(t.fan_wallet) = public.popup_jwt_wallet()
+        )
+    )
+  );
+
+DROP POLICY IF EXISTS "creator_thread_messages_insert_participant" ON public.creator_thread_messages;
+CREATE POLICY "creator_thread_messages_insert_participant" ON public.creator_thread_messages
+  FOR INSERT
+  WITH CHECK (
+    (public.popup_is_admin() OR lower(sender_wallet) = public.popup_jwt_wallet())
+    AND EXISTS (
+      SELECT 1
+      FROM public.creator_threads t
+      WHERE t.id = creator_thread_messages.thread_id
+        AND (
+          public.popup_is_admin()
+          OR public.popup_wallet_owns_artist(t.artist_id)
+          OR lower(t.fan_wallet) = public.popup_jwt_wallet()
+        )
+    )
+  );
+
+GRANT SELECT ON public.creator_channels TO anon;
+GRANT SELECT ON public.creator_posts TO anon;
+
+GRANT ALL ON public.creator_fans TO authenticated;
+GRANT ALL ON public.creator_channels TO authenticated;
+GRANT ALL ON public.creator_posts TO authenticated;
+GRANT ALL ON public.creator_threads TO authenticated;
+GRANT ALL ON public.creator_thread_messages TO authenticated;
+
+GRANT ALL ON public.creator_fans TO service_role;
+GRANT ALL ON public.creator_channels TO service_role;
+GRANT ALL ON public.creator_posts TO service_role;
+GRANT ALL ON public.creator_threads TO service_role;
+GRANT ALL ON public.creator_thread_messages TO service_role;
+
+-- ============================================================================
+-- Migration: 20260408_fix_rls_policies_comprehensive.sql
+-- ============================================================================
+-- ============================================================================
+-- Migration: 20260408_fix_rls_policies_comprehensive.sql
+-- CRITICAL: Fix broken RLS policies allowing unauthorized access
+-- Date: April 8, 2026
+-- ============================================================================
+
+-- ============================================================================
+-- FUNCTION: Get authenticated user's wallet
+-- ============================================================================
+CREATE OR REPLACE FUNCTION get_auth_wallet()
+RETURNS TEXT
+LANGUAGE sql
+STABLE
+AS $$
+  SELECT COALESCE(
+    (auth.jwt() ->> 'wallet'),
+    (auth.jwt() ->> 'address'),
+    (auth.jwt() ->> 'wallet_address'),
+    ''
+  )::TEXT;
+$$;
+
+-- ============================================================================
+-- ORDERS TABLE - Fix critical data breach vulnerabilities
+-- ============================================================================
+
+-- Drop all existing policies
+DROP POLICY IF EXISTS "Orders - Buyers can read own" ON orders;
+DROP POLICY IF EXISTS "Orders - Sellers can read own artist orders" ON orders;
+DROP POLICY IF EXISTS "Orders - Anyone can read" ON orders;
+DROP POLICY IF EXISTS "Orders - Anyone can insert" ON orders;
+DROP POLICY IF EXISTS "Orders - Anyone can update" ON orders;
+
+-- Re-enable RLS (make sure it's on)
+ALTER TABLE orders ENABLE ROW LEVEL SECURITY;
+
+-- NEW POLICIES - Restrict to authorized users only
+-- Buyers can only read their own orders
+CREATE POLICY "Orders - Buyers read own orders only"
+  ON orders
+  FOR SELECT
+  USING (
+    auth.role() = 'service_role'
+    OR lower(buyer_wallet) = lower(get_auth_wallet())
+    OR EXISTS (
+      SELECT 1
+      FROM public.products p
+      LEFT JOIN public.artists a ON a.id = p.artist_id
+      WHERE p.id = orders.product_id
+        AND lower(COALESCE(a.wallet, p.creator_wallet, '')) = lower(get_auth_wallet())
+    )
+    OR EXISTS (
+      SELECT 1
+      FROM public.order_items oi
+      JOIN public.products p ON p.id = oi.product_id
+      LEFT JOIN public.artists a ON a.id = p.artist_id
+      WHERE oi.order_id = orders.id
+        AND lower(COALESCE(a.wallet, p.creator_wallet, '')) = lower(get_auth_wallet())
+    )
+  );
+
+-- Only verify transactions can create orders (via backend service role)
+CREATE POLICY "Orders - Service role creates verified orders only"
+  ON orders
+  FOR INSERT
+  WITH CHECK (auth.role() = 'service_role');
+
+-- Only order buyers and sellers can update their own orders
+CREATE POLICY "Orders - Order participants can update status"
+  ON orders
+  FOR UPDATE
+  USING (
+    auth.role() = 'service_role'
+    OR lower(buyer_wallet) = lower(get_auth_wallet())
+    OR EXISTS (
+      SELECT 1
+      FROM public.products p
+      LEFT JOIN public.artists a ON a.id = p.artist_id
+      WHERE p.id = orders.product_id
+        AND lower(COALESCE(a.wallet, p.creator_wallet, '')) = lower(get_auth_wallet())
+    )
+    OR EXISTS (
+      SELECT 1
+      FROM public.order_items oi
+      JOIN public.products p ON p.id = oi.product_id
+      LEFT JOIN public.artists a ON a.id = p.artist_id
+      WHERE oi.order_id = orders.id
+        AND lower(COALESCE(a.wallet, p.creator_wallet, '')) = lower(get_auth_wallet())
+    )
+  )
+  WITH CHECK (
+    auth.role() = 'service_role'
+    OR lower(buyer_wallet) = lower(get_auth_wallet())
+    OR EXISTS (
+      SELECT 1
+      FROM public.products p
+      LEFT JOIN public.artists a ON a.id = p.artist_id
+      WHERE p.id = orders.product_id
+        AND lower(COALESCE(a.wallet, p.creator_wallet, '')) = lower(get_auth_wallet())
+    )
+    OR EXISTS (
+      SELECT 1
+      FROM public.order_items oi
+      JOIN public.products p ON p.id = oi.product_id
+      LEFT JOIN public.artists a ON a.id = p.artist_id
+      WHERE oi.order_id = orders.id
+        AND lower(COALESCE(a.wallet, p.creator_wallet, '')) = lower(get_auth_wallet())
+    )
+  );
+
+-- ============================================================================
+-- ARTISTS TABLE - Fix profile update vulnerabilities
+-- ============================================================================
+
+DROP POLICY IF EXISTS "Artists - Owners can update" ON artists;
+DROP POLICY IF EXISTS "Artists - Anyone can read" ON artists;
+DROP POLICY IF EXISTS "Artists - Anyone can update" ON artists;
+
+ALTER TABLE artists ENABLE ROW LEVEL SECURITY;
+
+-- Anyone can read approved/active artist profiles
+DROP POLICY IF EXISTS "Artists - Public read approved profiles" ON artists;
+CREATE POLICY "Artists - Public read approved profiles"
+  ON artists
+  FOR SELECT
+  USING (
+    auth.role() = 'service_role'
+    OR status IN ('approved', 'active')
+    OR lower(wallet) = lower(get_auth_wallet())
+  );
+
+-- Only artists can update their own profile
+CREATE POLICY "Artists - Only owner can update own profile"
+  ON artists
+  FOR UPDATE
+  USING (auth.role() = 'service_role' OR lower(wallet) = lower(get_auth_wallet()))
+  WITH CHECK (auth.role() = 'service_role' OR lower(wallet) = lower(get_auth_wallet()));
+
+-- Service role can insert (admin user creation)
+CREATE POLICY "Artists - Service role creates artists"
+  ON artists
+  FOR INSERT
+  WITH CHECK (auth.role() = 'service_role');
+
+-- ============================================================================
+-- DROPS TABLE - Fix deletion vulnerabilities
+-- ============================================================================
+
+DROP POLICY IF EXISTS "Drops - Anyone can read" ON drops;
+DROP POLICY IF EXISTS "Drops - Anyone can delete" ON drops;
+DROP POLICY IF EXISTS "Drops - Anyone can update" ON drops;
+
+ALTER TABLE drops ENABLE ROW LEVEL SECURITY;
+
+-- Anyone can read published drops
+DROP POLICY IF EXISTS "Drops - Public read published drops" ON drops;
+CREATE POLICY "Drops - Public read published drops"
+  ON drops
+  FOR SELECT
+  USING (
+    auth.role() = 'service_role'
+    OR status IN ('published', 'active', 'live')
+    OR EXISTS (
+      SELECT 1 FROM artists a
+      WHERE a.id = drops.artist_id
+      AND lower(a.wallet) = lower(get_auth_wallet())
+    )
+  );
+
+-- Only artist owner can update their drops
+CREATE POLICY "Drops - Artist owner can update own drops"
+  ON drops
+  FOR UPDATE
+  USING (
+    auth.role() = 'service_role'
+    OR EXISTS (
+      SELECT 1 FROM artists a
+      WHERE a.id = drops.artist_id
+      AND lower(a.wallet) = lower(get_auth_wallet())
+    )
+  )
+  WITH CHECK (
+    auth.role() = 'service_role'
+    OR EXISTS (
+      SELECT 1 FROM artists a
+      WHERE a.id = drops.artist_id
+      AND lower(a.wallet) = lower(get_auth_wallet())
+    )
+  );
+
+-- Only artist owner can delete their drops
+CREATE POLICY "Drops - Artist owner can delete own drops"
+  ON drops
+  FOR DELETE
+  USING (
+    auth.role() = 'service_role'
+    OR EXISTS (
+      SELECT 1 FROM artists a
+      WHERE a.id = drops.artist_id
+      AND lower(a.wallet) = lower(get_auth_wallet())
+    )
+  );
+
+-- Service role creates drops
+CREATE POLICY "Drops - Service role creates drops"
+  ON drops
+  FOR INSERT
+  WITH CHECK (auth.role() = 'service_role');
+
+-- ============================================================================
+-- PRODUCTS TABLE - Fix authorization
+-- ============================================================================
+
+DROP POLICY IF EXISTS "Products - Anyone can read" ON products;
+DROP POLICY IF EXISTS "Products - Anyone can delete" ON products;
+DROP POLICY IF EXISTS "Products - Public read published products" ON products;
+DROP POLICY IF EXISTS "Products - Creator can update own products" ON products;
+DROP POLICY IF EXISTS "Products - Creator can delete own products" ON products;
+
+ALTER TABLE products ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Products - Public read published products"
+  ON products
+  FOR SELECT
+  USING (
+    auth.role() = 'service_role'
+    OR status IN ('published', 'active')
+    OR EXISTS (
+      SELECT 1 FROM artists a
+      WHERE a.id = products.artist_id
+      AND lower(a.wallet) = lower(get_auth_wallet())
+    )
+    OR lower(products.creator_wallet) = lower(get_auth_wallet())
+  );
+
+CREATE POLICY "Products - Creator can update own products"
+  ON products
+  FOR UPDATE
+  USING (
+    auth.role() = 'service_role'
+    OR EXISTS (
+      SELECT 1 FROM artists a
+      WHERE a.id = products.artist_id
+      AND lower(a.wallet) = lower(get_auth_wallet())
+    )
+    OR lower(products.creator_wallet) = lower(get_auth_wallet())
+  )
+  WITH CHECK (
+    auth.role() = 'service_role'
+    OR EXISTS (
+      SELECT 1 FROM artists a
+      WHERE a.id = products.artist_id
+      AND lower(a.wallet) = lower(get_auth_wallet())
+    )
+    OR lower(products.creator_wallet) = lower(get_auth_wallet())
+  );
+
+CREATE POLICY "Products - Creator can delete own products"
+  ON products
+  FOR DELETE
+  USING (
+    auth.role() = 'service_role'
+    OR EXISTS (
+      SELECT 1 FROM artists a
+      WHERE a.id = products.artist_id
+      AND lower(a.wallet) = lower(get_auth_wallet())
+    )
+    OR lower(products.creator_wallet) = lower(get_auth_wallet())
+  );
+
+-- ============================================================================
+-- SUBSCRIPTIONS TABLE - Fix authorization
+-- ============================================================================
+
+DROP POLICY IF EXISTS "Subscriptions - Anyone can read" ON subscriptions;
+DROP POLICY IF EXISTS "Subscriptions - Anyone can update" ON subscriptions;
+
+ALTER TABLE subscriptions ENABLE ROW LEVEL SECURITY;
+
+-- Subscribers can read their own subscriptions
+CREATE POLICY "Subscriptions - Users read own subscriptions"
+  ON subscriptions
+  FOR SELECT
+  USING (
+    auth.role() = 'service_role'
+    OR lower(subscriber_wallet) = lower(get_auth_wallet())
+  );
+
+-- Only service role creates/updates subscriptions
+CREATE POLICY "Subscriptions - Service role manages subscriptions"
+  ON subscriptions
+  FOR INSERT
+  WITH CHECK (auth.role() = 'service_role');
+
+CREATE POLICY "Subscriptions - Service role updates subscriptions"
+  ON subscriptions
+  FOR UPDATE
+  USING (auth.role() = 'service_role')
+  WITH CHECK (auth.role() = 'service_role');
+
+-- ============================================================================
+-- ARTIST_SHARES TABLE - Protect financial data
+-- ============================================================================
+
+DO $$
+BEGIN
+  IF to_regclass('public.artist_shares') IS NOT NULL THEN
+    EXECUTE 'DROP POLICY IF EXISTS "Artist Shares - Anyone can read" ON public.artist_shares';
+    EXECUTE 'DROP POLICY IF EXISTS "Artist Shares - Artists read own shares" ON public.artist_shares';
+    EXECUTE 'DROP POLICY IF EXISTS "Artist Shares - Service role manages shares" ON public.artist_shares';
+    EXECUTE 'DROP POLICY IF EXISTS "Artist Shares - Service role updates shares" ON public.artist_shares';
+    EXECUTE 'ALTER TABLE public.artist_shares ENABLE ROW LEVEL SECURITY';
+    EXECUTE $artist_shares_policy$
+      CREATE POLICY "Artist Shares - Artists read own shares"
+        ON public.artist_shares
+        FOR SELECT
+        USING (
+          auth.role() = 'service_role'
+          OR EXISTS (
+            SELECT 1
+            FROM public.artists a
+            WHERE a.id = artist_shares.artist_id
+              AND lower(a.wallet) = lower(get_auth_wallet())
+          )
+        )
+    $artist_shares_policy$;
+    EXECUTE $artist_shares_policy$
+      CREATE POLICY "Artist Shares - Service role manages shares"
+        ON public.artist_shares
+        FOR INSERT
+        WITH CHECK (auth.role() = 'service_role')
+    $artist_shares_policy$;
+    EXECUTE $artist_shares_policy$
+      CREATE POLICY "Artist Shares - Service role updates shares"
+        ON public.artist_shares
+        FOR UPDATE
+        USING (auth.role() = 'service_role')
+        WITH CHECK (auth.role() = 'service_role')
+    $artist_shares_policy$;
+  END IF;
+END $$;
+
+-- ============================================================================
+-- NONCES TABLE - Protect authentication
+-- ============================================================================
+
+DROP POLICY IF EXISTS "Nonces - Anyone can insert" ON nonces;
+
+ALTER TABLE nonces ENABLE ROW LEVEL SECURITY;
+
+-- Only service role can manage nonces (backend only)
+CREATE POLICY "Nonces - Service role only"
+  ON nonces
+  FOR ALL
+  USING (auth.role() = 'service_role')
+  WITH CHECK (auth.role() = 'service_role');
+
+-- ============================================================================
+-- GRANT STATEMENTS - Restrict permissions by role
+-- ============================================================================
+
+-- Authenticated users get basic read access
+GRANT SELECT ON orders TO authenticated;
+GRANT SELECT ON artists TO authenticated;
+GRANT SELECT ON drops TO authenticated;
+GRANT SELECT ON products TO authenticated;
+GRANT SELECT ON subscriptions TO authenticated;
+
+-- Authenticated users can update their own data  
+GRANT UPDATE ON orders TO authenticated;
+GRANT UPDATE ON artists TO authenticated;
+GRANT UPDATE ON drops TO authenticated;
+GRANT UPDATE ON products TO authenticated;
+
+-- Service role has unrestricted access (for backend API)
+GRANT ALL ON orders TO service_role;
+GRANT ALL ON artists TO service_role;
+GRANT ALL ON drops TO service_role;
+GRANT ALL ON products TO service_role;
+GRANT ALL ON subscriptions TO service_role;
+DO $$
+BEGIN
+  IF to_regclass('public.artist_shares') IS NOT NULL THEN
+    GRANT ALL ON public.artist_shares TO service_role;
+  END IF;
+END $$;
+GRANT ALL ON nonces TO service_role;
+
+-- Anonymous users can read published content only (read-only)
+GRANT SELECT ON artists TO anon;
+GRANT SELECT ON drops TO anon;
+GRANT SELECT ON products TO anon;
+
+-- ============================================================================
+-- VERIFICATION QUERIES (Run these to test)
+-- ============================================================================
+
+-- Test 1: Verify a user cannot read all orders
+-- SELECT COUNT(*) FROM orders WHERE buyer_wallet != current_user;
+-- Expected: 0 or error
+
+-- Test 2: Verify a user cannot update another artist's profile
+-- UPDATE artists SET bio = 'HACKED' WHERE wallet != current_user LIMIT 1;
+-- Expected: Error or 0 rows updated
+
+-- Test 3: Verify a user cannot delete another artist's drops
+-- DELETE FROM drops WHERE artist_id NOT IN (SELECT id FROM artists WHERE wallet = current_user);
+-- Expected: Error or 0 rows deleted
+
+-- Test 4: Verify published data is readable
+-- SELECT COUNT(*) FROM drops WHERE status = 'published';
+-- Expected: Multiple rows (no auth error)
+
+-- ============================================================================
+-- NOTES FOR NEXT STEPS
+-- ============================================================================
+-- 1. Test policies thoroughly before production deployment
+-- 2. Run as non-admin user to verify access restrictions
+-- 3. Verify schema audit_log table isn't affected
+-- 4. Check performance impact of complex RLS policies
+-- 5. Consider caching for frequently accessed public data
+
+-- ============================================================================
+-- Migration: 20260408_product_feedback_inbox.sql
+-- ============================================================================
+-- ============================================================================
+-- Migration: 20260408_product_feedback_inbox.sql
+-- Description:
+--   * Adds verified collector feedback threads for products
+--   * Introduces creator-curated public reviews and private feedback inboxes
+--   * Adds wallet-aware RLS for creator/collector participation
+-- ============================================================================
+
+CREATE OR REPLACE FUNCTION public.popup_jwt_wallet()
+RETURNS TEXT
+LANGUAGE sql
+STABLE
+AS $$
+  SELECT lower(
+    nullif(
+      coalesce(
+        auth.jwt() ->> 'sub',
+        auth.jwt() ->> 'wallet_address',
+        auth.jwt() ->> 'wallet',
+        auth.jwt() ->> 'address',
+        ''
+      ),
+      ''
+    )
+  );
+$$;
+
+CREATE OR REPLACE FUNCTION public.popup_is_admin()
+RETURNS BOOLEAN
+LANGUAGE sql
+STABLE
+AS $$
+  SELECT
+    coalesce(lower(auth.jwt() ->> 'app_role'), '') = 'admin'
+    OR coalesce(lower(auth.jwt() ->> 'role_name'), '') = 'admin'
+    OR auth.role() = 'service_role';
+$$;
+
+CREATE OR REPLACE FUNCTION public.popup_wallet_owns_artist(target_artist_id UUID)
+RETURNS BOOLEAN
+LANGUAGE sql
+STABLE
+AS $$
+  SELECT
+    public.popup_is_admin()
+    OR EXISTS (
+      SELECT 1
+      FROM public.artists a
+      WHERE a.id = target_artist_id
+        AND lower(a.wallet) = public.popup_jwt_wallet()
+    );
+$$;
+
+CREATE TABLE IF NOT EXISTS public.product_feedback_threads (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  product_id UUID NOT NULL REFERENCES public.products(id) ON DELETE CASCADE,
+  item_id UUID NOT NULL,
+  item_type VARCHAR(50) NOT NULL DEFAULT 'product',
+  artist_id UUID NOT NULL REFERENCES public.artists(id) ON DELETE CASCADE,
+  order_id UUID REFERENCES public.orders(id) ON DELETE SET NULL,
+  order_item_id UUID REFERENCES public.order_items(id) ON DELETE SET NULL,
+  buyer_wallet TEXT NOT NULL,
+  creator_wallet TEXT NOT NULL,
+  feedback_type VARCHAR(50) NOT NULL DEFAULT 'feedback',
+  visibility VARCHAR(20) NOT NULL DEFAULT 'private',
+  status VARCHAR(20) NOT NULL DEFAULT 'open',
+  rating INT,
+  title TEXT,
+  featured BOOLEAN NOT NULL DEFAULT FALSE,
+  creator_curated BOOLEAN NOT NULL DEFAULT FALSE,
+  subscriber_priority BOOLEAN NOT NULL DEFAULT FALSE,
+  last_message_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  CONSTRAINT product_feedback_threads_feedback_type_check
+    CHECK (feedback_type IN ('review', 'feedback', 'question')),
+  CONSTRAINT product_feedback_threads_item_type_check
+    CHECK (item_type IN ('drop', 'product', 'release')),
+  CONSTRAINT product_feedback_threads_visibility_check
+    CHECK (visibility IN ('public', 'private')),
+  CONSTRAINT product_feedback_threads_status_check
+    CHECK (status IN ('open', 'closed', 'archived')),
+  CONSTRAINT product_feedback_threads_rating_check
+    CHECK (rating IS NULL OR (rating >= 1 AND rating <= 5))
+);
+
+CREATE INDEX IF NOT EXISTS idx_product_feedback_threads_product_id
+ON public.product_feedback_threads(product_id, featured DESC, last_message_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_product_feedback_threads_item_lookup
+ON public.product_feedback_threads(item_id, item_type, visibility, status, featured DESC);
+
+CREATE INDEX IF NOT EXISTS idx_product_feedback_threads_artist_id
+ON public.product_feedback_threads(artist_id, status, last_message_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_product_feedback_threads_buyer_wallet
+ON public.product_feedback_threads(lower(buyer_wallet), last_message_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_product_feedback_threads_visibility
+ON public.product_feedback_threads(visibility, status, featured DESC);
+
+CREATE TABLE IF NOT EXISTS public.product_feedback_messages (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  thread_id UUID NOT NULL REFERENCES public.product_feedback_threads(id) ON DELETE CASCADE,
+  sender_wallet TEXT NOT NULL,
+  sender_role VARCHAR(20) NOT NULL DEFAULT 'collector',
+  body TEXT NOT NULL,
+  metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  CONSTRAINT product_feedback_messages_sender_role_check
+    CHECK (sender_role IN ('creator', 'collector', 'admin'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_product_feedback_messages_thread_id
+ON public.product_feedback_messages(thread_id, created_at ASC);
+
+CREATE OR REPLACE FUNCTION public.popup_wallet_can_access_product_feedback_thread(target_thread_id UUID)
+RETURNS BOOLEAN
+LANGUAGE sql
+STABLE
+AS $$
+  SELECT EXISTS (
+    SELECT 1
+    FROM public.product_feedback_threads t
+    WHERE t.id = target_thread_id
+      AND (
+        public.popup_is_admin()
+        OR public.popup_wallet_owns_artist(t.artist_id)
+        OR lower(t.buyer_wallet) = public.popup_jwt_wallet()
+        OR (t.visibility = 'public' AND t.status <> 'archived')
+      )
+  );
+$$;
+
+GRANT EXECUTE ON FUNCTION public.popup_jwt_wallet() TO anon, authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.popup_is_admin() TO anon, authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.popup_wallet_owns_artist(UUID) TO anon, authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.popup_wallet_can_access_product_feedback_thread(UUID) TO anon, authenticated, service_role;
+
+ALTER TABLE public.product_feedback_threads ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.product_feedback_messages ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "product_feedback_threads_select_accessible" ON public.product_feedback_threads;
+CREATE POLICY "product_feedback_threads_select_accessible" ON public.product_feedback_threads
+  FOR SELECT
+  USING (public.popup_wallet_can_access_product_feedback_thread(id));
+
+DROP POLICY IF EXISTS "product_feedback_threads_insert_participant" ON public.product_feedback_threads;
+CREATE POLICY "product_feedback_threads_insert_participant" ON public.product_feedback_threads
+  FOR INSERT
+  WITH CHECK (
+    public.popup_is_admin()
+    OR public.popup_wallet_owns_artist(artist_id)
+    OR lower(buyer_wallet) = public.popup_jwt_wallet()
+  );
+
+DROP POLICY IF EXISTS "product_feedback_threads_update_participant" ON public.product_feedback_threads;
+CREATE POLICY "product_feedback_threads_update_participant" ON public.product_feedback_threads
+  FOR UPDATE
+  USING (
+    public.popup_is_admin()
+    OR public.popup_wallet_owns_artist(artist_id)
+    OR lower(buyer_wallet) = public.popup_jwt_wallet()
+  )
+  WITH CHECK (
+    public.popup_is_admin()
+    OR public.popup_wallet_owns_artist(artist_id)
+    OR lower(buyer_wallet) = public.popup_jwt_wallet()
+  );
+
+DROP POLICY IF EXISTS "product_feedback_messages_select_accessible" ON public.product_feedback_messages;
+CREATE POLICY "product_feedback_messages_select_accessible" ON public.product_feedback_messages
+  FOR SELECT
+  USING (public.popup_wallet_can_access_product_feedback_thread(thread_id));
+
+DROP POLICY IF EXISTS "product_feedback_messages_insert_participant" ON public.product_feedback_messages;
+CREATE POLICY "product_feedback_messages_insert_participant" ON public.product_feedback_messages
+  FOR INSERT
+  WITH CHECK (
+    (public.popup_is_admin() OR lower(sender_wallet) = public.popup_jwt_wallet())
+    AND public.popup_wallet_can_access_product_feedback_thread(thread_id)
+  );
+
+GRANT SELECT ON public.product_feedback_threads TO anon, authenticated;
+GRANT SELECT ON public.product_feedback_messages TO anon, authenticated;
+GRANT ALL ON public.product_feedback_threads TO service_role;
+GRANT ALL ON public.product_feedback_messages TO service_role;
+GRANT ALL ON public.product_feedback_threads TO authenticated;
+GRANT ALL ON public.product_feedback_messages TO authenticated;
+
+-- ============================================================================
+-- Migration: 20260409_catalog_optimization.sql
+-- ============================================================================
+-- ============================================================================
+-- Migration: 20260409_catalog_optimization.sql
+-- Purpose: Optimize catalog queries and align the unified catalog with the
+--          actual product/drop/release schema used by the app.
+-- ============================================================================
+
+-- ============================================
+-- Step 1: Add performance indexes
+-- ============================================
+
+CREATE INDEX IF NOT EXISTS idx_products_artist_status
+  ON public.products(artist_id, status, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_drops_artist_status
+  ON public.drops(artist_id, status, created_at DESC);
+
+ALTER TABLE public.creative_releases
+  ADD COLUMN IF NOT EXISTS campaign_id UUID REFERENCES public.ip_campaigns(id) ON DELETE SET NULL;
+
+CREATE INDEX IF NOT EXISTS idx_creative_releases_artist_campaign
+  ON public.creative_releases(artist_id, campaign_id, created_at DESC);
+
+-- ============================================
+-- Step 2: Add unified item tracking to feedback
+-- ============================================
+
+ALTER TABLE public.product_feedback_threads
+  ADD COLUMN IF NOT EXISTS item_id UUID;
+
+ALTER TABLE public.product_feedback_threads
+  ADD COLUMN IF NOT EXISTS item_type VARCHAR(50);
+
+UPDATE public.product_feedback_threads
+SET
+  item_id = COALESCE(item_id, product_id),
+  item_type = COALESCE(item_type, 'product')
+WHERE item_id IS NULL
+   OR item_type IS NULL;
+
+ALTER TABLE public.product_feedback_threads
+  ALTER COLUMN item_type SET DEFAULT 'product';
+
+ALTER TABLE public.product_feedback_threads
+  ALTER COLUMN item_id SET NOT NULL;
+
+ALTER TABLE public.product_feedback_threads
+  ALTER COLUMN item_type SET NOT NULL;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conname = 'product_feedback_threads_item_type_check'
+  ) THEN
+    ALTER TABLE public.product_feedback_threads
+    ADD CONSTRAINT product_feedback_threads_item_type_check
+    CHECK (item_type IN ('drop', 'product', 'release'));
+  END IF;
+END $$;
+
+CREATE INDEX IF NOT EXISTS idx_feedback_item_lookup
+  ON public.product_feedback_threads(item_id, item_type, visibility, status);
+
+CREATE INDEX IF NOT EXISTS idx_feedback_threads_item
+  ON public.product_feedback_threads(item_id, item_type);
+
+-- ============================================
+-- Step 3: Create unified catalog view
+-- ============================================
+
+DROP FUNCTION IF EXISTS public.get_catalog_item(UUID, TEXT);
+DROP FUNCTION IF EXISTS public.count_catalog_by_type(TEXT);
+DROP VIEW IF EXISTS public.catalog_with_engagement;
+DROP VIEW IF EXISTS public.catalog_unified;
+
+CREATE VIEW public.catalog_unified AS
+SELECT
+  'drop'::text AS item_type,
+  d.id,
+  d.title,
+  d.description,
+  COALESCE(d.image_url, d.image_ipfs_uri) AS image_url,
+  d.price_eth,
+  GREATEST(COALESCE(d.supply, 0) - COALESCE(d.sold, 0), 0) AS supply_or_stock,
+  d.contract_address,
+  NULL::uuid AS campaign_id,
+  NULL::text AS campaign_type,
+  d.artist_id AS creator_id,
+  lower(a.wallet) AS creator_wallet,
+  d.created_at,
+  d.updated_at,
+  GREATEST(COALESCE(d.supply, 0) - COALESCE(d.sold, 0), 0) > 0 AS can_purchase,
+  lower(COALESCE(d.type, '')) = 'auction' AS can_bid,
+  false AS can_participate_campaign,
+  d.status
+FROM public.drops d
+LEFT JOIN public.artists a ON a.id = d.artist_id
+WHERE d.status IN ('live', 'active', 'published')
+
+UNION ALL
+
+SELECT
+  'product'::text AS item_type,
+  p.id,
+  p.name AS title,
+  p.description,
+  COALESCE(
+    NULLIF(p.preview_uri, ''),
+    NULLIF(p.image_url, ''),
+    NULLIF(p.image_ipfs_uri, ''),
+    NULLIF(p.metadata ->> 'image_url', '')
+  ) AS image_url,
+  p.price_eth,
+  CASE
+    WHEN COALESCE(p.stock, 0) = 0 THEN NULL::integer
+    ELSE GREATEST(COALESCE(p.stock, 0) - COALESCE(p.sold, 0), 0)
+  END AS supply_or_stock,
+  NULL::text AS contract_address,
+  NULL::uuid AS campaign_id,
+  NULL::text AS campaign_type,
+  p.artist_id AS creator_id,
+  lower(COALESCE(p.creator_wallet, a.wallet)) AS creator_wallet,
+  p.created_at,
+  p.updated_at,
+  (
+    COALESCE(p.stock, 0) = 0
+    OR COALESCE(p.stock, 0) > COALESCE(p.sold, 0)
+  ) AS can_purchase,
+  false AS can_bid,
+  false AS can_participate_campaign,
+  p.status
+FROM public.products p
+LEFT JOIN public.artists a ON a.id = p.artist_id
+WHERE p.status IN ('published', 'active')
+
+UNION ALL
+
+SELECT
+  'release'::text AS item_type,
+  cr.id,
+  cr.title,
+  cr.description,
+  COALESCE(
+    NULLIF(cr.cover_image_uri, ''),
+    NULLIF(cr.metadata ->> 'image_url', '')
+  ) AS image_url,
+  cr.price_eth,
+  CASE
+    WHEN COALESCE(cr.supply, 0) = 0 THEN NULL::integer
+    ELSE GREATEST(COALESCE(cr.supply, 0) - COALESCE(cr.sold, 0), 0)
+  END AS supply_or_stock,
+  cr.contract_address,
+  cr.campaign_id,
+  COALESCE(ipc.campaign_type, cr.metadata ->> 'campaign_type') AS campaign_type,
+  cr.artist_id AS creator_id,
+  lower(COALESCE(a.wallet, cr.metadata ->> 'creator_wallet')) AS creator_wallet,
+  cr.created_at,
+  cr.updated_at,
+  (
+    COALESCE(cr.supply, 0) = 0
+    OR COALESCE(cr.supply, 0) > COALESCE(cr.sold, 0)
+  ) AS can_purchase,
+  lower(COALESCE(ipc.campaign_type, cr.metadata ->> 'campaign_type', '')) = 'auction' AS can_bid,
+  cr.campaign_id IS NOT NULL AS can_participate_campaign,
+  cr.status
+FROM public.creative_releases cr
+LEFT JOIN public.ip_campaigns ipc ON ipc.id = cr.campaign_id
+LEFT JOIN public.artists a ON a.id = cr.artist_id
+WHERE cr.status IN ('live', 'published');
+
+-- ============================================
+-- Step 4: Create denormalized engagement view
+-- ============================================
+
+CREATE VIEW public.catalog_with_engagement AS
+SELECT
+  cu.*,
+  COALESCE(comment_stats.comment_count, 0) AS comment_count,
+  COALESCE(comment_stats.avg_rating, 0) AS avg_rating
+FROM public.catalog_unified cu
+LEFT JOIN (
+  SELECT
+    item_id,
+    item_type,
+    COUNT(DISTINCT id) AS comment_count,
+    AVG(rating) AS avg_rating
+  FROM public.product_feedback_threads
+  WHERE visibility = 'public'
+    AND status <> 'archived'
+  GROUP BY item_id, item_type
+) comment_stats
+  ON cu.id = comment_stats.item_id
+ AND cu.item_type = comment_stats.item_type;
+
+-- ============================================
+-- Step 5: Add helper functions
+-- ============================================
+
+CREATE OR REPLACE FUNCTION public.get_catalog_item(
+  p_item_id UUID,
+  p_item_type TEXT
+)
+RETURNS JSON
+LANGUAGE plpgsql
+AS $$
+DECLARE
+  result JSON;
+BEGIN
+  SELECT json_build_object(
+    'id', cu.id,
+    'item_type', cu.item_type,
+    'title', cu.title,
+    'description', cu.description,
+    'image_url', cu.image_url,
+    'price_eth', cu.price_eth,
+    'creator_id', cu.creator_id,
+    'creator_wallet', cu.creator_wallet,
+    'can_purchase', cu.can_purchase,
+    'can_bid', cu.can_bid,
+    'can_participate_campaign', cu.can_participate_campaign,
+    'comment_count', cu.comment_count,
+    'avg_rating', cu.avg_rating,
+    'created_at', cu.created_at,
+    'updated_at', cu.updated_at
+  )
+  INTO result
+  FROM public.catalog_with_engagement cu
+  WHERE cu.id = p_item_id
+    AND cu.item_type = p_item_type;
+
+  RETURN result;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.count_catalog_by_type(filter_type TEXT DEFAULT NULL)
+RETURNS TABLE(item_type TEXT, count BIGINT)
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  RETURN QUERY
+  SELECT
+    cu.item_type,
+    COUNT(*) AS count
+  FROM public.catalog_unified cu
+  WHERE filter_type IS NULL
+     OR cu.item_type = filter_type
+  GROUP BY cu.item_type;
+END;
+$$;
+
+-- ============================================
+-- Step 6: Grant permissions
+-- ============================================
+
+GRANT SELECT ON public.catalog_unified TO anon, authenticated, service_role;
+GRANT SELECT ON public.catalog_with_engagement TO anon, authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.get_catalog_item(UUID, TEXT) TO anon, authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.count_catalog_by_type(TEXT) TO anon, authenticated, service_role;
+
+-- ============================================================================
+-- Migration: 20260409_feedback_item_threads_generic.sql
+-- ============================================================================
+-- ============================================================================
+-- Migration: 20260409_feedback_item_threads_generic.sql
+-- Purpose: Allow the shared feedback inbox to support drops and releases in
+--          addition to products by making product_id optional.
+-- ============================================================================
+
+ALTER TABLE public.product_feedback_threads
+  ALTER COLUMN product_id DROP NOT NULL;
+
+-- ============================================================================
+-- Migration: 20260409_personalization_features.sql
+-- ============================================================================
+-- ============================================================================
+-- Migration: 20260409_personalization_features.sql
+-- Purpose: Add favorites, subscriptions, analytics, and recommendations
+-- ============================================================================
+
+-- ============================================
+-- 1. USER FAVORITES/WISHLIST TABLE
+-- ============================================
+
+CREATE TABLE IF NOT EXISTS public.user_favorites (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_wallet TEXT NOT NULL,
+  item_id UUID NOT NULL,
+  item_type VARCHAR(50) NOT NULL,
+  saved_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  UNIQUE(user_wallet, item_id, item_type),
+  CONSTRAINT user_favorites_item_type_check
+    CHECK (item_type IN ('drop', 'product', 'release'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_favorites_wallet
+ON public.user_favorites(lower(user_wallet), saved_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_user_favorites_item
+ON public.user_favorites(item_id, item_type);
+
+-- ============================================
+-- 2. CREATOR SUBSCRIPTIONS TABLE
+-- ============================================
+
+CREATE TABLE IF NOT EXISTS public.creator_subscriptions (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  subscriber_wallet TEXT NOT NULL,
+  creator_id UUID NOT NULL REFERENCES public.artists(id) ON DELETE CASCADE,
+  creator_wallet TEXT NOT NULL,
+  subscription_tier VARCHAR(50) NOT NULL DEFAULT 'free',
+  subscribed_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  notifications_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+  metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+  UNIQUE(subscriber_wallet, creator_id),
+  CONSTRAINT creator_subscriptions_tier_check
+    CHECK (subscription_tier IN ('free', 'supporter', 'vip', 'collector'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_creator_subscriptions_subscriber
+ON public.creator_subscriptions(lower(subscriber_wallet), subscribed_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_creator_subscriptions_creator
+ON public.creator_subscriptions(creator_id, subscription_tier);
+
+-- ============================================
+-- 3. ANALYTICS EVENTS TABLE
+-- ============================================
+
+CREATE TABLE IF NOT EXISTS public.analytics_events (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  item_id UUID NOT NULL,
+  item_type VARCHAR(50) NOT NULL,
+  event_type VARCHAR(50) NOT NULL,
+  user_wallet TEXT,
+  data JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  CONSTRAINT analytics_events_event_type_check
+    CHECK (event_type IN ('view', 'like', 'comment', 'purchase', 'share'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_analytics_events_item
+ON public.analytics_events(item_id, item_type, event_type);
+
+CREATE INDEX IF NOT EXISTS idx_analytics_events_date
+ON public.analytics_events(created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_analytics_events_user
+ON public.analytics_events(lower(user_wallet), created_at DESC);
+
+-- ============================================
+-- 4. RECOMMENDATIONS TABLE (Materialized)
+-- ============================================
+
+CREATE TABLE IF NOT EXISTS public.item_recommendations (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  item_id UUID NOT NULL,
+  item_type VARCHAR(50) NOT NULL,
+  recommended_item_id UUID NOT NULL,
+  recommended_item_type VARCHAR(50),
+  recommendation_score DECIMAL(5,2) NOT NULL DEFAULT 0,
+  co_purchase_count INT DEFAULT 0,
+  similarity_score DECIMAL(5,2) DEFAULT 0,
+  last_calculated TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  UNIQUE(item_id, item_type, recommended_item_id, recommended_item_type)
+);
+
+CREATE INDEX IF NOT EXISTS idx_item_recommendations_item
+ON public.item_recommendations(item_id, item_type, recommendation_score DESC);
+
+-- ============================================
+-- 5. SOCIAL SHARES TABLE
+-- ============================================
+
+CREATE TABLE IF NOT EXISTS public.social_shares (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  item_id UUID NOT NULL,
+  item_type VARCHAR(50) NOT NULL,
+  share_platform VARCHAR(50) NOT NULL,
+  shared_by_wallet TEXT,
+  share_url TEXT,
+  click_count INT DEFAULT 0,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  CONSTRAINT social_shares_platform_check
+    CHECK (share_platform IN ('twitter', 'facebook', 'linkedin', 'telegram', 'whatsapp', 'reddit'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_social_shares_item
+ON public.social_shares(item_id, item_type, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_social_shares_platform
+ON public.social_shares(share_platform, click_count DESC);
+
+-- ============================================
+-- 6. HELPER FUNCTIONS
+-- ============================================
+
+-- Get user's favorite items
+CREATE OR REPLACE FUNCTION get_user_favorites(wallet_address TEXT, limit_count INT DEFAULT 50)
+RETURNS TABLE(item_id UUID, item_type VARCHAR, saved_at TIMESTAMP WITH TIME ZONE) AS $$
+BEGIN
+  RETURN QUERY
+  SELECT uf.item_id, uf.item_type, uf.saved_at
+  FROM public.user_favorites uf
+  WHERE lower(uf.user_wallet) = lower(wallet_address)
+  ORDER BY uf.saved_at DESC
+  LIMIT limit_count;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Get creator's subscribers count
+CREATE OR REPLACE FUNCTION get_creator_subscriber_count(creator_id_param UUID)
+RETURNS INT AS $$
+BEGIN
+  RETURN (
+    SELECT COUNT(*)
+    FROM public.creator_subscriptions cs
+    WHERE cs.creator_id = creator_id_param
+  );
+END;
+$$ LANGUAGE plpgsql;
+
+-- Get item analytics summary
+CREATE OR REPLACE FUNCTION get_item_analytics(item_id_param UUID, item_type_param VARCHAR)
+RETURNS TABLE(views INT, likes INT, comments INT, purchases INT, shares INT, avg_rating DECIMAL) AS $$
+BEGIN
+  RETURN QUERY
+  SELECT
+    COALESCE((SELECT COUNT(*) FROM public.analytics_events WHERE item_id = item_id_param AND item_type = item_type_param AND event_type = 'view'), 0)::INT,
+    COALESCE((SELECT COUNT(*) FROM public.analytics_events WHERE item_id = item_id_param AND item_type = item_type_param AND event_type = 'like'), 0)::INT,
+    COALESCE((SELECT COUNT(*) FROM public.analytics_events WHERE item_id = item_id_param AND item_type = item_type_param AND event_type = 'comment'), 0)::INT,
+    COALESCE((SELECT COUNT(*) FROM public.analytics_events WHERE item_id = item_id_param AND item_type = item_type_param AND event_type = 'purchase'), 0)::INT,
+    COALESCE((SELECT COUNT(*) FROM public.analytics_events WHERE item_id = item_id_param AND item_type = item_type_param AND event_type = 'share'), 0)::INT,
+    COALESCE((SELECT AVG(CAST(data->>'rating' AS INT)) FROM public.analytics_events WHERE item_id = item_id_param AND item_type = item_type_param AND event_type = 'like'), 0)::DECIMAL;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Get recommendations for item
+CREATE OR REPLACE FUNCTION get_item_recommendations(item_id_param UUID, item_type_param VARCHAR, limit_count INT DEFAULT 10)
+RETURNS TABLE(recommended_item_id UUID, recommended_item_type VARCHAR, score DECIMAL) AS $$
+BEGIN
+  RETURN QUERY
+  SELECT ir.recommended_item_id, ir.recommended_item_type, ir.recommendation_score
+  FROM public.item_recommendations ir
+  WHERE ir.item_id = item_id_param AND ir.item_type = item_type_param
+  ORDER BY ir.recommendation_score DESC
+  LIMIT limit_count;
+END;
+$$ LANGUAGE plpgsql;
+
+-- ============================================
+-- 7. GRANT PERMISSIONS
+-- ============================================
+
+GRANT EXECUTE ON FUNCTION get_user_favorites(TEXT, INT) TO anon, authenticated, service_role;
+GRANT EXECUTE ON FUNCTION get_creator_subscriber_count(UUID) TO anon, authenticated, service_role;
+GRANT EXECUTE ON FUNCTION get_item_analytics(UUID, VARCHAR) TO anon, authenticated, service_role;
+GRANT EXECUTE ON FUNCTION get_item_recommendations(UUID, VARCHAR, INT) TO anon, authenticated, service_role;
+
+GRANT SELECT ON public.user_favorites TO anon, authenticated;
+GRANT SELECT ON public.creator_subscriptions TO anon, authenticated;
+GRANT SELECT ON public.analytics_events TO authenticated, service_role;
+GRANT SELECT ON public.item_recommendations TO anon, authenticated;
+GRANT SELECT ON public.social_shares TO anon, authenticated;
+
+GRANT INSERT ON public.user_favorites TO authenticated;
+GRANT INSERT ON public.creator_subscriptions TO authenticated;
+GRANT INSERT ON public.analytics_events TO authenticated, service_role;
+GRANT INSERT ON public.social_shares TO authenticated, service_role;
+
+GRANT UPDATE ON public.user_favorites TO authenticated;
+GRANT UPDATE ON public.creator_subscriptions TO authenticated;
+
+GRANT DELETE ON public.user_favorites TO authenticated;
+GRANT DELETE ON public.creator_subscriptions TO authenticated;
+
+-- ============================================
+-- 8. ROW LEVEL SECURITY
+-- ============================================
+
+ALTER TABLE public.user_favorites ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.creator_subscriptions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.social_shares ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "user_favorites_own" ON public.user_favorites;
+CREATE POLICY "user_favorites_own" ON public.user_favorites
+  FOR ALL
+  USING (lower(user_wallet) = lower(auth.jwt() ->> 'sub')
+    OR lower(user_wallet) = lower(auth.jwt() ->> 'wallet_address'))
+  WITH CHECK (lower(user_wallet) = lower(auth.jwt() ->> 'sub')
+    OR lower(user_wallet) = lower(auth.jwt() ->> 'wallet_address'));
+
+DROP POLICY IF EXISTS "creator_subscriptions_own" ON public.creator_subscriptions;
+CREATE POLICY "creator_subscriptions_own" ON public.creator_subscriptions
+  FOR ALL
+  USING (lower(subscriber_wallet) = lower(auth.jwt() ->> 'sub')
+    OR lower(subscriber_wallet) = lower(auth.jwt() ->> 'wallet_address'))
+  WITH CHECK (lower(subscriber_wallet) = lower(auth.jwt() ->> 'sub')
+    OR lower(subscriber_wallet) = lower(auth.jwt() ->> 'wallet_address'));
+
+DROP POLICY IF EXISTS "social_shares_public_read" ON public.social_shares;
+CREATE POLICY "social_shares_public_read" ON public.social_shares
+  FOR SELECT
+  USING (TRUE);
+
+DROP POLICY IF EXISTS "social_shares_own_write" ON public.social_shares;
+CREATE POLICY "social_shares_own_write" ON public.social_shares
+  FOR ALL
+  USING (lower(shared_by_wallet) = lower(auth.jwt() ->> 'sub')
+    OR lower(shared_by_wallet) = lower(auth.jwt() ->> 'wallet_address'))
+  WITH CHECK (lower(shared_by_wallet) = lower(auth.jwt() ->> 'sub')
+    OR lower(shared_by_wallet) = lower(auth.jwt() ->> 'wallet_address'));

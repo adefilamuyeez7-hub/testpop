@@ -69,7 +69,12 @@ CREATE INDEX IF NOT EXISTS idx_feedback_threads_item
 -- Step 3: Create unified catalog view
 -- ============================================
 
-CREATE OR REPLACE VIEW public.catalog_unified AS
+DROP FUNCTION IF EXISTS public.get_catalog_item(UUID, TEXT);
+DROP FUNCTION IF EXISTS public.count_catalog_by_type(TEXT);
+DROP VIEW IF EXISTS public.catalog_with_engagement;
+DROP VIEW IF EXISTS public.catalog_unified;
+
+CREATE VIEW public.catalog_unified AS
 SELECT
   'drop'::text AS item_type,
   d.id,
@@ -168,7 +173,7 @@ WHERE cr.status IN ('live', 'published');
 -- Step 4: Create denormalized engagement view
 -- ============================================
 
-CREATE OR REPLACE VIEW public.catalog_with_engagement AS
+CREATE VIEW public.catalog_with_engagement AS
 SELECT
   cu.*,
   COALESCE(comment_stats.comment_count, 0) AS comment_count,
