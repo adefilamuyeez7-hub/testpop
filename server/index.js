@@ -15,6 +15,7 @@ import { appJwtSecret } from "./config.js";
 import { getPinataAuthMode, requirePinataAuthStrategies } from "./pinataAuth.js";
 import notificationRoutes from "./api/notifications.js";
 import fanHubRoutes from "./api/fanHub.js";
+import catalogRoutes from "./routes/catalog.js";
 import { initializeEventListeners } from "./services/eventListeners.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -4664,6 +4665,7 @@ app.get('*', (req, res, next) => {
 // ============================================
 app.use('/api/notifications', notificationRoutes);
 app.use("/api/fan-hub", fanHubRoutes);
+app.use("/api", catalogRoutes(supabase));
 
 // 404 handler - API routes that don't match
 app.use((_req, res) => {

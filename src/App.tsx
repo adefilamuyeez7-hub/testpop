@@ -38,6 +38,7 @@ const ProductDetailPage = lazy(() => import("./pages/ProductDetailPage").then((m
 const CartPage = lazy(() => import("./pages/CartPage").then((module) => ({ default: module.CartPage })));
 const CheckoutPage = lazy(() => import("./pages/CheckoutPage").then((module) => ({ default: module.CheckoutPage })));
 const OrderHistoryPage = lazy(() => import("./pages/OrderHistoryPage").then((module) => ({ default: module.OrderHistoryPage })));
+const CatalogPage = lazy(() => import("./pages/CatalogPage").then((module) => ({ default: module.CatalogPage })));
 
 // Heavy routes (studio, admin) - load on demand only
 const WalletStudioRoute = lazy(() => import("./routes/WalletStudioRoute"));
@@ -90,6 +91,8 @@ const App = () => {
                       <Route path="/subscriptions" element={<WalletSubscriptionsRoute />} />
                       <Route path="/products" element={<ReleasesPage />} />
                       <Route path="/products/:id" element={<ProductDetailPage />} />
+                      <Route path="/catalog" element={<CatalogPage />} />
+                      <Route path="/catalog/:type/:id" element={<CatalogPage />} />
                       <Route path="/cart" element={<CartPage />} />
                       <Route path="/checkout" element={<CheckoutPage />} />
                       <Route path="/orders" element={<OrderHistoryPage />} />
