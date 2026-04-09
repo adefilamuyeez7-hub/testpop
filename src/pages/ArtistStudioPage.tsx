@@ -60,6 +60,7 @@ import {
   updateDrop as dbUpdateDrop,
   updateProduct as dbUpdateProduct,
   type IPCampaign,
+  type ProductAsset,
   type Product,
 } from "@/lib/db";
 import { useSupabaseArtistByWallet, useSupabaseDropsByArtist, useSupabaseProductsByCreator } from "@/hooks/useSupabase";
@@ -114,6 +115,22 @@ type Drop = {
 type DropMode = Drop["type"];
 type DropContentKind = "artwork" | "ebook" | "downloadable";
 type StudioReleaseType = "collectible" | "physical" | "hybrid";
+
+function toProductAssetKind(assetType: AssetType, contentKind: DropContentKind): ProductAsset["asset_type"] {
+  if (assetType === "image" || assetType === "video" || assetType === "audio" || assetType === "pdf" || assetType === "epub") {
+    return assetType;
+  }
+
+  if (contentKind === "ebook") {
+    return "document";
+  }
+
+  if (contentKind === "downloadable") {
+    return "archive";
+  }
+
+  return "other";
+}
 
 const getListingReleaseLabel = (value?: string | null) => {
   if (value === "hybrid") return "hybrid collectible";
@@ -698,6 +715,7 @@ const CreateDropSheet = ({
           const imageCid = await uploadFileToPinata(coverFile);
           const imageUri = `ipfs://${imageCid}`;
           const galleryUris: string[] = [];
+          const deliveryAssetType = deliveryFile ? detectAssetTypeFromFile(deliveryFile) : null;
 
           for (const file of galleryFiles) {
             const galleryCid = await uploadFileToPinata(file);
@@ -722,6 +740,9 @@ const CreateDropSheet = ({
               galleryUris,
               coverImageUri: imageUri,
               deliveryUri: nextDeliveryUri,
+              deliveryAssetType,
+              deliveryFileName: deliveryFile?.name || null,
+              deliveryMimeType: deliveryFile?.type || null,
               physicalDetails: physicalDetails,
               shippingProfile: shippingProfile,
               creatorNotes,
@@ -733,8 +754,14 @@ const CreateDropSheet = ({
             imageUri,
             galleryUris,
             deliveryUri: nextDeliveryUri,
+            deliveryAssetType,
+            deliveryFileName: deliveryFile?.name || null,
+            deliveryMimeType: deliveryFile?.type || null,
+            deliveryFileSize: deliveryFile?.size || null,
           };
         });
+
+        const linkedReleaseAssetType = uploadResult.deliveryAssetType || "image";
 
         toast.info("Creating onchain escrow listing...");
         const onchainRelease = await createOnchainCreativeRelease({
@@ -770,6 +797,9 @@ const CreateDropSheet = ({
             release_source: "artist_studio",
             delivery_uri: uploadResult.deliveryUri,
             content_kind: contentKind,
+            delivery_asset_type: uploadResult.deliveryAssetType,
+            delivery_file_name: uploadResult.deliveryFileName,
+            delivery_mime_type: uploadResult.deliveryMimeType,
           },
           published_at: new Date().toISOString(),
         });
@@ -786,7 +816,7 @@ const CreateDropSheet = ({
           description: form.description,
           category: releaseType === "hybrid" ? "Hybrid Collectible" : "Merchandise",
           product_type: releaseType,
-          asset_type: "image",
+          asset_type: linkedReleaseAssetType,
           price_eth: Number(form.price),
           stock: Number(form.supply),
           sold: 0,
@@ -803,6 +833,10 @@ const CreateDropSheet = ({
             release_type: releaseType,
             contract_listing_id: onchainRelease.contractListingId,
             art_metadata_uri: uploadResult.metadataUri,
+            content_kind: contentKind,
+            delivery_asset_type: uploadResult.deliveryAssetType,
+            delivery_file_name: uploadResult.deliveryFileName,
+            delivery_mime_type: uploadResult.deliveryMimeType,
           },
         });
 
@@ -823,7 +857,7 @@ const CreateDropSheet = ({
           metadata_ipfs_uri: uploadResult.metadataUri,
           preview_uri: uploadResult.imageUri,
           delivery_uri: uploadResult.deliveryUri,
-          asset_type: "image",
+          asset_type: linkedReleaseAssetType,
           is_gated: Boolean(uploadResult.deliveryUri),
           status: "published",
           type: "drop",
@@ -839,6 +873,9 @@ const CreateDropSheet = ({
             product_type: releaseType,
             content_kind: contentKind,
             delivery_uri: uploadResult.deliveryUri,
+            delivery_asset_type: uploadResult.deliveryAssetType,
+            delivery_file_name: uploadResult.deliveryFileName,
+            delivery_mime_type: uploadResult.deliveryMimeType,
             physical_details_jsonb: physicalDetails,
             shipping_profile_jsonb: shippingProfile,
           },
@@ -877,11 +914,18 @@ const CreateDropSheet = ({
                 product_id: createdProduct.id,
                 role: "delivery",
                 visibility: "gated",
-                asset_type: "other",
+                asset_type: toProductAssetKind(linkedReleaseAssetType, contentKind),
                 uri: uploadResult.deliveryUri,
                 preview_uri: uploadResult.imageUri,
+                mime_type: uploadResult.deliveryMimeType,
+                file_name: uploadResult.deliveryFileName,
+                file_size_bytes: uploadResult.deliveryFileSize,
                 is_primary: false,
                 sort_order: uploadResult.galleryUris.length + 1,
+                metadata: {
+                  content_kind: contentKind,
+                  delivery_asset_type: uploadResult.deliveryAssetType,
+                },
               }]
             : []),
         ];

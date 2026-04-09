@@ -6,22 +6,30 @@ import { useWallet } from "@/hooks/useContracts";
 import { trackCollectionView } from "@/lib/analyticsStore";
 import { ImageViewer, VideoViewer, AudioPlayer, PdfReader, DownloadPanel } from "@/components/collection";
 import { ipfsToHttp } from "@/lib/pinata";
-import { resolveDropCoverImage } from "@/lib/mediaPreview";
+import { resolveDropCoverImage, sameMediaTarget } from "@/lib/mediaPreview";
 import { useCollectionStore, type CollectedDropItem } from "@/stores/collectionStore";
 import {
   getEntitlementsByBuyer,
   getFulfillmentsByOrder,
   getOrdersByBuyer,
+  getProductAssets,
   createProductFeedbackThread,
   type Entitlement,
   type Fulfillment,
   type OrderWithItems,
+  type ProductAsset,
 } from "@/lib/db";
-import { detectAssetTypeFromUri, type AssetType } from "@/lib/assetTypes";
+import {
+  detectAssetTypeFromFilename,
+  detectAssetTypeFromMime,
+  detectAssetTypeFromUri,
+  type AssetType,
+} from "@/lib/assetTypes";
 import { toast } from "sonner";
 import { establishSecureSession } from "@/lib/secureAuth";
 
 const ACCESSIBLE_ORDER_STATUSES = new Set(["paid", "processing", "shipped", "delivered"]);
+const IMAGE_LIKE_ASSET_TYPES = new Set<AssetType>(["image", "video", "audio"]);
 
 const EpubReader = lazy(() =>
   import("@/components/collection/EpubReader").then((module) => ({ default: module.EpubReader }))
@@ -39,6 +47,18 @@ function getCollectionItemKey(item: CollectedDropItem) {
 }
 
 function inferCollectedAssetType(item: Pick<CollectedDropItem, "assetType" | "deliveryUri" | "previewUri" | "imageUrl">): AssetType {
+  const hasDistinctDeliveryAsset =
+    Boolean(item.deliveryUri?.trim()) &&
+    !sameMediaTarget(item.deliveryUri, item.previewUri) &&
+    !sameMediaTarget(item.deliveryUri, item.imageUrl);
+
+  if (item.assetType === "image" && hasDistinctDeliveryAsset) {
+    const deliveryDetected = detectAssetTypeFromUri(item.deliveryUri || "");
+    if (deliveryDetected !== "image") {
+      return deliveryDetected;
+    }
+  }
+
   if (item.assetType && item.assetType !== "digital") {
     return item.assetType;
   }
@@ -52,7 +72,93 @@ function inferCollectedAssetType(item: Pick<CollectedDropItem, "assetType" | "de
     }
   }
 
-  return item.assetType || "image";
+  return item.assetType || "digital";
+}
+
+function inferProductAssetType(asset?: Partial<ProductAsset> | null): AssetType {
+  if (!asset) {
+    return "digital";
+  }
+
+  if (
+    asset.asset_type === "image" ||
+    asset.asset_type === "video" ||
+    asset.asset_type === "audio" ||
+    asset.asset_type === "pdf" ||
+    asset.asset_type === "epub"
+  ) {
+    return asset.asset_type;
+  }
+
+  if (asset.mime_type?.trim()) {
+    const detectedFromMime = detectAssetTypeFromMime(asset.mime_type);
+    if (detectedFromMime !== "digital") {
+      return detectedFromMime;
+    }
+  }
+
+  if (asset.file_name?.trim()) {
+    const detectedFromFilename = detectAssetTypeFromFilename(asset.file_name);
+    if (detectedFromFilename !== "digital") {
+      return detectedFromFilename;
+    }
+  }
+
+  if (asset.uri?.trim()) {
+    const detectedFromUri = detectAssetTypeFromUri(asset.uri);
+    if (detectedFromUri !== "digital") {
+      return detectedFromUri;
+    }
+  }
+
+  return "digital";
+}
+
+function pickPreviewProductAsset(assets: ProductAsset[]): ProductAsset | null {
+  const candidates = assets.filter((asset) => (asset.preview_uri || asset.uri)?.trim());
+  const priorityGroups = [
+    candidates.filter(
+      (asset) =>
+        asset.visibility === "public" &&
+        (asset.is_primary || asset.role === "hero_art" || asset.role === "preview") &&
+        IMAGE_LIKE_ASSET_TYPES.has(inferProductAssetType(asset)),
+    ),
+    candidates.filter(
+      (asset) =>
+        asset.visibility === "public" &&
+        IMAGE_LIKE_ASSET_TYPES.has(inferProductAssetType(asset)),
+    ),
+    candidates.filter((asset) => asset.visibility === "public" && asset.is_primary),
+    candidates.filter((asset) => asset.visibility === "public"),
+    candidates,
+  ];
+
+  for (const group of priorityGroups) {
+    if (group.length > 0) {
+      return group[0];
+    }
+  }
+
+  return null;
+}
+
+function pickDeliveryProductAsset(assets: ProductAsset[]): ProductAsset | null {
+  const candidates = assets.filter((asset) => asset.uri?.trim());
+  const priorityGroups = [
+    candidates.filter((asset) => asset.role === "delivery"),
+    candidates.filter((asset) => asset.visibility === "gated" || asset.visibility === "private"),
+    candidates.filter((asset) => asset.role === "source" || asset.role === "attachment"),
+    candidates.filter((asset) => inferProductAssetType(asset) !== "image"),
+    candidates,
+  ];
+
+  for (const group of priorityGroups) {
+    if (group.length > 0) {
+      return group[0];
+    }
+  }
+
+  return null;
 }
 
 function resolveCollectionPreviewImage(item: Pick<CollectedDropItem, "assetType" | "deliveryUri" | "previewUri" | "imageUrl">): string {
@@ -65,9 +171,17 @@ function resolveCollectionPreviewImage(item: Pick<CollectedDropItem, "assetType"
 }
 
 function normalizeCollectedItem(item: CollectedDropItem): CollectedDropItem {
-  const imageUrl = resolveCollectionPreviewImage(item);
-  const previewUri = item.previewUri || imageUrl || item.deliveryUri;
-  const deliveryUri = item.deliveryUri || item.previewUri || item.imageUrl;
+  const assetType = inferCollectedAssetType(item);
+  const imageUrl = resolveCollectionPreviewImage({ ...item, assetType });
+  const previewUri =
+    item.previewUri ||
+    imageUrl ||
+    (assetType === "image" || assetType === "video" || assetType === "audio" ? item.deliveryUri : undefined);
+  const deliveryUri =
+    item.deliveryUri ||
+    (assetType === "image" || assetType === "video" || assetType === "audio"
+      ? item.previewUri || item.imageUrl
+      : undefined);
 
   return {
     ...item,
@@ -75,7 +189,7 @@ function normalizeCollectedItem(item: CollectedDropItem): CollectedDropItem {
     previewUri: previewUri || undefined,
     deliveryUri: deliveryUri || undefined,
     assetType: inferCollectedAssetType({
-      assetType: item.assetType,
+      assetType,
       deliveryUri,
       previewUri,
       imageUrl,
@@ -95,7 +209,15 @@ function resolveCollectedAssetSource(item: Pick<CollectedDropItem, "assetType" |
   return ipfsToHttp(delivery || preview || image || "");
 }
 
-function toOrderCollectionItems(order: OrderWithItems, ownerWallet: string): CollectedDropItem[] {
+function resolveCollectedDownloadSource(item: Pick<CollectedDropItem, "deliveryUri" | "previewUri" | "imageUrl">): string {
+  return ipfsToHttp(item.deliveryUri?.trim() || item.previewUri?.trim() || item.imageUrl?.trim() || "");
+}
+
+function toOrderCollectionItems(
+  order: OrderWithItems,
+  ownerWallet: string,
+  productAssetsByProductId: Map<string, ProductAsset[]>,
+): CollectedDropItem[] {
   const typedOrder = order as OrderWithItems;
   const orderItems = typedOrder.order_items?.length
     ? typedOrder.order_items
@@ -110,33 +232,48 @@ function toOrderCollectionItems(order: OrderWithItems, ownerWallet: string): Col
 
   return orderItems.map((item, index) => {
     const product = Array.isArray(item.products) ? item.products[0] : item.products;
-    const previewUri = product?.preview_uri || product?.image_url || product?.image_ipfs_uri || undefined;
-    const deliveryUri = product?.delivery_uri || product?.image_ipfs_uri || product?.image_url || undefined;
+    const productId = item.product_id || typedOrder.product_id || null;
+    const productAssets = productId ? productAssetsByProductId.get(productId) || [] : [];
+    const previewAsset = pickPreviewProductAsset(productAssets);
+    const deliveryAsset = pickDeliveryProductAsset(productAssets);
+    const previewUri =
+      previewAsset?.preview_uri?.trim() ||
+      previewAsset?.uri?.trim() ||
+      product?.preview_uri ||
+      product?.image_ipfs_uri ||
+      product?.image_url ||
+      undefined;
+    const deliveryUri =
+      deliveryAsset?.uri?.trim() ||
+      product?.delivery_uri ||
+      undefined;
+    const deliveryAssetType = inferProductAssetType(deliveryAsset);
+    const inferredAssetType = inferCollectedAssetType({
+      assetType: deliveryAsset ? deliveryAssetType : product?.asset_type || undefined,
+      deliveryUri,
+      previewUri,
+      imageUrl: product?.image_url || undefined,
+    });
     const imageUrl = resolveDropCoverImage({
-      assetType: product?.asset_type || undefined,
+      assetType: inferredAssetType,
       previewUri,
       imageUrl: product?.image_url || undefined,
       imageIpfsUri: product?.image_ipfs_uri || undefined,
       deliveryUri,
-    });
-    const assetType = inferCollectedAssetType({
-      assetType: product?.asset_type || undefined,
-      deliveryUri,
-      previewUri,
-      imageUrl,
+      metadata: product?.metadata || undefined,
     });
 
     return {
       id: `${typedOrder.id}:${item.id || item.product_id || index}`,
       ownerWallet,
       creativeReleaseId: typedOrder.creative_release_id ?? null,
-      productId: item.product_id || typedOrder.product_id || null,
+      productId,
       title: product?.name?.trim() || `Order item ${index + 1}`,
       artist: product?.creator_wallet || "Marketplace",
       imageUrl,
       previewUri,
       deliveryUri,
-      assetType,
+      assetType: inferredAssetType,
       isGated: Boolean(product?.is_gated),
       contractKind: typedOrder.contract_kind ?? null,
       orderStatus: typedOrder.status || undefined,
@@ -236,16 +373,33 @@ const MyCollectionPage = ({ embedded = false }: MyCollectionPageProps) => {
       setPurchasedCollectionLoading(true);
 
       try {
+        await establishSecureSession(address.toLowerCase());
         const orders = await getOrdersByBuyer(address.toLowerCase(), { accessibleOnly: true });
         if (!active) return;
 
-        const [entitlements, fulfillmentGroups] = await Promise.all([
+        const productIds = Array.from(
+          new Set(
+            (orders || []).flatMap((order) => {
+              const normalizedOrder = order as OrderWithItems;
+              const itemProductIds = normalizedOrder.order_items?.map((item) => item.product_id).filter(Boolean) || [];
+              return normalizedOrder.product_id ? [...itemProductIds, normalizedOrder.product_id] : itemProductIds;
+            }),
+          ),
+        );
+
+        const [entitlements, fulfillmentGroups, productAssetEntries] = await Promise.all([
           getEntitlementsByBuyer(address.toLowerCase()),
           Promise.all(
             (orders || []).map(async (order) => ({
               orderId: order.id,
               fulfillments: await getFulfillmentsByOrder(order.id),
             })),
+          ),
+          Promise.all(
+            productIds.map(async (productId) => [
+              productId,
+              await getProductAssets(productId, { includePrivate: true }),
+            ] as const),
           ),
         ]);
         if (!active) return;
@@ -261,9 +415,10 @@ const MyCollectionPage = ({ embedded = false }: MyCollectionPageProps) => {
         const fulfillmentsByOrder = new Map<string, Fulfillment[]>(
           fulfillmentGroups.map((entry) => [entry.orderId, entry.fulfillments || []]),
         );
+        const productAssetsByProductId = new Map<string, ProductAsset[]>(productAssetEntries);
 
         const mappedItems = (orders || []).flatMap((order) =>
-          toOrderCollectionItems(order as OrderWithItems, address).map((item) => {
+          toOrderCollectionItems(order as OrderWithItems, address, productAssetsByProductId).map((item) => {
             const productId = item.productId || order.product_id || null;
             const entitlementKey = `${order.id}:${productId || ""}`;
             const itemEntitlements = entitlementsByOrderAndProduct.get(entitlementKey) || [];
@@ -463,6 +618,7 @@ const MyCollectionPage = ({ embedded = false }: MyCollectionPageProps) => {
                       selectedItem.mintedTokenId != null ||
                       Boolean(selectedItem.contractAddress) ||
                       !selectedItem.isGated;
+                    const downloadUrl = resolveCollectedDownloadSource(selectedItem) || undefined;
 
                     return (
                       <div className="space-y-4 border-t border-gray-700 p-6">
@@ -476,24 +632,20 @@ const MyCollectionPage = ({ embedded = false }: MyCollectionPageProps) => {
                           fileType={selectedItem.assetType}
                           isGated={selectedItem.isGated || false}
                           isOwned={isOwned}
-                          downloadUrl={
-                            selectedItem.assetType === "pdf" || selectedItem.assetType === "epub"
-                              ? undefined
-                              : ipfsToHttp(selectedItem.deliveryUri || selectedItem.previewUri || "")
-                          }
+                          downloadUrl={downloadUrl}
                           accessNote={
                             selectedItem.assetType === "pdf" || selectedItem.assetType === "epub"
-                              ? "This eBook opens in the in-app reader above. If the file fails to render, the reader includes a direct open fallback."
+                              ? "This file opens in the in-app reader above, and you can also open or download the original file from here."
                               : selectedItem.isGated
                                 ? "You own this item. Delivery files are available."
                                 : undefined
                           }
-                          actionLabel="Download"
-                          showCopyLink={selectedItem.assetType !== "pdf" && selectedItem.assetType !== "epub"}
+                          actionLabel={selectedItem.assetType === "pdf" || selectedItem.assetType === "epub" ? "Open file" : "Download"}
+                          showCopyLink={Boolean(downloadUrl)}
                           onDownload={() => {
-                            if (selectedItem.deliveryUri && selectedItem.assetType !== "pdf" && selectedItem.assetType !== "epub") {
+                            if (downloadUrl) {
                               const downloadLink = document.createElement("a");
-                              downloadLink.href = ipfsToHttp(selectedItem.deliveryUri);
+                              downloadLink.href = downloadUrl;
                               downloadLink.target = "_blank";
                               downloadLink.rel = "noreferrer";
                               downloadLink.download = selectedItem.title;

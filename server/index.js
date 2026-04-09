@@ -2572,7 +2572,8 @@ const LEGACY_ORDER_SELECT = `
     preview_uri,
     delivery_uri,
     is_gated,
-    creator_wallet
+    creator_wallet,
+    metadata
   )
 `;
 
@@ -2597,7 +2598,8 @@ const ORDER_SELECT = `
       preview_uri,
       delivery_uri,
       is_gated,
-      creator_wallet
+      creator_wallet,
+      metadata
     )
   )
 `;
@@ -2910,9 +2912,25 @@ registerRoute("get", "/products/:id/assets", authRequired, async (req, res) => {
 registerRoute("post", "/product-assets", authRequired, async (req, res) => {
   try {
     const payload = req.body || {};
-    const productId = typeof payload.product_id === "string" ? payload.product_id.trim() : "";
+    const rawAssets = Array.isArray(payload.assets) ? payload.assets : [payload];
+    const inferredProductId =
+      typeof rawAssets[0]?.product_id === "string" ? rawAssets[0].product_id.trim() : "";
+    const productId =
+      typeof payload.product_id === "string" && payload.product_id.trim()
+        ? payload.product_id.trim()
+        : inferredProductId;
     if (!productId) {
       return res.status(400).json({ error: "product_id is required" });
+    }
+
+    const mismatchedAsset = rawAssets.find((asset) => {
+      if (typeof asset?.product_id !== "string" || !asset.product_id.trim()) {
+        return false;
+      }
+      return asset.product_id.trim() !== productId;
+    });
+    if (mismatchedAsset) {
+      return res.status(400).json({ error: "All product assets in a batch must share the same product_id" });
     }
 
     const { data: product, error: productError } = await supabase
@@ -2929,8 +2947,7 @@ registerRoute("post", "/product-assets", authRequired, async (req, res) => {
       return res.status(403).json({ error: "Only the creator or admin can attach product assets" });
     }
 
-    const assets = Array.isArray(payload.assets) ? payload.assets : [payload];
-    const sanitizedAssets = assets
+    const sanitizedAssets = rawAssets
       .map((asset) => ({
         product_id: productId,
         role: typeof asset.role === "string" ? asset.role.trim() : "gallery_photo",

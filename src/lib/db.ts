@@ -208,6 +208,7 @@ export interface OrderWithItems extends Order {
     delivery_uri?: string | null;
     is_gated?: boolean | null;
     creator_wallet?: string | null;
+    metadata?: Product["metadata"] | null;
   } | Array<{
     id?: string | null;
     name?: string | null;
@@ -219,6 +220,7 @@ export interface OrderWithItems extends Order {
     delivery_uri?: string | null;
     is_gated?: boolean | null;
     creator_wallet?: string | null;
+    metadata?: Product["metadata"] | null;
   }> | null;
   order_items?: Array<OrderItem & {
     products?: {
@@ -232,6 +234,7 @@ export interface OrderWithItems extends Order {
       delivery_uri?: string | null;
       is_gated?: boolean | null;
       creator_wallet?: string | null;
+      metadata?: Product["metadata"] | null;
     } | Array<{
       id?: string | null;
       name?: string | null;
@@ -243,6 +246,7 @@ export interface OrderWithItems extends Order {
       delivery_uri?: string | null;
       is_gated?: boolean | null;
       creator_wallet?: string | null;
+      metadata?: Product["metadata"] | null;
     }> | null;
   }>;
 }
@@ -1245,7 +1249,13 @@ export async function createProductAssets(
   assets: Array<Partial<ProductAsset>> | Partial<ProductAsset>,
 ): Promise<ProductAsset[]> {
   try {
-    const payload = Array.isArray(assets) ? { assets } : assets;
+    const payload = Array.isArray(assets)
+      ? {
+          product_id:
+            typeof assets[0]?.product_id === "string" ? assets[0].product_id : undefined,
+          assets,
+        }
+      : assets;
     return await secureApiRequest<ProductAsset[]>("/product-assets", {
       method: "POST",
       body: JSON.stringify(payload),
@@ -1305,7 +1315,8 @@ const LEGACY_ORDER_SELECT = `
     preview_uri,
     delivery_uri,
     is_gated,
-    creator_wallet
+    creator_wallet,
+    metadata
   )
 `;
 
@@ -1330,7 +1341,8 @@ const ORDER_SELECT = `
       preview_uri,
       delivery_uri,
       is_gated,
-      creator_wallet
+      creator_wallet,
+      metadata
     )
   )
 `;

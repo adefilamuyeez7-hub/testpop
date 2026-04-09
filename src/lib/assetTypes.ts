@@ -100,7 +100,7 @@ export function detectAssetTypeFromFile(file: File): AssetType {
  * Detect asset type from URI (IPFS, HTTPS, data URL)
  * Uses file extension from path
  * @param uri File URI/URL
- * @returns Detected AssetType or 'image' as default
+ * @returns Detected AssetType or 'digital' as default
  */
 export function detectAssetTypeFromUri(uri: string): AssetType {
   try {
@@ -122,9 +122,9 @@ export function detectAssetTypeFromUri(uri: string): AssetType {
     const filename = path.split('/').pop() || '';
     const detected = detectAssetTypeFromFilename(filename);
     
-    return detected !== 'digital' ? detected : 'image';
+    return detected;
   } catch {
-    return 'image'; // Default to image if detection fails
+    return 'digital'; // Keep unknown assets downloadable instead of forcing image rendering
   }
 }
 
