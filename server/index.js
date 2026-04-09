@@ -130,6 +130,10 @@ function isBareIpfsCid(value = "") {
   return /^(bafy[a-z2-7]+|bafk[a-z2-7]+|Qm[1-9A-HJ-NP-Za-km-z]{44,})$/i.test(value.trim());
 }
 
+function normalizeBaseUrl(value = "") {
+  return String(value || "").trim().replace(/\/+$/, "");
+}
+
 function resolveMediaProxyTarget(value = "") {
   const normalized = String(value || "").trim();
   if (!normalized) return null;
@@ -152,6 +156,108 @@ function resolveMediaProxyTarget(value = "") {
   }
 
   return null;
+}
+
+function normalizeIpfsUrl(value = "") {
+  const normalized = String(value || "").trim();
+  if (!normalized) return "";
+  if (normalized.startsWith("ipfs://ipfs/")) {
+    return `${IPFS_GATEWAY_BASE}/${normalized.slice("ipfs://ipfs/".length)}`;
+  }
+  if (normalized.startsWith("ipfs://")) {
+    return `${IPFS_GATEWAY_BASE}/${normalized.slice("ipfs://".length)}`;
+  }
+  return normalized;
+}
+
+function escapeHtml(value = "") {
+  return String(value || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function resolveRequestBaseUrl(req) {
+  const configuredBase = normalizeBaseUrl(
+    process.env.SHARE_BASE_URL ||
+    process.env.VITE_SHARE_BASE_URL ||
+    process.env.FRONTEND_PUBLIC_URL
+  );
+
+  if (configuredBase) {
+    return configuredBase;
+  }
+
+  const forwardedProto = String(req.headers["x-forwarded-proto"] || "").split(",")[0].trim();
+  const forwardedHost = String(req.headers["x-forwarded-host"] || "").split(",")[0].trim();
+  const host = forwardedHost || String(req.headers.host || "").trim();
+  const protocol = forwardedProto || req.protocol || "https";
+
+  if (host) {
+    return `${protocol}://${host}`;
+  }
+
+  const frontendOrigin = String(process.env.FRONTEND_ORIGIN || "")
+    .split(",")
+    .map((origin) => normalizeBaseUrl(origin))
+    .find(Boolean);
+
+  return frontendOrigin || "https://testpop-one.vercel.app";
+}
+
+function getSharePreviewMeta(item, req) {
+  const baseUrl = resolveRequestBaseUrl(req);
+  const imageUrl = normalizeIpfsUrl(item?.image_url || "") || `${baseUrl}/popup-logo.png`;
+  const priceValue = Number(item?.price_eth || 0);
+  const title = String(item?.title || "POPUP collectible").trim() || "POPUP collectible";
+  const itemType = String(item?.item_type || "item").trim();
+  const summary = String(item?.description || "").trim();
+  const description = summary
+    || (priceValue > 0
+      ? `${title} is live on POPUP for ${priceValue} ETH. Open the action card to view and collect.`
+      : `${title} is live on POPUP. Open the action card to view and collect.`);
+
+  return {
+    title,
+    description,
+    imageUrl,
+    canonicalUrl: `${baseUrl}${req.originalUrl || req.url || `/share/${itemType}/${item?.id || ""}`}`,
+    itemType,
+  };
+}
+
+function injectShareMetaTags(template, meta) {
+  const escapedTitle = escapeHtml(meta.title);
+  const escapedDescription = escapeHtml(meta.description);
+  const escapedImageUrl = escapeHtml(meta.imageUrl);
+  const escapedCanonicalUrl = escapeHtml(meta.canonicalUrl);
+  const escapedItemType = escapeHtml(meta.itemType);
+  const headTags = [
+    `<title>${escapedTitle} | POPUP</title>`,
+    `<meta name="description" content="${escapedDescription}" />`,
+    `<meta property="og:title" content="${escapedTitle}" />`,
+    `<meta property="og:description" content="${escapedDescription}" />`,
+    `<meta property="og:image" content="${escapedImageUrl}" />`,
+    `<meta property="og:url" content="${escapedCanonicalUrl}" />`,
+    `<meta property="og:type" content="product" />`,
+    `<meta property="og:site_name" content="POPUP" />`,
+    `<meta name="twitter:card" content="summary_large_image" />`,
+    `<meta name="twitter:title" content="${escapedTitle}" />`,
+    `<meta name="twitter:description" content="${escapedDescription}" />`,
+    `<meta name="twitter:image" content="${escapedImageUrl}" />`,
+    `<meta name="popup:item_type" content="${escapedItemType}" />`,
+    `<link rel="canonical" href="${escapedCanonicalUrl}" />`,
+  ].join("\n    ");
+
+  return template
+    .replace(/<title>[\s\S]*?<\/title>/i, `<title>${escapedTitle} | POPUP</title>`)
+    .replace(
+      /<meta\s+name="description"\s+content="[\s\S]*?"\s*\/?>/i,
+      `<meta name="description" content="${escapedDescription}" />`
+    )
+    .replace("</head>", `    ${headTags}\n  </head>`);
 }
 
 function loadEnvFile(envPath) {
@@ -4659,6 +4765,43 @@ const port = Number(PORT) || 3000;
 // SPA FALLBACK - Serve index.html for all non-API routes
 // This allows React Router to handle client-side navigation
 // ═════════════════════════════════════════════════════════════════════════════
+app.get("/share/:type/:id", async (req, res, next) => {
+  const { type, id } = req.params;
+
+  if (!["drop", "product", "release"].includes(type)) {
+    return next();
+  }
+
+  if (!fs.existsSync(frontendIndexPath)) {
+    return next();
+  }
+
+  try {
+    const { data: item, error } = await supabase
+      .from("catalog_with_engagement")
+      .select("id, item_type, title, description, image_url, price_eth")
+      .eq("item_type", type)
+      .eq("id", id)
+      .maybeSingle();
+
+    if (error) {
+      throw error;
+    }
+
+    const template = fs.readFileSync(frontendIndexPath, "utf8");
+    const html = item
+      ? injectShareMetaTags(template, getSharePreviewMeta(item, req))
+      : template;
+
+    res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+    res.setHeader("Content-Type", "text/html; charset=utf-8");
+    return res.status(200).send(html);
+  } catch (error) {
+    console.error("[GET /share/:type/:id] Failed to render share metadata:", error);
+    return next();
+  }
+});
+
 app.get('*', (req, res, next) => {
   // If it's an API route, skip to 404 handler
   if (req.originalUrl?.startsWith('/api') || req.path.startsWith('/api')) {
