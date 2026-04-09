@@ -71,7 +71,7 @@ function SearchPanel({ onClose }: { onClose: () => void }) {
         <input
           ref={inputRef}
           type="text"
-          placeholder="Search creators, drops, and releases..."
+          placeholder="Search creators, drops, and products..."
           value={query}
           onChange={(event) => setQuery(event.target.value)}
           className="flex-1 bg-transparent text-sm text-foreground placeholder-muted-foreground outline-none"
@@ -169,7 +169,7 @@ function SearchPanel({ onClose }: { onClose: () => void }) {
 
         {results.products.length > 0 && (
           <div>
-            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">Releases</p>
+            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">Products</p>
             <div className="space-y-2">
               {results.products.map((product) => (
                 <button
@@ -186,7 +186,7 @@ function SearchPanel({ onClose }: { onClose: () => void }) {
                     )}
                   </div>
                   <div>
-                    <p className="text-sm font-medium text-foreground">{product.name || "Untitled Release"}</p>
+                    <p className="text-sm font-medium text-foreground">{product.name || "Untitled Product"}</p>
                     <p className="text-xs text-muted-foreground">{product.price_eth ?? "0"} ETH</p>
                   </div>
                 </button>
@@ -206,9 +206,9 @@ const TopBar = () => {
   return (
     <>
       <header className="sticky top-0 z-40 border-b border-border bg-background/80 backdrop-blur-xl">
-        <div className="mx-auto flex h-12 max-w-lg items-center justify-between px-3 md:hidden">
+        <div className="mx-auto flex h-14 w-full max-w-full items-center justify-between gap-2 px-3 sm:px-4 md:hidden">
           <img src={logo} alt="POPUP" className="h-7 w-7 rounded-sm object-contain" />
-          <div className="flex items-center gap-1">
+          <div className="flex min-w-0 items-center gap-1">
             <ThemeToggle />
             <button
               onClick={() => {
@@ -219,7 +219,7 @@ const TopBar = () => {
             >
               <Search className="h-4 w-4 text-foreground" />
             </button>
-            <Suspense fallback={<div className="h-8 w-24 rounded-full bg-secondary animate-pulse" />}>
+            <Suspense fallback={<div className="h-8 w-20 rounded-full bg-secondary animate-pulse" />}>
               <TopBarWalletControls />
             </Suspense>
           </div>
@@ -230,7 +230,7 @@ const TopBar = () => {
             <img src={logo} alt="POPUP" className="h-10 w-10 rounded-lg object-contain" />
             <div className="min-w-0">
               <p className="text-sm font-semibold tracking-[0.18em] text-foreground/70 uppercase">Popup</p>
-              <p className="text-xs text-muted-foreground">Collect releases, follow creators, and support them onchain.</p>
+              <p className="text-xs text-muted-foreground">Collect drops, follow creators, and support them onchain.</p>
             </div>
           </div>
 

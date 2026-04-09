@@ -20,9 +20,34 @@ export interface CatalogItem {
   can_participate_campaign: boolean;
   creator_id: string;
   creator_wallet: string;
+  product_type?: "digital" | "physical" | "hybrid" | string | null;
+  contract_kind?: "artDrop" | "productStore" | "creativeReleaseEscrow" | string | null;
+  contract_listing_id?: number | null;
+  contract_product_id?: number | null;
+  creative_release_id?: string | null;
   comment_count?: number;
   avg_rating?: number;
   created_at: string;
+}
+
+export type CatalogPrimaryAction = "bid" | "cart" | "collect" | "details";
+
+export function getCatalogPrimaryAction(
+  item: Pick<CatalogItem, "item_type" | "can_bid" | "can_purchase">
+): CatalogPrimaryAction {
+  if (item.item_type === "drop" && item.can_bid) {
+    return "bid";
+  }
+
+  if (item.item_type === "product" && item.can_purchase) {
+    return "cart";
+  }
+
+  if (item.can_purchase) {
+    return "collect";
+  }
+
+  return "details";
 }
 
 /**

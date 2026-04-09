@@ -2,7 +2,9 @@ import React, { useEffect, useMemo, useState } from "react";
 import { ArrowRight, ExternalLink, Gavel, Heart, Loader2, MessageCircle, Share2, ShoppingBag } from "lucide-react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { supabase } from "@/lib/db";
-import { formatPrice, formatSupply } from "@/utils/catalogUtils";
+import { SECURE_API_BASE } from "@/lib/apiBase";
+import { useCartStore } from "@/stores/cartStore";
+import { formatPrice, formatSupply, getCatalogPrimaryAction } from "@/utils/catalogUtils";
 
 type ShareCatalogItem = {
   id: string;
@@ -40,6 +42,13 @@ type CreatorProfile = {
   wallet?: string | null;
 };
 
+const API_BASE = SECURE_API_BASE || "/api";
+
+function buildApiUrl(path: string) {
+  const normalizedPath = path.startsWith("/") ? path : `/${path}`;
+  return `${API_BASE}${normalizedPath}`;
+}
+
 function truncateWallet(wallet?: string | null, start = 6, end = 4) {
   const value = String(wallet || "").trim();
   if (!value) return "Creator";
@@ -60,22 +69,28 @@ function getItemRoute(item: ShareCatalogItem) {
 }
 
 function getPrimaryCta(item: ShareCatalogItem) {
-  if (item.item_type === "drop" && item.can_bid) {
-    return { label: "Place a bid", icon: Gavel };
-  }
+  const action = getCatalogPrimaryAction({
+    item_type: item.item_type,
+    can_bid: Boolean(item.can_bid),
+    can_purchase: Boolean(item.can_purchase),
+  });
 
-  if (item.can_purchase) {
-    return {
-      label: item.item_type === "product" ? "Collect now" : "Open release",
-      icon: ShoppingBag,
-    };
+  switch (action) {
+    case "bid":
+      return { action, label: "Bid", icon: Gavel };
+    case "cart":
+      return { action, label: "Add to cart", icon: ShoppingBag };
+    case "collect":
+      return { action, label: "Collect", icon: ShoppingBag };
+    case "details":
+    default:
+      return { action: "details" as const, label: "View details", icon: ExternalLink };
   }
-
-  return { label: "View details", icon: ExternalLink };
 }
 
 const ShareLandingPage = () => {
   const navigate = useNavigate();
+  const addItem = useCartStore((state) => state.addItem);
   const { type, id } = useParams();
   const [searchParams] = useSearchParams();
   const [item, setItem] = useState<ShareCatalogItem | null>(null);
@@ -83,12 +98,13 @@ const ShareLandingPage = () => {
   const [creator, setCreator] = useState<CreatorProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [ctaBusy, setCtaBusy] = useState(false);
 
   useEffect(() => {
     const shareId = searchParams.get("share");
     if (!shareId) return;
 
-    fetch(`/api/personalization/share/${shareId}/click`).catch((clickError) => {
+    fetch(buildApiUrl(`/personalization/share/${shareId}/click`)).catch((clickError) => {
       console.warn("Failed to track share click:", clickError);
     });
   }, [searchParams]);
@@ -103,7 +119,7 @@ const ShareLandingPage = () => {
         setLoading(true);
         setError(null);
 
-        const response = await fetch(`/api/catalog/${type}/${id}`);
+        const response = await fetch(buildApiUrl(`/catalog/${type}/${id}`));
         const payload = await response.json();
         if (!response.ok) {
           throw new Error(payload?.error || payload?.message || "Unable to load shared item.");
@@ -115,7 +131,7 @@ const ShareLandingPage = () => {
         setComments(payload.comments || []);
 
         if (payload.item) {
-          void fetch("/api/personalization/analytics", {
+          void fetch(buildApiUrl("/personalization/analytics"), {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -169,12 +185,60 @@ const ShareLandingPage = () => {
 
   const primaryCta = useMemo(() => (item ? getPrimaryCta(item) : null), [item]);
 
+  async function handlePrimaryAction() {
+    if (!item || !primaryCta) return;
+
+    try {
+      setCtaBusy(true);
+
+      if (primaryCta.action === "cart") {
+        const { data: product, error: productError } = await supabase
+          .from("products")
+          .select("id, creative_release_id, contract_kind, contract_listing_id, contract_product_id, price_eth, name, preview_uri, image_url, image_ipfs_uri")
+          .eq("id", item.id)
+          .maybeSingle();
+
+        if (productError) {
+          throw productError;
+        }
+
+        if (!product) {
+          throw new Error("This product is unavailable right now.");
+        }
+
+        const resolvedPriceEth = Number(product.price_eth ?? item.price_eth ?? 0);
+        const priceWei = BigInt(Math.max(0, Math.round(resolvedPriceEth * 1e18)));
+
+        addItem(
+          product.id,
+          product.creative_release_id ?? null,
+          (product.contract_kind as "artDrop" | "productStore" | "creativeReleaseEscrow" | null) ?? "productStore",
+          Number.isFinite(Number(product.contract_listing_id)) ? Number(product.contract_listing_id) : null,
+          Number.isFinite(Number(product.contract_product_id)) ? Number(product.contract_product_id) : null,
+          1,
+          priceWei,
+          product.name || item.title || "Untitled Product",
+          product.preview_uri || product.image_url || product.image_ipfs_uri || item.image_url || "",
+        );
+
+        navigate("/cart");
+        return;
+      }
+
+      navigate(getItemRoute(item));
+    } catch (actionError) {
+      setError(actionError instanceof Error ? actionError.message : "Unable to continue.");
+    } finally {
+      setCtaBusy(false);
+    }
+  }
+
   if (loading) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-[radial-gradient(circle_at_top,rgba(14,165,233,0.18),transparent_30%),linear-gradient(180deg,#f8fbff_0%,#eef5ff_100%)]">
         <div className="rounded-[2rem] border border-white/80 bg-white/92 px-8 py-10 text-center shadow-[0_35px_120px_rgba(15,23,42,0.12)]">
           <Loader2 className="mx-auto h-6 w-6 animate-spin text-sky-600" />
-          <p className="mt-4 text-sm text-slate-600">Loading shared collectible...</p>
+          <p className="mt-4 text-sm text-slate-600">Loading shared drop...</p>
         </div>
       </div>
     );
@@ -221,11 +285,11 @@ const ShareLandingPage = () => {
             <div className="flex flex-col justify-between p-6 md:p-8">
               <div>
                 <p className="text-xs font-semibold uppercase tracking-[0.24em] text-sky-700">
-                  {item.item_type} spotlight
+                  {item.item_type === "release" ? "drop spotlight" : `${item.item_type} spotlight`}
                 </p>
                 <h1 className="mt-3 text-4xl font-semibold tracking-tight text-slate-950">{item.title}</h1>
                 <p className="mt-4 text-base leading-8 text-slate-600">
-                  {item.description || "A shared collectible from the POPUP discovery feed. Open it to explore the full deck, public conversation, and creator context."}
+                  {item.description || "A shared collectible from the POPUP discovery feed. Open it to explore the full drop deck, public conversation, and creator context."}
                 </p>
 
                 <div className="mt-6 flex items-center gap-3">
@@ -265,10 +329,11 @@ const ShareLandingPage = () => {
               <div className="mt-8 flex flex-wrap gap-3">
                 <button
                   type="button"
-                  onClick={() => navigate(getItemRoute(item))}
-                  className="inline-flex h-12 items-center gap-2 rounded-full bg-slate-950 px-6 text-sm font-medium text-white transition hover:bg-slate-800"
+                  onClick={() => void handlePrimaryAction()}
+                  disabled={ctaBusy}
+                  className="inline-flex h-12 items-center gap-2 rounded-full bg-slate-950 px-6 text-sm font-medium text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-70"
                 >
-                  <PrimaryIcon className="h-4 w-4" />
+                  {ctaBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <PrimaryIcon className="h-4 w-4" />}
                   {primaryCta.label}
                 </button>
                 <button
@@ -308,7 +373,7 @@ const ShareLandingPage = () => {
                   Direct CTA
                 </div>
                 <p className="mt-2 text-sm leading-6 text-slate-600">
-                  The primary action stays close to the media so someone coming from X, Telegram, or WhatsApp can move straight into the collectible flow.
+                  The primary action stays close to the media so someone coming from X, Telegram, or WhatsApp can move straight into the right drop flow.
                 </p>
               </div>
             </div>

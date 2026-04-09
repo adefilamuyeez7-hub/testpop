@@ -14,6 +14,9 @@ CREATE INDEX IF NOT EXISTS idx_products_artist_status
 CREATE INDEX IF NOT EXISTS idx_drops_artist_status
   ON public.drops(artist_id, status, created_at DESC);
 
+ALTER TABLE public.creative_releases
+  ADD COLUMN IF NOT EXISTS campaign_id UUID REFERENCES public.ip_campaigns(id) ON DELETE SET NULL;
+
 CREATE INDEX IF NOT EXISTS idx_creative_releases_artist_campaign
   ON public.creative_releases(artist_id, campaign_id, created_at DESC);
 
@@ -108,7 +111,7 @@ SELECT
     WHEN COALESCE(p.stock, 0) = 0 THEN NULL::integer
     ELSE GREATEST(COALESCE(p.stock, 0) - COALESCE(p.sold, 0), 0)
   END AS supply_or_stock,
-  p.contract_address,
+  NULL::text AS contract_address,
   NULL::uuid AS campaign_id,
   NULL::text AS campaign_type,
   p.artist_id AS creator_id,

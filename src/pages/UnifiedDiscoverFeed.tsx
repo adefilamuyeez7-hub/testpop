@@ -2,7 +2,6 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   ExternalLink,
   Gavel,
-  Heart,
   Loader2,
   MessageCircle,
   Search,
@@ -18,7 +17,8 @@ import { SECURE_API_BASE } from "@/lib/apiBase";
 import { getRuntimeApiToken } from "@/lib/runtimeSession";
 import { useWallet } from "@/hooks/useContracts";
 import { toast } from "@/components/ui/use-toast";
-import { CatalogItem, formatPrice, formatSupply } from "@/utils/catalogUtils";
+import { useCartStore } from "@/stores/cartStore";
+import { CatalogItem, formatPrice, formatSupply, getCatalogPrimaryAction } from "@/utils/catalogUtils";
 
 const FEED_PAGE_SIZE = 10;
 const API_BASE = SECURE_API_BASE || "/api";
@@ -274,27 +274,39 @@ function getItemRoute(post: DiscoverPost) {
 }
 
 function getPrimaryCta(post: DiscoverPost) {
-  if (post.item_type === "drop" && post.can_bid) {
-    return {
-      label: "Bid now",
-      icon: Gavel,
-      className: "bg-[#0f172a] text-white hover:bg-[#1e293b]",
-    };
-  }
+  const action = getCatalogPrimaryAction(post);
 
-  if (post.can_purchase) {
-    return {
-      label: post.item_type === "product" ? "Collect" : "Get release",
-      icon: ShoppingBag,
-      className: "bg-[#1d4ed8] text-white hover:bg-[#1e40af]",
-    };
+  switch (action) {
+    case "bid":
+      return {
+        action,
+        label: "Bid",
+        icon: Gavel,
+        className: "bg-[#0f172a] text-white hover:bg-[#1e293b]",
+      };
+    case "cart":
+      return {
+        action,
+        label: "Add to cart",
+        icon: ShoppingBag,
+        className: "bg-[#1d4ed8] text-white hover:bg-[#1e40af]",
+      };
+    case "collect":
+      return {
+        action,
+        label: "Collect",
+        icon: ShoppingBag,
+        className: "bg-[#1d4ed8] text-white hover:bg-[#1e40af]",
+      };
+    case "details":
+    default:
+      return {
+        action: "details" as const,
+        label: "View details",
+        icon: ExternalLink,
+        className: "bg-slate-100 text-slate-900 hover:bg-slate-200",
+      };
   }
-
-  return {
-    label: "View details",
-    icon: ExternalLink,
-    className: "bg-slate-100 text-slate-900 hover:bg-slate-200",
-  };
 }
 
 function getTypePill(post: DiscoverPost) {
@@ -306,7 +318,7 @@ function getTypePill(post: DiscoverPost) {
       };
     case "release":
       return {
-        label: "Release",
+        label: "Creative drop",
         className: "bg-rose-100 text-rose-900",
       };
     case "product":
@@ -343,7 +355,7 @@ function FeedHeader({
     { value: "all", label: "All" },
     { value: "drop", label: "Drops" },
     { value: "product", label: "Products" },
-    { value: "release", label: "Releases" },
+    { value: "release", label: "Creative Drops" },
   ];
 
   return (
@@ -356,9 +368,9 @@ function FeedHeader({
               Discover feed
             </div>
             <div>
-              <h1 className="text-3xl font-semibold tracking-tight text-slate-950">Scroll releases like a social timeline</h1>
+              <h1 className="text-3xl font-semibold tracking-tight text-slate-950">Scroll drops like a social timeline</h1>
               <p className="max-w-2xl text-sm leading-6 text-slate-600">
-                Collectors can react, comment, share externally, open details, and reach creators without leaving the feed.
+                Open the artwork first, move into the right CTA fast, and share a clean drop story without leaving the feed.
               </p>
             </div>
           </div>
@@ -602,7 +614,7 @@ function InlineCommentComposer({
               void handleSubmit();
             }
           }}
-          placeholder={disabled ? disabledLabel : "Add a public comment to this release"}
+          placeholder={disabled ? disabledLabel : "Add a public comment to this drop"}
           disabled={disabled || sending}
           className="h-11 flex-1 rounded-full border border-slate-200 bg-white px-4 text-sm text-slate-900 outline-none transition focus:border-slate-300 disabled:cursor-not-allowed disabled:bg-slate-100"
         />
@@ -633,36 +645,27 @@ function DiscoverCard({
 }) {
   const navigate = useNavigate();
   const { isConnected, connectWallet } = useWallet();
+  const addItem = useCartStore((state) => state.addItem);
   const [comments, setComments] = useState<FeedbackThread[]>([]);
   const [commentsLoading, setCommentsLoading] = useState(true);
-  const [analytics, setAnalytics] = useState<ItemAnalytics | null>(null);
-  const [liked, setLiked] = useState(false);
-  const [likeBusy, setLikeBusy] = useState(false);
-  const [shareBoost, setShareBoost] = useState(0);
+  const [ctaBusy, setCtaBusy] = useState(false);
 
-  async function loadCommentsAndAnalytics() {
+  async function loadComments() {
     try {
       setCommentsLoading(true);
-      const [loadedComments, loadedAnalytics] = await Promise.all([
-        fetchPublicComments(post, 2),
-        fetchItemAnalytics(post),
-      ]);
+      const loadedComments = await fetchPublicComments(post, 2);
       setComments(loadedComments);
-      setAnalytics(loadedAnalytics);
     } catch (error) {
-      console.error("Failed to load social metadata:", error);
+      console.error("Failed to load comments:", error);
     } finally {
       setCommentsLoading(false);
     }
   }
 
   useEffect(() => {
-    void loadCommentsAndAnalytics();
+    void loadComments();
   }, [post.id, post.item_type]);
 
-  const commentsCount = Math.max(post.comment_count || 0, analytics?.comments || 0, comments.length);
-  const likesCount = (analytics?.likes || 0) + (liked ? 1 : 0);
-  const sharesCount = (analytics?.shares || 0) + shareBoost;
   const primaryCta = getPrimaryCta(post);
   const PrimaryCtaIcon = primaryCta.icon;
   const typePill = getTypePill(post);
@@ -688,35 +691,68 @@ function DiscoverCard({
     });
   }
 
-  async function handleLike() {
-    if (liked || likeBusy) return;
-
-    if (!isConnected) {
-      await handleRequireWallet();
-      return;
-    }
-
+  async function handlePrimaryAction() {
     try {
-      setLikeBusy(true);
-      setLiked(true);
-      await trackItemEvent(post, "like", { source: "discover_feed" });
-    } catch {
-      setLiked(false);
+      setCtaBusy(true);
+
+      if (primaryCta.action === "cart") {
+        const { data: product, error } = await supabase
+          .from("products")
+          .select("id, creative_release_id, contract_kind, contract_listing_id, contract_product_id, price_eth, name, preview_uri, image_url, image_ipfs_uri")
+          .eq("id", post.id)
+          .maybeSingle();
+
+        if (error) {
+          throw error;
+        }
+
+        if (!product) {
+          throw new Error("This product is unavailable right now.");
+        }
+
+        const resolvedPriceEth = Number(product.price_eth ?? post.price_eth ?? 0);
+        const priceWei = BigInt(Math.max(0, Math.round(resolvedPriceEth * 1e18)));
+
+        addItem(
+          product.id,
+          product.creative_release_id ?? null,
+          (product.contract_kind as "artDrop" | "productStore" | "creativeReleaseEscrow" | null) ?? "productStore",
+          Number.isFinite(Number(product.contract_listing_id)) ? Number(product.contract_listing_id) : null,
+          Number.isFinite(Number(product.contract_product_id)) ? Number(product.contract_product_id) : null,
+          1,
+          priceWei,
+          product.name || post.title || "Untitled Product",
+          product.preview_uri || product.image_url || product.image_ipfs_uri || post.image_url || "",
+        );
+
+        toast({
+          title: "Added to cart",
+          description: "Your product is ready in checkout.",
+        });
+        navigate("/cart");
+        return;
+      }
+
+      if (primaryCta.action === "details") {
+        onOpenDetails(post);
+        return;
+      }
+
+      await trackItemEvent(post, "purchase", { source: "discover_feed", action: primaryCta.action });
+      navigate(getItemRoute(post));
+    } catch (error) {
+      toast({
+        title: "Action unavailable",
+        description: error instanceof Error ? error.message : "Try again in a moment.",
+        variant: "destructive",
+      });
     } finally {
-      setLikeBusy(false);
+      setCtaBusy(false);
     }
   }
 
   function handleCommentCreated(thread: FeedbackThread) {
     setComments((current) => mergeFeedbackThreads(current, thread));
-    setAnalytics((current) => ({
-      views: current?.views || 0,
-      likes: current?.likes || 0,
-      comments: Math.max((current?.comments || 0) + 1, comments.length + 1),
-      purchases: current?.purchases || 0,
-      shares: current?.shares || 0,
-      avg_rating: current?.avg_rating || 0,
-    }));
   }
 
   return (
@@ -726,12 +762,12 @@ function DiscoverCard({
         onClick={() => onOpenDetails(post)}
         className="group relative block w-full overflow-hidden bg-slate-950 text-left"
       >
-        <div className="aspect-[16/9] w-full overflow-hidden bg-gradient-to-br from-slate-900 via-slate-800 to-slate-700">
+        <div className="min-h-[320px] w-full overflow-hidden bg-gradient-to-br from-slate-900 via-slate-800 to-slate-700 md:min-h-[420px]">
           {post.image_url ? (
             <img
               src={post.image_url}
               alt={post.title}
-              className="h-full w-full object-cover transition duration-300 group-hover:scale-[1.03]"
+              className="h-full w-full object-cover transition duration-300 group-hover:scale-[1.02]"
             />
           ) : (
             <div className="flex h-full items-center justify-center text-sm font-medium text-white/60">
@@ -786,40 +822,7 @@ function DiscoverCard({
           </div>
         </div>
 
-        <div className="grid gap-3 sm:grid-cols-4">
-          <div className="rounded-2xl bg-slate-50 px-4 py-3">
-            <p className="text-xs uppercase tracking-[0.18em] text-slate-400">Views</p>
-            <p className="mt-1 text-lg font-semibold text-slate-950">{analytics?.views || 0}</p>
-          </div>
-          <div className="rounded-2xl bg-slate-50 px-4 py-3">
-            <p className="text-xs uppercase tracking-[0.18em] text-slate-400">Likes</p>
-            <p className="mt-1 text-lg font-semibold text-slate-950">{likesCount}</p>
-          </div>
-          <div className="rounded-2xl bg-slate-50 px-4 py-3">
-            <p className="text-xs uppercase tracking-[0.18em] text-slate-400">Comments</p>
-            <p className="mt-1 text-lg font-semibold text-slate-950">{commentsCount}</p>
-          </div>
-          <div className="rounded-2xl bg-slate-50 px-4 py-3">
-            <p className="text-xs uppercase tracking-[0.18em] text-slate-400">Shares</p>
-            <p className="mt-1 text-lg font-semibold text-slate-950">{sharesCount}</p>
-          </div>
-        </div>
-
         <div className="flex flex-wrap items-center gap-2 border-y border-slate-100 py-3">
-          <button
-            type="button"
-            onClick={() => void handleLike()}
-            disabled={liked || likeBusy}
-            className={`inline-flex h-10 items-center gap-2 rounded-full px-4 text-sm font-medium transition ${
-              liked
-                ? "bg-rose-100 text-rose-700"
-                : "bg-slate-100 text-slate-700 hover:bg-slate-200"
-            }`}
-          >
-            {likeBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Heart className={`h-4 w-4 ${liked ? "fill-current" : ""}`} />}
-            {liked ? "Liked" : "Like"}
-          </button>
-
           <button
             type="button"
             onClick={() => onOpenComments(post)}
@@ -829,19 +832,15 @@ function DiscoverCard({
             Conversation
           </button>
 
-          <ShareMenuButton
-            item={post}
-            onShared={() => {
-              setShareBoost((current) => current + 1);
-            }}
-          />
+          <ShareMenuButton item={post} />
 
           <button
             type="button"
-            onClick={() => navigate(getItemRoute(post))}
-            className={`ml-auto inline-flex h-11 items-center gap-2 rounded-full px-5 text-sm font-medium transition ${primaryCta.className}`}
+            onClick={() => void handlePrimaryAction()}
+            disabled={ctaBusy}
+            className={`ml-auto inline-flex h-11 items-center gap-2 rounded-full px-5 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-70 ${primaryCta.className}`}
           >
-            <PrimaryCtaIcon className="h-4 w-4" />
+            {ctaBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <PrimaryCtaIcon className="h-4 w-4" />}
             {primaryCta.label}
           </button>
         </div>
@@ -903,10 +902,12 @@ function DetailsModal({
 }) {
   const navigate = useNavigate();
   const { isConnected, connectWallet } = useWallet();
+  const addItem = useCartStore((state) => state.addItem);
   const [analytics, setAnalytics] = useState<ItemAnalytics | null>(null);
   const [comments, setComments] = useState<FeedbackThread[]>([]);
   const [messageDraft, setMessageDraft] = useState("");
   const [messageBusy, setMessageBusy] = useState(false);
+  const [ctaBusy, setCtaBusy] = useState(false);
 
   useEffect(() => {
     void trackItemEvent(post, "view", { source: "discover_modal" });
@@ -988,6 +989,69 @@ function DetailsModal({
     }
   }
 
+  async function handlePrimaryAction() {
+    const primaryCta = getPrimaryCta(post);
+
+    try {
+      setCtaBusy(true);
+
+      if (primaryCta.action === "cart") {
+        const { data: product, error } = await supabase
+          .from("products")
+          .select("id, creative_release_id, contract_kind, contract_listing_id, contract_product_id, price_eth, name, preview_uri, image_url, image_ipfs_uri")
+          .eq("id", post.id)
+          .maybeSingle();
+
+        if (error) {
+          throw error;
+        }
+
+        if (!product) {
+          throw new Error("This product is unavailable right now.");
+        }
+
+        const resolvedPriceEth = Number(product.price_eth ?? post.price_eth ?? 0);
+        const priceWei = BigInt(Math.max(0, Math.round(resolvedPriceEth * 1e18)));
+
+        addItem(
+          product.id,
+          product.creative_release_id ?? null,
+          (product.contract_kind as "artDrop" | "productStore" | "creativeReleaseEscrow" | null) ?? "productStore",
+          Number.isFinite(Number(product.contract_listing_id)) ? Number(product.contract_listing_id) : null,
+          Number.isFinite(Number(product.contract_product_id)) ? Number(product.contract_product_id) : null,
+          1,
+          priceWei,
+          product.name || post.title || "Untitled Product",
+          product.preview_uri || product.image_url || product.image_ipfs_uri || post.image_url || "",
+        );
+
+        toast({
+          title: "Added to cart",
+          description: "Your product is ready in checkout.",
+        });
+        onClose();
+        navigate("/cart");
+        return;
+      }
+
+      if (primaryCta.action === "details") {
+        navigate(getItemRoute(post));
+        return;
+      }
+
+      await trackItemEvent(post, "purchase", { source: "discover_modal", action: primaryCta.action });
+      navigate(getItemRoute(post));
+    } catch (error) {
+      toast({
+        title: "Action unavailable",
+        description: error instanceof Error ? error.message : "Try again in a moment.",
+        variant: "destructive",
+      });
+    } finally {
+      setCtaBusy(false);
+    }
+  }
+
   const primaryCta = getPrimaryCta(post);
   const PrimaryIcon = primaryCta.icon;
   const commentsCount = Math.max(post.comment_count || 0, analytics?.comments || 0, comments.length);
@@ -997,7 +1061,7 @@ function DetailsModal({
       <div className="max-h-[92vh] w-full max-w-4xl overflow-y-auto rounded-[30px] bg-white shadow-2xl">
         <div className="sticky top-0 z-10 flex items-center justify-between border-b border-slate-200 bg-white/95 px-5 py-4 backdrop-blur md:px-6">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">Release details</p>
+            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">Drop details</p>
             <h2 className="mt-1 text-xl font-semibold text-slate-950">{post.title}</h2>
           </div>
           <button
@@ -1037,10 +1101,11 @@ function DetailsModal({
                 </div>
                 <button
                   type="button"
-                  onClick={() => navigate(getItemRoute(post))}
-                  className={`inline-flex h-11 items-center gap-2 rounded-full px-5 text-sm font-medium transition ${primaryCta.className}`}
+                  onClick={() => void handlePrimaryAction()}
+                  disabled={ctaBusy}
+                  className={`inline-flex h-11 items-center gap-2 rounded-full px-5 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-70 ${primaryCta.className}`}
                 >
-                  <PrimaryIcon className="h-4 w-4" />
+                  {ctaBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <PrimaryIcon className="h-4 w-4" />}
                   {primaryCta.label}
                 </button>
               </div>
@@ -1063,7 +1128,7 @@ function DetailsModal({
               <div className="mt-5 space-y-3">
                 <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Description</p>
                 <p className="text-sm leading-7 text-slate-700">
-                  {post.description || "This release is live in the social feed. Open the thread, react, or start a direct creator conversation from here."}
+                  {post.description || "This drop is live in the social feed. Open the thread, react, or start a direct creator conversation from here."}
                 </p>
               </div>
             </div>
@@ -1464,7 +1529,7 @@ export function UnifiedDiscoverFeed() {
           {loading ? (
             <div className="flex items-center gap-2">
               <Loader2 className="h-4 w-4 animate-spin" />
-              Loading more releases
+              Loading more drops
             </div>
           ) : hasMore ? (
             "Scroll for more"
