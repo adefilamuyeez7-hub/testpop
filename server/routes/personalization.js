@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { verifyApiBearerToken } from '../requestAuth.js';
 
 /**
  * Personalization API Routes
@@ -10,6 +11,20 @@ import { Router } from 'express';
  */
 export default function createPersonalizationRoutes(supabase) {
   const router = Router();
+
+  function resolveOptionalWallet(req) {
+    if (req.user?.wallet) return req.user.wallet;
+
+    try {
+      if (req.headers.authorization) {
+        return verifyApiBearerToken(req.headers.authorization).wallet;
+      }
+    } catch (_error) {
+      return '';
+    }
+
+    return '';
+  }
 
   // ============================================
   // FAVORITES ENDPOINTS
@@ -293,7 +308,7 @@ export default function createPersonalizationRoutes(supabase) {
    */
   router.post('/personalization/share', async (req, res) => {
     try {
-      const userWallet = req.user?.wallet;
+      const userWallet = resolveOptionalWallet(req);
       const { item_id, item_type, share_platform } = req.body;
 
       if (!item_id || !item_type || !share_platform) {
@@ -301,21 +316,31 @@ export default function createPersonalizationRoutes(supabase) {
       }
 
       // Generate share URL
-      const baseUrl = process.env.VITE_SHARE_BASE_URL || 'https://testpop-one.vercel.app';
-      const shareUrl = `${baseUrl}/share/${item_type}/${item_id}?ref=${userWallet}`;
-
       const { data, error } = await supabase
         .from('social_shares')
         .insert({
           item_id,
           item_type,
           share_platform,
-          shared_by_wallet: userWallet,
-          share_url: shareUrl
+          shared_by_wallet: userWallet || null,
         })
         .select();
 
       if (error) throw error;
+
+      const shareId = data?.[0]?.id;
+      const baseUrl = process.env.VITE_SHARE_BASE_URL || 'https://testpop-one.vercel.app';
+      const params = new URLSearchParams();
+      if (shareId) params.set('share', shareId);
+      if (userWallet) params.set('ref', userWallet);
+      const shareUrl = `${baseUrl}/share/${item_type}/${item_id}${params.toString() ? `?${params.toString()}` : ''}`;
+
+      if (shareId) {
+        await supabase
+          .from('social_shares')
+          .update({ share_url: shareUrl })
+          .eq('id', shareId);
+      }
 
       res.json({
         ...data?.[0],
@@ -343,10 +368,21 @@ export default function createPersonalizationRoutes(supabase) {
     try {
       const { share_id } = req.params;
 
+      const { data: shareRow, error: loadError } = await supabase
+        .from('social_shares')
+        .select('id, click_count')
+        .eq('id', share_id)
+        .maybeSingle();
+
+      if (loadError) throw loadError;
+      if (!shareRow) {
+        return res.status(404).json({ error: 'Share link not found' });
+      }
+
       const { error } = await supabase
         .from('social_shares')
-        .update({ click_count: supabase.raw('click_count + 1') })
-        .match({ id: share_id });
+        .update({ click_count: Number(shareRow.click_count || 0) + 1 })
+        .eq('id', share_id);
 
       if (error) throw error;
       res.json({ success: true });

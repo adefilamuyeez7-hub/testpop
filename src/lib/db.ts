@@ -491,9 +491,26 @@ export interface ProductFeedbackMessage {
   created_at?: string;
 }
 
+export interface FeedbackCatalogItemSummary {
+  id: string;
+  item_type: "drop" | "product" | "release";
+  title: string;
+  description?: string | null;
+  image_url?: string | null;
+  price_eth?: number;
+  supply_or_stock?: number | null;
+  creator_id?: string | null;
+  creator_wallet?: string | null;
+  status?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+}
+
 export interface ProductFeedbackThread {
   id: string;
-  product_id: string;
+  product_id?: string | null;
+  item_id: string;
+  item_type: "drop" | "product" | "release";
   artist_id: string;
   order_id?: string | null;
   order_item_id?: string | null;
@@ -514,6 +531,7 @@ export interface ProductFeedbackThread {
   latest_message?: ProductFeedbackMessage | null;
   artist?: Pick<Artist, "id" | "wallet" | "name" | "handle" | "tag" | "avatar_url" | "banner_url"> | null;
   product?: Pick<Product, "id" | "artist_id" | "creator_wallet" | "name" | "image_url" | "image_ipfs_uri" | "preview_uri" | "status"> | null;
+  catalog_item?: FeedbackCatalogItemSummary | null;
 }
 
 export interface ProductFeedbackOverview {
@@ -2045,6 +2063,31 @@ export async function createOrOpenCreatorThread(payload: {
   return response.thread;
 }
 
+export async function broadcastCreatorThreads(payload: {
+  artistId: string;
+  audience: "collectors" | "subscribers" | "all_fans";
+  subject?: string;
+  body: string;
+}): Promise<{
+  audience: "collectors" | "subscribers" | "all_fans";
+  recipient_count: number;
+  thread_ids: string[];
+}> {
+  const response = await secureApiRequest<{
+    success: boolean;
+    result: {
+      audience: "collectors" | "subscribers" | "all_fans";
+      recipient_count: number;
+      thread_ids: string[];
+    };
+  }>("/api/fan-hub/threads/broadcast", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+
+  return response.result;
+}
+
 export async function getCreatorThreadMessages(threadId: string): Promise<{
   thread: CreatorThread;
   messages: CreatorThreadMessage[];
@@ -2089,6 +2132,32 @@ export async function createProductFeedbackThread(payload: {
 }): Promise<ProductFeedbackThread> {
   const response = await secureApiRequest<{ success: boolean; thread: ProductFeedbackThread }>(
     `/api/fan-hub/products/${payload.productId}/feedback`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        feedbackType: payload.feedbackType,
+        visibility: payload.visibility,
+        rating: payload.rating,
+        title: payload.title,
+        body: payload.body,
+      }),
+    }
+  );
+
+  return response.thread;
+}
+
+export async function createItemFeedbackThread(payload: {
+  itemType: ProductFeedbackThread["item_type"];
+  itemId: string;
+  feedbackType?: ProductFeedbackThread["feedback_type"];
+  visibility?: ProductFeedbackThread["visibility"];
+  rating?: number | null;
+  title?: string;
+  body: string;
+}): Promise<ProductFeedbackThread> {
+  const response = await secureApiRequest<{ success: boolean; thread: ProductFeedbackThread }>(
+    `/api/fan-hub/items/${payload.itemType}/${payload.itemId}/feedback`,
     {
       method: "POST",
       body: JSON.stringify({

@@ -1,187 +1,251 @@
 -- ============================================================================
 -- Migration: 20260409_catalog_optimization.sql
--- Purpose: Optimize catalog queries and enable Release/Drop consolidation
+-- Purpose: Optimize catalog queries and align the unified catalog with the
+--          actual product/drop/release schema used by the app.
 -- ============================================================================
 
 -- ============================================
--- Step 1: Add Performance Indexes
+-- Step 1: Add performance indexes
 -- ============================================
 
-CREATE INDEX IF NOT EXISTS idx_products_creator_status 
-  ON products(creator_id, status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_products_artist_status
+  ON public.products(artist_id, status, created_at DESC);
 
-CREATE INDEX IF NOT EXISTS idx_drops_artist_status 
-  ON drops(artist_id, status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_drops_artist_status
+  ON public.drops(artist_id, status, created_at DESC);
 
-CREATE INDEX IF NOT EXISTS idx_creative_releases_artist_campaign 
-  ON creative_releases(artist_id, campaign_id, created_at DESC);
-
-CREATE INDEX IF NOT EXISTS idx_feedback_item_lookup 
-  ON product_feedback_threads(product_id, visibility, status);
+CREATE INDEX IF NOT EXISTS idx_creative_releases_artist_campaign
+  ON public.creative_releases(artist_id, campaign_id, created_at DESC);
 
 -- ============================================
--- Step 2: Create Unified Catalog View
+-- Step 2: Add unified item tracking to feedback
 -- ============================================
 
-CREATE OR REPLACE VIEW catalog_unified AS
-SELECT 
-  'drop'::text as item_type,
-  drops.id,
-  drops.title,
-  drops.description,
-  drops.image_url,
-  drops.price_eth,
-  drops.supply as supply_or_stock,
-  drops.contract_address,
-  NULL::uuid as campaign_id,
-  NULL::text as campaign_type,
-  drops.artist_id as creator_id,
-  drops.artist_wallet as creator_wallet,
-  drops.created_at,
-  drops.updated_at,
-  COALESCE(drops.supply, 0) > 0 as can_purchase,
-  true as can_bid,
-  false as can_participate_campaign,
-  'live' as status
-FROM drops
-WHERE drops.status = 'live'
-
-UNION ALL
-
-SELECT 
-  'product'::text,
-  products.id,
-  products.name as title,
-  products.description,
-  (products.metadata->>'image_url')::text as image_url,
-  products.price_eth,
-  products.stock as supply_or_stock,
-  NULL::text,
-  NULL::uuid,
-  NULL::text,
-  products.creator_id,
-  products.creator_wallet,
-  products.created_at,
-  products.updated_at,
-  COALESCE(products.stock, 0) > 0 as can_purchase,
-  false as can_bid,
-  false as can_participate_campaign,
-  'live' as status
-FROM products
-WHERE products.stock > 0
-
-UNION ALL
-
-SELECT 
-  'release'::text,
-  creative_releases.id,
-  creative_releases.title,
-  creative_releases.description,
-  creative_releases.image_url,
-  COALESCE((creative_releases.metadata->>'price_eth')::numeric, 0),
-  NULL::integer,
-  NULL::text,
-  creative_releases.campaign_id,
-  COALESCE((creative_releases.metadata->>'campaign_type')::text, 'funding'),
-  creative_releases.artist_id,
-  COALESCE(campaigns.creator_wallet, creative_releases.metadata->>'creator_wallet'),
-  creative_releases.created_at,
-  creative_releases.updated_at,
-  true as can_purchase,
-  CASE WHEN creative_releases.metadata->>'campaign_type' = 'auction' THEN true ELSE false END,
-  true as can_participate_campaign,
-  'live' as status
-FROM creative_releases
-LEFT JOIN campaigns ON creative_releases.campaign_id = campaigns.id
-WHERE creative_releases.status = 'live';
-
--- ============================================
--- Step 3: Add Item Type Tracking to Feedback
--- ============================================
-
-ALTER TABLE product_feedback_threads 
+ALTER TABLE public.product_feedback_threads
   ADD COLUMN IF NOT EXISTS item_id UUID;
 
-ALTER TABLE product_feedback_threads 
+ALTER TABLE public.product_feedback_threads
   ADD COLUMN IF NOT EXISTS item_type VARCHAR(50);
 
--- Create index for unified item lookups
-CREATE INDEX IF NOT EXISTS idx_feedback_threads_item 
-  ON product_feedback_threads(item_id, item_type);
+UPDATE public.product_feedback_threads
+SET
+  item_id = COALESCE(item_id, product_id),
+  item_type = COALESCE(item_type, 'product')
+WHERE item_id IS NULL
+   OR item_type IS NULL;
+
+ALTER TABLE public.product_feedback_threads
+  ALTER COLUMN item_type SET DEFAULT 'product';
+
+ALTER TABLE public.product_feedback_threads
+  ALTER COLUMN item_id SET NOT NULL;
+
+ALTER TABLE public.product_feedback_threads
+  ALTER COLUMN item_type SET NOT NULL;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conname = 'product_feedback_threads_item_type_check'
+  ) THEN
+    ALTER TABLE public.product_feedback_threads
+    ADD CONSTRAINT product_feedback_threads_item_type_check
+    CHECK (item_type IN ('drop', 'product', 'release'));
+  END IF;
+END $$;
+
+CREATE INDEX IF NOT EXISTS idx_feedback_item_lookup
+  ON public.product_feedback_threads(item_id, item_type, visibility, status);
+
+CREATE INDEX IF NOT EXISTS idx_feedback_threads_item
+  ON public.product_feedback_threads(item_id, item_type);
 
 -- ============================================
--- Step 4: Create Denormalized Comment Count View
+-- Step 3: Create unified catalog view
 -- ============================================
 
-CREATE OR REPLACE VIEW catalog_with_engagement AS
-SELECT 
+CREATE OR REPLACE VIEW public.catalog_unified AS
+SELECT
+  'drop'::text AS item_type,
+  d.id,
+  d.title,
+  d.description,
+  COALESCE(d.image_url, d.image_ipfs_uri) AS image_url,
+  d.price_eth,
+  GREATEST(COALESCE(d.supply, 0) - COALESCE(d.sold, 0), 0) AS supply_or_stock,
+  d.contract_address,
+  NULL::uuid AS campaign_id,
+  NULL::text AS campaign_type,
+  d.artist_id AS creator_id,
+  lower(a.wallet) AS creator_wallet,
+  d.created_at,
+  d.updated_at,
+  GREATEST(COALESCE(d.supply, 0) - COALESCE(d.sold, 0), 0) > 0 AS can_purchase,
+  lower(COALESCE(d.type, '')) = 'auction' AS can_bid,
+  false AS can_participate_campaign,
+  d.status
+FROM public.drops d
+LEFT JOIN public.artists a ON a.id = d.artist_id
+WHERE d.status IN ('live', 'active', 'published')
+
+UNION ALL
+
+SELECT
+  'product'::text AS item_type,
+  p.id,
+  p.name AS title,
+  p.description,
+  COALESCE(
+    NULLIF(p.preview_uri, ''),
+    NULLIF(p.image_url, ''),
+    NULLIF(p.image_ipfs_uri, ''),
+    NULLIF(p.metadata ->> 'image_url', '')
+  ) AS image_url,
+  p.price_eth,
+  CASE
+    WHEN COALESCE(p.stock, 0) = 0 THEN NULL::integer
+    ELSE GREATEST(COALESCE(p.stock, 0) - COALESCE(p.sold, 0), 0)
+  END AS supply_or_stock,
+  p.contract_address,
+  NULL::uuid AS campaign_id,
+  NULL::text AS campaign_type,
+  p.artist_id AS creator_id,
+  lower(COALESCE(p.creator_wallet, a.wallet)) AS creator_wallet,
+  p.created_at,
+  p.updated_at,
+  (
+    COALESCE(p.stock, 0) = 0
+    OR COALESCE(p.stock, 0) > COALESCE(p.sold, 0)
+  ) AS can_purchase,
+  false AS can_bid,
+  false AS can_participate_campaign,
+  p.status
+FROM public.products p
+LEFT JOIN public.artists a ON a.id = p.artist_id
+WHERE p.status IN ('published', 'active')
+
+UNION ALL
+
+SELECT
+  'release'::text AS item_type,
+  cr.id,
+  cr.title,
+  cr.description,
+  COALESCE(
+    NULLIF(cr.cover_image_uri, ''),
+    NULLIF(cr.metadata ->> 'image_url', '')
+  ) AS image_url,
+  cr.price_eth,
+  CASE
+    WHEN COALESCE(cr.supply, 0) = 0 THEN NULL::integer
+    ELSE GREATEST(COALESCE(cr.supply, 0) - COALESCE(cr.sold, 0), 0)
+  END AS supply_or_stock,
+  cr.contract_address,
+  cr.campaign_id,
+  COALESCE(ipc.campaign_type, cr.metadata ->> 'campaign_type') AS campaign_type,
+  cr.artist_id AS creator_id,
+  lower(COALESCE(a.wallet, cr.metadata ->> 'creator_wallet')) AS creator_wallet,
+  cr.created_at,
+  cr.updated_at,
+  (
+    COALESCE(cr.supply, 0) = 0
+    OR COALESCE(cr.supply, 0) > COALESCE(cr.sold, 0)
+  ) AS can_purchase,
+  lower(COALESCE(ipc.campaign_type, cr.metadata ->> 'campaign_type', '')) = 'auction' AS can_bid,
+  cr.campaign_id IS NOT NULL AS can_participate_campaign,
+  cr.status
+FROM public.creative_releases cr
+LEFT JOIN public.ip_campaigns ipc ON ipc.id = cr.campaign_id
+LEFT JOIN public.artists a ON a.id = cr.artist_id
+WHERE cr.status IN ('live', 'published');
+
+-- ============================================
+-- Step 4: Create denormalized engagement view
+-- ============================================
+
+CREATE OR REPLACE VIEW public.catalog_with_engagement AS
+SELECT
   cu.*,
-  COALESCE(comment_stats.comment_count, 0) as comment_count,
-  COALESCE(comment_stats.avg_rating, 0) as avg_rating
-FROM catalog_unified cu
+  COALESCE(comment_stats.comment_count, 0) AS comment_count,
+  COALESCE(comment_stats.avg_rating, 0) AS avg_rating
+FROM public.catalog_unified cu
 LEFT JOIN (
-  SELECT 
-    product_id,
-    COUNT(DISTINCT id) as comment_count,
-    AVG(CASE WHEN rating IS NOT NULL THEN rating ELSE NULL END) as avg_rating
-  FROM product_feedback_threads
+  SELECT
+    item_id,
+    item_type,
+    COUNT(DISTINCT id) AS comment_count,
+    AVG(rating) AS avg_rating
+  FROM public.product_feedback_threads
   WHERE visibility = 'public'
-  GROUP BY product_id
-) comment_stats ON cu.id = comment_stats.product_id;
+    AND status <> 'archived'
+  GROUP BY item_id, item_type
+) comment_stats
+  ON cu.id = comment_stats.item_id
+ AND cu.item_type = comment_stats.item_type;
 
 -- ============================================
--- Step 5: Add Helper Functions
+-- Step 5: Add helper functions
 -- ============================================
 
--- Get item details with all metadata
-CREATE OR REPLACE FUNCTION get_catalog_item(item_id UUID, item_type TEXT)
-RETURNS JSON AS $$
+CREATE OR REPLACE FUNCTION public.get_catalog_item(
+  p_item_id UUID,
+  p_item_type TEXT
+)
+RETURNS JSON
+LANGUAGE plpgsql
+AS $$
 DECLARE
   result JSON;
 BEGIN
   SELECT json_build_object(
-    'id', id,
-    'type', item_type,
-    'title', title,
-    'description', description,
-    'image_url', image_url,
-    'price_eth', price_eth,
-    'creator_id', creator_id,
-    'creator_wallet', creator_wallet,
-    'can_purchase', can_purchase,
-    'can_bid', can_bid,
-    'can_participate_campaign', can_participate_campaign,
-    'comment_count', comment_count,
-    'avg_rating', avg_rating,
-    'created_at', created_at,
-    'updated_at', updated_at
-  ) INTO result
-  FROM catalog_with_engagement
-  WHERE id = item_id AND item_type = item_type;
-  
+    'id', cu.id,
+    'item_type', cu.item_type,
+    'title', cu.title,
+    'description', cu.description,
+    'image_url', cu.image_url,
+    'price_eth', cu.price_eth,
+    'creator_id', cu.creator_id,
+    'creator_wallet', cu.creator_wallet,
+    'can_purchase', cu.can_purchase,
+    'can_bid', cu.can_bid,
+    'can_participate_campaign', cu.can_participate_campaign,
+    'comment_count', cu.comment_count,
+    'avg_rating', cu.avg_rating,
+    'created_at', cu.created_at,
+    'updated_at', cu.updated_at
+  )
+  INTO result
+  FROM public.catalog_with_engagement cu
+  WHERE cu.id = p_item_id
+    AND cu.item_type = p_item_type;
+
   RETURN result;
 END;
-$$ LANGUAGE plpgsql;
+$$;
 
--- Count items by type
-CREATE OR REPLACE FUNCTION count_catalog_by_type(filter_type TEXT DEFAULT NULL)
-RETURNS TABLE(item_type TEXT, count BIGINT) AS $$
+CREATE OR REPLACE FUNCTION public.count_catalog_by_type(filter_type TEXT DEFAULT NULL)
+RETURNS TABLE(item_type TEXT, count BIGINT)
+LANGUAGE plpgsql
+AS $$
 BEGIN
   RETURN QUERY
-  SELECT 
+  SELECT
     cu.item_type,
-    COUNT(*) as count
-  FROM catalog_unified cu
-  WHERE (filter_type IS NULL OR cu.item_type = filter_type)
+    COUNT(*) AS count
+  FROM public.catalog_unified cu
+  WHERE filter_type IS NULL
+     OR cu.item_type = filter_type
   GROUP BY cu.item_type;
 END;
-$$ LANGUAGE plpgsql;
+$$;
 
 -- ============================================
--- Step 6: Grant Permissions
+-- Step 6: Grant permissions
 -- ============================================
 
-GRANT SELECT ON catalog_unified TO anon, authenticated, service_role;
-GRANT SELECT ON catalog_with_engagement TO anon, authenticated, service_role;
-GRANT EXECUTE ON FUNCTION get_catalog_item(UUID, TEXT) TO anon, authenticated, service_role;
-GRANT EXECUTE ON FUNCTION count_catalog_by_type(TEXT) TO anon, authenticated, service_role;
+GRANT SELECT ON public.catalog_unified TO anon, authenticated, service_role;
+GRANT SELECT ON public.catalog_with_engagement TO anon, authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.get_catalog_item(UUID, TEXT) TO anon, authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.count_catalog_by_type(TEXT) TO anon, authenticated, service_role;

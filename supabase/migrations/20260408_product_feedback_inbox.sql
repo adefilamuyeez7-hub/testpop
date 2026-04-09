@@ -54,6 +54,8 @@ $$;
 CREATE TABLE IF NOT EXISTS public.product_feedback_threads (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   product_id UUID NOT NULL REFERENCES public.products(id) ON DELETE CASCADE,
+  item_id UUID NOT NULL,
+  item_type VARCHAR(50) NOT NULL DEFAULT 'product',
   artist_id UUID NOT NULL REFERENCES public.artists(id) ON DELETE CASCADE,
   order_id UUID REFERENCES public.orders(id) ON DELETE SET NULL,
   order_item_id UUID REFERENCES public.order_items(id) ON DELETE SET NULL,
@@ -73,6 +75,8 @@ CREATE TABLE IF NOT EXISTS public.product_feedback_threads (
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
   CONSTRAINT product_feedback_threads_feedback_type_check
     CHECK (feedback_type IN ('review', 'feedback', 'question')),
+  CONSTRAINT product_feedback_threads_item_type_check
+    CHECK (item_type IN ('drop', 'product', 'release')),
   CONSTRAINT product_feedback_threads_visibility_check
     CHECK (visibility IN ('public', 'private')),
   CONSTRAINT product_feedback_threads_status_check
@@ -83,6 +87,9 @@ CREATE TABLE IF NOT EXISTS public.product_feedback_threads (
 
 CREATE INDEX IF NOT EXISTS idx_product_feedback_threads_product_id
 ON public.product_feedback_threads(product_id, featured DESC, last_message_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_product_feedback_threads_item_lookup
+ON public.product_feedback_threads(item_id, item_type, visibility, status, featured DESC);
 
 CREATE INDEX IF NOT EXISTS idx_product_feedback_threads_artist_id
 ON public.product_feedback_threads(artist_id, status, last_message_at DESC);

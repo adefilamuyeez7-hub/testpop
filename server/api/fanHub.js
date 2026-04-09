@@ -1,7 +1,9 @@
 import express from "express";
 import { verifyApiBearerToken, verifyAuthToken } from "../requestAuth.js";
 import {
+  broadcastCreatorThreads,
   createProductFeedbackMessage,
+  createItemFeedbackThread,
   createProductFeedbackThread,
   createChannel,
   createOrOpenThread,
@@ -9,6 +11,7 @@ import {
   createThreadMessage,
   curateProductFeedbackThread,
   getFanHubOverview,
+  getItemFeedback,
   getProductFeedback,
   getProductFeedbackThreadMessages,
   getThreadMessages,
@@ -78,6 +81,23 @@ router.post("/threads", verifyAuthToken, async (req, res) => {
   }
 });
 
+router.post("/threads/broadcast", verifyAuthToken, async (req, res) => {
+  try {
+    const result = await broadcastCreatorThreads({
+      wallet: req.user.wallet,
+      artistId: req.body?.artistId,
+      audience: req.body?.audience,
+      subject: req.body?.subject,
+      body: req.body?.body,
+    });
+
+    return res.json({ success: true, result });
+  } catch (error) {
+    console.error("Failed to broadcast creator threads:", error);
+    return res.status(400).json({ error: error.message || "Failed to broadcast creator threads" });
+  }
+});
+
 router.get("/threads/:threadId/messages", verifyAuthToken, async (req, res) => {
   try {
     const thread = await getThreadMessages({
@@ -143,6 +163,46 @@ router.post("/products/:productId/feedback", verifyAuthToken, async (req, res) =
   } catch (error) {
     console.error("Failed to create product feedback thread:", error);
     return res.status(400).json({ error: error.message || "Failed to create product feedback thread" });
+  }
+});
+
+router.get("/items/:itemType/:itemId/feedback", async (req, res) => {
+  let wallet = "";
+
+  try {
+    if (req.headers.authorization) {
+      wallet = verifyApiBearerToken(req.headers.authorization).wallet;
+    }
+  } catch (_error) {
+    wallet = "";
+  }
+
+  try {
+    const feedback = await getItemFeedback(req.params.itemType, req.params.itemId, wallet);
+    return res.json({ success: true, feedback });
+  } catch (error) {
+    console.error("Failed to load item feedback:", error);
+    return res.status(400).json({ error: error.message || "Failed to load item feedback" });
+  }
+});
+
+router.post("/items/:itemType/:itemId/feedback", verifyAuthToken, async (req, res) => {
+  try {
+    const thread = await createItemFeedbackThread({
+      wallet: req.user.wallet,
+      itemType: req.params.itemType,
+      itemId: req.params.itemId,
+      feedbackType: req.body?.feedbackType,
+      visibility: req.body?.visibility,
+      rating: req.body?.rating,
+      title: req.body?.title,
+      body: req.body?.body,
+    });
+
+    return res.json({ success: true, thread });
+  } catch (error) {
+    console.error("Failed to create item feedback thread:", error);
+    return res.status(400).json({ error: error.message || "Failed to create item feedback thread" });
   }
 });
 

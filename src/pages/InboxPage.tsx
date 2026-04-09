@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { useWallet } from "@/hooks/useContracts";
 import { toast } from "sonner";
 import {
+  broadcastCreatorThreads,
   curateProductFeedbackThread,
   createCreatorChannel,
   createCreatorPost,
@@ -41,6 +42,12 @@ function formatEth(value: number) {
   return value >= 10 ? value.toFixed(1) : value.toFixed(2);
 }
 
+function getFeedbackThreadLabel(thread: FanHubOverview["feedback_threads"][number]) {
+  const metadataTitle =
+    typeof thread.metadata?.item_title === "string" ? thread.metadata.item_title : null;
+  return thread.product?.name || thread.catalog_item?.title || metadataTitle || thread.title || "Item feedback";
+}
+
 const InboxPage = () => {
   const { address, isConnected, connectWallet } = useWallet();
   const [overview, setOverview] = useState<FanHubOverview | null>(null);
@@ -55,6 +62,12 @@ const InboxPage = () => {
   const [feedbackLoading, setFeedbackLoading] = useState(false);
   const [feedbackDraft, setFeedbackDraft] = useState("");
   const [threadForm, setThreadForm] = useState({ artistId: "", fanWallet: "", subject: "", body: "" });
+  const [broadcastForm, setBroadcastForm] = useState({
+    artistId: "",
+    audience: "subscribers" as "collectors" | "subscribers" | "all_fans",
+    subject: "",
+    body: "",
+  });
   const [channelForm, setChannelForm] = useState({
     artistId: "",
     name: "",
@@ -68,7 +81,7 @@ const InboxPage = () => {
     body: "",
     postKind: "update" as "update" | "drop" | "release" | "reward" | "event" | "poll",
   });
-  const [busy, setBusy] = useState<null | "channel" | "post" | "thread" | "message" | "feedbackMessage" | "feedbackCurate">(null);
+  const [busy, setBusy] = useState<null | "channel" | "post" | "thread" | "broadcast" | "message" | "feedbackMessage" | "feedbackCurate">(null);
 
   const ownedCreators = overview?.owned_creators || [];
   const relationships = overview?.relationships || [];
@@ -114,6 +127,7 @@ const InboxPage = () => {
       setSelectedThreadId(preferredThreadId || selectedThreadId || nextOverview.threads[0]?.id || null);
       setSelectedFeedbackThreadId((current) => current || nextOverview.feedback_threads[0]?.id || null);
       setThreadForm((prev) => ({ ...prev, artistId: prev.artistId || defaultArtistId }));
+      setBroadcastForm((prev) => ({ ...prev, artistId: prev.artistId || nextOverview.owned_creators[0]?.id || "" }));
       setChannelForm((prev) => ({ ...prev, artistId: prev.artistId || nextOverview.owned_creators[0]?.id || "" }));
       setPostForm((prev) => {
         const artistId = prev.artistId || nextOverview.owned_creators[0]?.id || "";
@@ -258,6 +272,25 @@ const InboxPage = () => {
       await loadOverview(thread.id);
     } catch (submitError) {
       toast.error(submitError instanceof Error ? submitError.message : "Failed to create thread");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function handleBroadcastThread() {
+    if (!broadcastForm.artistId || !broadcastForm.body.trim()) {
+      toast.error("Choose a creator and write the broadcast message.");
+      return;
+    }
+
+    setBusy("broadcast");
+    try {
+      const result = await broadcastCreatorThreads(broadcastForm);
+      setBroadcastForm((prev) => ({ ...prev, subject: "", body: "" }));
+      toast.success(`Broadcast sent to ${result.recipient_count} fans.`);
+      await loadOverview(selectedThreadId);
+    } catch (submitError) {
+      toast.error(submitError instanceof Error ? submitError.message : "Failed to send broadcast");
     } finally {
       setBusy(null);
     }
@@ -488,13 +521,12 @@ const InboxPage = () => {
                         onClick={() => setSelectedFeedbackThreadId(thread.id)}
                         className={`w-full rounded-[1.2rem] px-3 py-3 text-left transition-colors ${selectedFeedbackThreadId === thread.id ? "bg-[#dbeafe]" : "bg-[#f7fbff]"}`}
                       >
-                        <p className="truncate text-sm font-semibold text-foreground">
-                          {thread.product?.name || thread.title || "Product feedback"}
-                        </p>
+                        <p className="truncate text-sm font-semibold text-foreground">{getFeedbackThreadLabel(thread)}</p>
                         <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">
                           {thread.latest_message?.body || thread.title || "Open feedback thread"}
                         </p>
                         <div className="mt-2 flex flex-wrap gap-1">
+                          <Badge variant="outline" className="capitalize">{thread.item_type}</Badge>
                           {thread.visibility === "public" ? <Badge variant="outline">Public</Badge> : <Badge variant="outline">Private</Badge>}
                           {thread.feedback_type === "review" ? <Badge className="bg-[#ecfeff] text-[#155e75]">Review</Badge> : null}
                           {thread.subscriber_priority ? <Badge className="bg-[#dcfce7] text-[#166534]">Subscriber</Badge> : null}
@@ -512,10 +544,10 @@ const InboxPage = () => {
                           <div className="flex flex-wrap items-start justify-between gap-3">
                             <div>
                               <p className="text-sm font-semibold text-foreground">
-                                {selectedFeedbackThread.product?.name || selectedFeedbackThread.title || "Product feedback"}
+                                {getFeedbackThreadLabel(selectedFeedbackThread)}
                               </p>
                               <p className="mt-1 text-xs text-muted-foreground">
-                                {selectedFeedbackThread.feedback_type} · {selectedFeedbackThread.visibility} · {selectedFeedbackThread.rating ? `${selectedFeedbackThread.rating}/5` : "no rating"}
+                                {selectedFeedbackThread.item_type} · {selectedFeedbackThread.feedback_type} · {selectedFeedbackThread.visibility} · {selectedFeedbackThread.rating ? `${selectedFeedbackThread.rating}/5` : "no rating"}
                               </p>
                             </div>
                             <div className="flex flex-wrap gap-2">
@@ -589,16 +621,34 @@ const InboxPage = () => {
 
               <div className="rounded-[1.8rem] border border-white/80 bg-white/92 p-4 shadow-[0_30px_80px_rgba(37,99,235,0.08)]">
                 <div className="flex items-center gap-2"><MessageSquare className="h-4 w-4 text-primary" /><p className="text-sm font-semibold text-foreground">Threads</p></div>
-                <div className="mt-4 rounded-[1.2rem] bg-[#f7fbff] p-3">
-                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-primary/70">Start a thread</p>
-                  <select value={threadForm.artistId} onChange={(event) => setThreadForm((prev) => ({ ...prev, artistId: event.target.value }))} className="mt-3 h-10 w-full rounded-xl border border-border bg-white px-3 text-sm">
-                    <option value="">Select creator</option>
-                    {artistOptions.map((artist) => <option key={artist.artistId} value={artist.artistId}>{artist.label}</option>)}
-                  </select>
-                  {ownedCreators.some((artist) => artist.id === threadForm.artistId) ? <Input value={threadForm.fanWallet} onChange={(event) => setThreadForm((prev) => ({ ...prev, fanWallet: event.target.value }))} className="mt-3 h-10 rounded-xl bg-white" placeholder="Fan wallet address" /> : null}
-                  <Input value={threadForm.subject} onChange={(event) => setThreadForm((prev) => ({ ...prev, subject: event.target.value }))} className="mt-3 h-10 rounded-xl bg-white" placeholder="Optional subject" />
-                  <textarea value={threadForm.body} onChange={(event) => setThreadForm((prev) => ({ ...prev, body: event.target.value }))} className="mt-3 min-h-[100px] w-full rounded-xl border border-border bg-white px-3 py-3 text-sm" placeholder="Open the thread with context, gratitude, or a direct question." />
-                  <Button onClick={() => void handleCreateThread()} disabled={busy === "thread"} className="mt-3 h-10 w-full rounded-xl gradient-primary text-primary-foreground">{busy === "thread" ? <Loader2 className="h-4 w-4 animate-spin" /> : "Open thread"}</Button>
+                <div className="mt-4 grid gap-4 lg:grid-cols-2">
+                  <div className="rounded-[1.2rem] bg-[#f7fbff] p-3">
+                    <p className="text-xs font-semibold uppercase tracking-[0.18em] text-primary/70">Broadcast to collectors or subscribers</p>
+                    <select value={broadcastForm.artistId} onChange={(event) => setBroadcastForm((prev) => ({ ...prev, artistId: event.target.value }))} className="mt-3 h-10 w-full rounded-xl border border-border bg-white px-3 text-sm">
+                      <option value="">Select creator</option>
+                      {ownedCreators.map((artist) => <option key={artist.id} value={artist.id}>{artist.name || artist.handle || "Untitled Creator"}</option>)}
+                    </select>
+                    <select value={broadcastForm.audience} onChange={(event) => setBroadcastForm((prev) => ({ ...prev, audience: event.target.value as typeof broadcastForm.audience }))} className="mt-3 h-10 w-full rounded-xl border border-border bg-white px-3 text-sm">
+                      <option value="subscribers">Subscribers</option>
+                      <option value="collectors">Collectors</option>
+                      <option value="all_fans">All fans</option>
+                    </select>
+                    <Input value={broadcastForm.subject} onChange={(event) => setBroadcastForm((prev) => ({ ...prev, subject: event.target.value }))} className="mt-3 h-10 rounded-xl bg-white" placeholder="Optional broadcast subject" />
+                    <textarea value={broadcastForm.body} onChange={(event) => setBroadcastForm((prev) => ({ ...prev, body: event.target.value }))} className="mt-3 min-h-[100px] w-full rounded-xl border border-border bg-white px-3 py-3 text-sm" placeholder="Send a direct thread update to the chosen fan audience..." />
+                    <Button onClick={() => void handleBroadcastThread()} disabled={busy === "broadcast"} className="mt-3 h-10 w-full rounded-xl gradient-primary text-primary-foreground">{busy === "broadcast" ? <Loader2 className="h-4 w-4 animate-spin" /> : "Send broadcast"}</Button>
+                  </div>
+
+                  <div className="rounded-[1.2rem] bg-[#f7fbff] p-3">
+                    <p className="text-xs font-semibold uppercase tracking-[0.18em] text-primary/70">Start a thread</p>
+                    <select value={threadForm.artistId} onChange={(event) => setThreadForm((prev) => ({ ...prev, artistId: event.target.value }))} className="mt-3 h-10 w-full rounded-xl border border-border bg-white px-3 text-sm">
+                      <option value="">Select creator</option>
+                      {artistOptions.map((artist) => <option key={artist.artistId} value={artist.artistId}>{artist.label}</option>)}
+                    </select>
+                    {ownedCreators.some((artist) => artist.id === threadForm.artistId) ? <Input value={threadForm.fanWallet} onChange={(event) => setThreadForm((prev) => ({ ...prev, fanWallet: event.target.value }))} className="mt-3 h-10 rounded-xl bg-white" placeholder="Fan wallet address" /> : null}
+                    <Input value={threadForm.subject} onChange={(event) => setThreadForm((prev) => ({ ...prev, subject: event.target.value }))} className="mt-3 h-10 rounded-xl bg-white" placeholder="Optional subject" />
+                    <textarea value={threadForm.body} onChange={(event) => setThreadForm((prev) => ({ ...prev, body: event.target.value }))} className="mt-3 min-h-[100px] w-full rounded-xl border border-border bg-white px-3 py-3 text-sm" placeholder="Open the thread with context, gratitude, or a direct question." />
+                    <Button onClick={() => void handleCreateThread()} disabled={busy === "thread"} className="mt-3 h-10 w-full rounded-xl gradient-primary text-primary-foreground">{busy === "thread" ? <Loader2 className="h-4 w-4 animate-spin" /> : "Open thread"}</Button>
+                  </div>
                 </div>
 
                 <div className="mt-4 grid gap-4 lg:grid-cols-[220px_minmax(0,1fr)]">

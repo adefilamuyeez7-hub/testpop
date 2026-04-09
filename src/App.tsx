@@ -42,6 +42,7 @@ const OrderHistoryPage = lazy(() => import("./pages/OrderHistoryPage").then((mod
 const UnifiedDiscoverFeed = lazy(() => import("./pages/UnifiedDiscoverFeed").then((module) => ({ default: module.UnifiedDiscoverFeed })));
 const CatalogPage = lazy(() => import("./pages/CatalogPage").then((module) => ({ default: module.CatalogPage })));
 const CreatorDashboard = lazy(() => import("./pages/CreatorDashboard").then((module) => ({ default: module.CreatorDashboard })));
+const ShareLandingPage = lazy(() => import("./pages/ShareLandingPage"));
 
 // Heavy routes (studio, admin) - load on demand only
 const WalletStudioRoute = lazy(() => import("./routes/WalletStudioRoute"));
@@ -93,6 +94,7 @@ const App = () => {
                       <Route path="/poaps" element={<WalletPOAPsRoute />} />
                       <Route path="/subscriptions" element={<WalletSubscriptionsRoute />} />
                       <Route path="/discover" element={<UnifiedDiscoverFeed />} />
+                      <Route path="/share/:type/:id" element={<ShareLandingPage />} />
                       <Route path="/products" element={<SocialMediaFeedReleases />} />
                       <Route path="/feed" element={<SocialMediaFeedReleases />} />
                       <Route path="/products/:id" element={<ProductDetailPage />} />
