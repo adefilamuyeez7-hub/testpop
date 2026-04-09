@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowRight, ExternalLink, Gavel, Loader2, MessageCircle, Share2, ShoppingBag } from "lucide-react";
 import { parseEther } from "viem";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
@@ -8,6 +8,7 @@ import { resolveMediaUrl } from "@/lib/pinata";
 import { getRuntimeApiToken } from "@/lib/runtimeSession";
 import { useWallet } from "@/hooks/useContracts";
 import { useMintArtist } from "@/hooks/useContractsArtist";
+import { queueWalletAppHandoff } from "@/lib/appKit";
 import { toast } from "@/components/ui/use-toast";
 import { useCartStore } from "@/stores/cartStore";
 import { useCollectionStore } from "@/stores/collectionStore";
@@ -69,6 +70,8 @@ type CreatorProfile = {
   avatar_url?: string | null;
   wallet?: string | null;
 };
+
+type ShareIntent = "checkout" | "collect" | "details";
 
 const API_BASE = SECURE_API_BASE || "/api";
 
@@ -139,7 +142,7 @@ function getPrimaryCta(item: ShareCatalogItem) {
     case "bid":
       return { action, label: "Bid", icon: Gavel };
     case "cart":
-      return { action, label: "Add to cart", icon: ShoppingBag };
+      return { action, label: "Open checkout", icon: ShoppingBag };
     case "collect":
       return { action, label: "Collect", icon: ShoppingBag };
     case "details":
@@ -159,6 +162,42 @@ function buildShareFlowSearch(searchParams: URLSearchParams) {
 
   const serialized = nextParams.toString();
   return serialized ? `?${serialized}` : "";
+}
+
+function buildCheckoutFlowSearch(searchParams: URLSearchParams) {
+  const nextParams = new URLSearchParams();
+  const shareId = searchParams.get("share");
+  const ref = searchParams.get("ref");
+
+  if (shareId) nextParams.set("share", shareId);
+  if (ref) nextParams.set("ref", ref);
+  nextParams.set("from", "share");
+  nextParams.set("intent", "checkout");
+
+  const serialized = nextParams.toString();
+  return serialized ? `?${serialized}` : "";
+}
+
+function resolveShareIntent(searchParams: URLSearchParams, item?: ShareCatalogItem | null): ShareIntent {
+  const rawIntent = searchParams.get("intent");
+  if (rawIntent === "checkout" || rawIntent === "collect" || rawIntent === "details") {
+    return rawIntent;
+  }
+
+  if (!item) {
+    return "details";
+  }
+
+  const action = getCatalogPrimaryAction({
+    item_type: item.item_type,
+    can_bid: Boolean(item.can_bid),
+    can_purchase: Boolean(item.can_purchase),
+    contract_kind: item.contract_kind,
+  });
+
+  if (action === "cart") return "checkout";
+  if (action === "collect") return "collect";
+  return "details";
 }
 
 async function trackShareLandingEvent(
@@ -244,10 +283,14 @@ const ShareLandingPage = () => {
   const [commentBusy, setCommentBusy] = useState(false);
   const [collectingDrop, setCollectingDrop] = useState<ActionableDiscoverDrop | null>(null);
   const shareFlowSearch = useMemo(() => buildShareFlowSearch(searchParams), [searchParams]);
+  const checkoutFlowSearch = useMemo(() => buildCheckoutFlowSearch(searchParams), [searchParams]);
   const shareId = searchParams.get("share");
   const referrerWallet = searchParams.get("ref");
+  const shouldAutoStart = searchParams.get("auto") === "1";
   const previewImageUrl = useMemo(() => getShareItemPreviewImage(item), [item]);
   const creatorAvatarUrl = useMemo(() => getCreatorAvatarUrl(creator), [creator]);
+  const autoActionCompletedRef = useRef(false);
+  const resumeAutoActionRef = useRef(false);
 
   useEffect(() => {
     if (!shareId) return;
@@ -344,8 +387,9 @@ const ShareLandingPage = () => {
   }, [addCollectedDrop, address, collectingDrop, isMintSuccess, item, mintedTokenId, referrerWallet, shareId]);
 
   const primaryCta = useMemo(() => (item ? getPrimaryCta(item) : null), [item]);
+  const shareIntent = useMemo(() => resolveShareIntent(searchParams, item), [item, searchParams]);
 
-  async function handlePrimaryAction() {
+  async function runPrimaryAction(source: "manual" | "auto" | "resume" | "wallet" = "manual") {
     if (!item || !primaryCta) return;
 
     try {
@@ -358,27 +402,32 @@ const ShareLandingPage = () => {
         await trackShareLandingEvent(item, "purchase", {
           source: "share_landing",
           action: resolvedAction.analyticsAction,
+          intent: shareIntent,
           share_id: shareId,
           ref: referrerWallet,
         });
-        toast({
-          title: "Ready to check out",
-          description:
-            item.item_type === "release"
-              ? "This release is now in your cart directly from the shared link."
-              : "This product is now in your cart directly from the shared link.",
-        });
-        return;
+        if (source === "manual" || source === "wallet") {
+          toast({
+            title: "Checkout ready",
+            description:
+              item.item_type === "release"
+                ? "This release is in your cart. Continue directly to checkout."
+                : "This item is in your cart. Continue directly to checkout.",
+          });
+        }
+        navigate(`/checkout${checkoutFlowSearch}`);
+        return "completed";
       }
 
       if (resolvedAction.kind === "collect") {
         if (!isConnected) {
           await connectWallet();
-          return;
+          return "deferred";
         }
 
         if (chain?.id !== ACTIVE_CHAIN.id) {
           await requestActiveChainSwitch(`Collecting this drop requires ${ACTIVE_CHAIN.name}.`);
+          return "deferred";
         }
 
         setCollectingDrop(resolvedAction.drop);
@@ -387,20 +436,80 @@ const ShareLandingPage = () => {
           parseEther(resolvedAction.priceEth),
           resolvedAction.contractAddress,
         );
-        return;
+        return "completed";
       }
 
       navigate(`${getItemRoute(item)}${shareFlowSearch}`);
+      return "completed";
     } catch (actionError) {
       toast({
         title: "Action unavailable",
         description: actionError instanceof Error ? actionError.message : "Unable to continue from this shared link.",
         variant: "destructive",
       });
+      return "failed";
     } finally {
       setCtaBusy(false);
     }
   }
+
+  const runPrimaryActionRef = useRef(runPrimaryAction);
+  runPrimaryActionRef.current = runPrimaryAction;
+
+  async function handlePrimaryAction() {
+    await runPrimaryAction("manual");
+  }
+
+  async function handleWalletFlow() {
+    const outcome = await runPrimaryAction("wallet");
+    if (outcome === "completed") {
+      queueWalletAppHandoff({ delayMs: 120 });
+    }
+  }
+
+  useEffect(() => {
+    if (!shouldAutoStart || !item || !primaryCta || autoActionCompletedRef.current) {
+      return;
+    }
+
+    let active = true;
+    void runPrimaryActionRef.current("auto").then((outcome) => {
+      if (!active) return;
+      if (outcome === "completed") {
+        autoActionCompletedRef.current = true;
+        resumeAutoActionRef.current = false;
+      } else if (outcome === "deferred") {
+        resumeAutoActionRef.current = true;
+      }
+    });
+
+    return () => {
+      active = false;
+    };
+  }, [item, primaryCta, shouldAutoStart]);
+
+  useEffect(() => {
+    if (!resumeAutoActionRef.current || autoActionCompletedRef.current || !item || !primaryCta || !isConnected) {
+      return;
+    }
+
+    if (shareIntent === "collect" && chain?.id !== ACTIVE_CHAIN.id) {
+      return;
+    }
+
+    let active = true;
+    void runPrimaryActionRef.current("resume").then((outcome) => {
+      if (!active) return;
+      if (outcome === "completed") {
+        autoActionCompletedRef.current = true;
+        resumeAutoActionRef.current = false;
+      }
+    });
+
+    return () => {
+      active = false;
+    };
+  }, [chain?.id, isConnected, item, primaryCta, shareIntent]);
 
   async function handlePostComment() {
     if (!item) return;
@@ -550,6 +659,13 @@ const ShareLandingPage = () => {
               </div>
 
               <div className="mt-8 space-y-3">
+                <div className="rounded-[1.25rem] border border-sky-100 bg-sky-50 px-4 py-3 text-sm text-sky-900">
+                  {shareIntent === "checkout"
+                    ? "This action link can take collectors straight into checkout on Base."
+                    : shareIntent === "collect"
+                      ? `This action link is primed to connect a wallet and collect on ${ACTIVE_CHAIN.name}.`
+                      : "This action link opens the public item page with context intact."}
+                </div>
                 <button
                   type="button"
                   onClick={() => void handlePrimaryAction()}
@@ -563,6 +679,17 @@ const ShareLandingPage = () => {
                   )}
                   {actionLabel}
                 </button>
+                {shareIntent !== "details" ? (
+                  <button
+                    type="button"
+                    onClick={() => void handleWalletFlow()}
+                    disabled={ctaBusy || isMintConfirming || isSwitchingNetwork}
+                    className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-full border border-sky-200 bg-sky-50 px-6 text-sm font-medium text-sky-900 transition hover:bg-sky-100 disabled:cursor-not-allowed disabled:opacity-70"
+                  >
+                    <Share2 className="h-4 w-4" />
+                    {shareIntent === "checkout" ? "Continue in wallet flow" : "Resume in wallet app"}
+                  </button>
+                ) : null}
                 <button
                   type="button"
                   onClick={() => navigate(`/discover${shareFlowSearch}`)}
