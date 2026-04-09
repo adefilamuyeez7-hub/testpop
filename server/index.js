@@ -209,22 +209,23 @@ function resolveRequestBaseUrl(req) {
 
 function getSharePreviewMeta(item, req) {
   const baseUrl = resolveRequestBaseUrl(req);
-  const imageUrl = normalizeIpfsUrl(item?.image_url || "") || `${baseUrl}/popup-logo.png`;
   const priceValue = Number(item?.price_eth || 0);
   const title = String(item?.title || "POPUP collectible").trim() || "POPUP collectible";
   const itemType = String(item?.item_type || "item").trim();
   const summary = String(item?.description || "").trim();
+  const actionLabel = getShareActionLabel(item);
   const description = summary
     || (priceValue > 0
-      ? `${title} is live on POPUP for ${priceValue} ETH. Open the action card to view and collect.`
-      : `${title} is live on POPUP. Open the action card to view and collect.`);
+      ? `${title} is live on POPUP for ${priceValue} ETH. ${actionLabel} from the shared action card.`
+      : `${title} is live on POPUP. ${actionLabel} from the shared action card.`);
 
   return {
     title,
     description,
-    imageUrl,
+    imageUrl: `${baseUrl}/og/share/${itemType}/${item?.id || ""}.svg`,
     canonicalUrl: `${baseUrl}${req.originalUrl || req.url || `/share/${itemType}/${item?.id || ""}`}`,
     itemType,
+    actionLabel,
   };
 }
 
@@ -258,6 +259,187 @@ function injectShareMetaTags(template, meta) {
       `<meta name="description" content="${escapedDescription}" />`
     )
     .replace("</head>", `    ${headTags}\n  </head>`);
+}
+
+function truncateAddress(value = "", start = 6, end = 4) {
+  const normalized = String(value || "").trim();
+  if (!normalized) return "";
+  if (normalized.length <= start + end) return normalized;
+  return `${normalized.slice(0, start)}...${normalized.slice(-end)}`;
+}
+
+function formatSharePrice(value) {
+  const numeric = Number(value || 0);
+  if (!Number.isFinite(numeric) || numeric <= 0) {
+    return "Free collect";
+  }
+  return `${numeric} ETH`;
+}
+
+function getShareActionLabel(item) {
+  if (item?.can_bid) return "Bid now";
+  if (item?.can_purchase === false) return "View details";
+
+  switch (String(item?.item_type || "")) {
+    case "drop":
+      return "Collect now";
+    case "release":
+      return "Add to cart";
+    case "product":
+      return "Buy now";
+    default:
+      return "Open action";
+  }
+}
+
+function splitTextIntoLines(value = "", maxCharsPerLine = 28, maxLines = 2) {
+  const words = String(value || "").trim().split(/\s+/).filter(Boolean);
+  if (words.length === 0) return [];
+
+  const lines = [];
+  let current = "";
+
+  for (const word of words) {
+    const candidate = current ? `${current} ${word}` : word;
+    if (candidate.length <= maxCharsPerLine) {
+      current = candidate;
+      continue;
+    }
+
+    if (current) {
+      lines.push(current);
+      current = word;
+    } else {
+      lines.push(word.slice(0, maxCharsPerLine));
+      current = word.slice(maxCharsPerLine);
+    }
+
+    if (lines.length === maxLines) {
+      break;
+    }
+  }
+
+  if (lines.length < maxLines && current) {
+    lines.push(current);
+  }
+
+  if (lines.length > maxLines) {
+    lines.length = maxLines;
+  }
+
+  if (words.join(" ").length > lines.join(" ").length) {
+    lines[lines.length - 1] = `${lines[lines.length - 1].slice(0, Math.max(0, maxCharsPerLine - 1))}…`;
+  }
+
+  return lines.map((line) => escapeHtml(line));
+}
+
+function renderSvgTextLines(lines = [], x, y, lineHeight, attrs = "") {
+  if (!Array.isArray(lines) || lines.length === 0) return "";
+
+  const tspans = lines
+    .map((line, index) => `<tspan x="${x}" dy="${index === 0 ? 0 : lineHeight}">${line}</tspan>`)
+    .join("");
+
+  return `<text x="${x}" y="${y}" ${attrs}>${tspans}</text>`;
+}
+
+function buildShareCardSvg(item, req) {
+  const itemType = String(item?.item_type || "item").trim() || "item";
+  const titleLines = splitTextIntoLines(String(item?.title || "POPUP collectible").trim() || "POPUP collectible", 26, 2);
+  const descriptionLines = splitTextIntoLines(
+    String(item?.description || "Open this shared collectible on POPUP.").trim() || "Open this shared collectible on POPUP."
+    ,
+    42,
+    3
+  );
+  const actionLabel = escapeHtml(getShareActionLabel(item));
+  const creatorLabel = escapeHtml(truncateAddress(item?.creator_wallet || "", 8, 4) || "POPUP");
+  const itemTypeLabel = escapeHtml(itemType.toUpperCase());
+  const priceLabel = escapeHtml(formatSharePrice(item?.price_eth));
+  const availabilityLabel = escapeHtml(
+    item?.supply_or_stock == null ? "Open edition" : `${Number(item.supply_or_stock || 0)} left`
+  );
+  const previewImage = normalizeIpfsUrl(item?.image_url || "");
+  const escapedPreviewImage = escapeHtml(previewImage);
+  const baseUrl = resolveRequestBaseUrl(req);
+  const brandMark = escapeHtml(`${baseUrl}/popup-logo.png`);
+
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<svg width="1200" height="630" viewBox="0 0 1200 630" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1200" y2="630" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#04111D"/>
+      <stop offset="0.55" stop-color="#0B2942"/>
+      <stop offset="1" stop-color="#102F4C"/>
+    </linearGradient>
+    <linearGradient id="card" x1="66" y1="56" x2="1150" y2="594" gradientUnits="userSpaceOnUse">
+      <stop stop-color="rgba(255,255,255,0.20)"/>
+      <stop offset="1" stop-color="rgba(255,255,255,0.08)"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="822" y1="94" x2="1036" y2="538" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#22D3EE"/>
+      <stop offset="1" stop-color="#38BDF8"/>
+    </linearGradient>
+    <filter id="shadow" x="40" y="34" width="1120" height="570" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feFlood flood-opacity="0" result="BackgroundImageFix"/>
+      <feColorMatrix in="SourceAlpha" type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 127 0" result="hardAlpha"/>
+      <feOffset dy="18"/>
+      <feGaussianBlur stdDeviation="16"/>
+      <feColorMatrix type="matrix" values="0 0 0 0 0.012 0 0 0 0 0.047 0 0 0 0 0.09 0 0 0 0.34 0"/>
+      <feBlend mode="normal" in2="BackgroundImageFix" result="effect1_dropShadow_1_2"/>
+      <feBlend mode="normal" in="SourceGraphic" in2="effect1_dropShadow_1_2" result="shape"/>
+    </filter>
+    <clipPath id="previewClip">
+      <rect x="760" y="92" width="360" height="446" rx="28" />
+    </clipPath>
+  </defs>
+
+  <rect width="1200" height="630" fill="url(#bg)"/>
+  <circle cx="129" cy="102" r="178" fill="#38BDF8" fill-opacity="0.16"/>
+  <circle cx="1082" cy="562" r="196" fill="#22D3EE" fill-opacity="0.15"/>
+
+  <g filter="url(#shadow)">
+    <rect x="66" y="56" width="1068" height="518" rx="34" fill="#071522"/>
+    <rect x="66.5" y="56.5" width="1067" height="517" rx="33.5" stroke="rgba(255,255,255,0.16)"/>
+    <rect x="66" y="56" width="1068" height="518" rx="34" fill="url(#card)"/>
+  </g>
+
+  <rect x="104" y="94" width="160" height="38" rx="19" fill="rgba(255,255,255,0.08)"/>
+  <text x="184" y="118" text-anchor="middle" fill="#D7F6FF" font-size="16" font-family="Arial, sans-serif" font-weight="700" letter-spacing="2">${itemTypeLabel}</text>
+
+  ${renderSvgTextLines(titleLines, 104, 188, 60, 'fill="#FFFFFF" font-size="56" font-family="Arial, sans-serif" font-weight="700"')}
+  ${renderSvgTextLines(descriptionLines, 104, 270, 34, 'fill="#B8C7D6" font-size="26" font-family="Arial, sans-serif"')}
+
+  <rect x="104" y="304" width="220" height="92" rx="24" fill="rgba(255,255,255,0.06)"/>
+  <text x="134" y="338" fill="#8FB0C8" font-size="18" font-family="Arial, sans-serif" font-weight="700" letter-spacing="1">PRICE</text>
+  <text x="134" y="378" fill="#FFFFFF" font-size="32" font-family="Arial, sans-serif" font-weight="700">${priceLabel}</text>
+
+  <rect x="344" y="304" width="220" height="92" rx="24" fill="rgba(255,255,255,0.06)"/>
+  <text x="374" y="338" fill="#8FB0C8" font-size="18" font-family="Arial, sans-serif" font-weight="700" letter-spacing="1">ACCESS</text>
+  <text x="374" y="378" fill="#FFFFFF" font-size="32" font-family="Arial, sans-serif" font-weight="700">${availabilityLabel}</text>
+
+  <rect x="104" y="438" width="296" height="72" rx="36" fill="url(#accent)"/>
+  <text x="252" y="482" text-anchor="middle" fill="#03131F" font-size="28" font-family="Arial, sans-serif" font-weight="800">${actionLabel}</text>
+
+  <text x="104" y="548" fill="#9FB7CB" font-size="22" font-family="Arial, sans-serif">Shared by ${creatorLabel}</text>
+
+  <rect x="760" y="92" width="360" height="446" rx="28" fill="#0E2235"/>
+  ${
+    escapedPreviewImage
+      ? `<g clip-path="url(#previewClip)">
+    <image href="${escapedPreviewImage}" x="760" y="92" width="360" height="446" preserveAspectRatio="xMidYMid slice"/>
+    <rect x="760" y="92" width="360" height="446" fill="rgba(2,8,23,0.20)"/>
+  </g>`
+      : `<rect x="760" y="92" width="360" height="446" rx="28" fill="url(#accent)"/>
+  <text x="940" y="330" text-anchor="middle" fill="#03131F" font-size="110" font-family="Arial, sans-serif" font-weight="800">${escapeHtml(itemTypeLabel.charAt(0) || "P")}</text>`
+  }
+  <rect x="788" y="468" width="304" height="42" rx="21" fill="rgba(3,19,31,0.72)"/>
+  <text x="940" y="495" text-anchor="middle" fill="#E7F7FF" font-size="18" font-family="Arial, sans-serif" font-weight="700">POPUP action card</text>
+
+  <rect x="760" y="552" width="360" height="22" rx="11" fill="rgba(255,255,255,0.08)"/>
+  <image href="${brandMark}" x="1072" y="546" width="36" height="36"/>
+</svg>`;
 }
 
 function loadEnvFile(envPath) {
@@ -4765,6 +4947,38 @@ const port = Number(PORT) || 3000;
 // SPA FALLBACK - Serve index.html for all non-API routes
 // This allows React Router to handle client-side navigation
 // ═════════════════════════════════════════════════════════════════════════════
+app.get("/og/share/:type/:id.svg", async (req, res, next) => {
+  const { type, id } = req.params;
+
+  if (!["drop", "product", "release"].includes(type)) {
+    return next();
+  }
+
+  try {
+    const { data: item, error } = await supabase
+      .from("catalog_with_engagement")
+      .select("id, item_type, title, description, image_url, price_eth, supply_or_stock, creator_wallet, can_purchase, can_bid")
+      .eq("item_type", type)
+      .eq("id", id)
+      .maybeSingle();
+
+    if (error) {
+      throw error;
+    }
+
+    if (!item) {
+      return next();
+    }
+
+    res.setHeader("Cache-Control", "public, max-age=300, s-maxage=300");
+    res.setHeader("Content-Type", "image/svg+xml; charset=utf-8");
+    return res.status(200).send(buildShareCardSvg(item, req));
+  } catch (error) {
+    console.error("[GET /og/share/:type/:id.svg] Failed to render share card:", error);
+    return next();
+  }
+});
+
 app.get("/share/:type/:id", async (req, res, next) => {
   const { type, id } = req.params;
 
@@ -4779,7 +4993,7 @@ app.get("/share/:type/:id", async (req, res, next) => {
   try {
     const { data: item, error } = await supabase
       .from("catalog_with_engagement")
-      .select("id, item_type, title, description, image_url, price_eth")
+      .select("id, item_type, title, description, image_url, price_eth, supply_or_stock, creator_wallet, can_purchase, can_bid")
       .eq("item_type", type)
       .eq("id", id)
       .maybeSingle();
