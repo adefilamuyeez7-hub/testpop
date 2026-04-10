@@ -33,8 +33,11 @@ export interface CatalogItem {
 export type CatalogPrimaryAction = "bid" | "cart" | "collect" | "details";
 
 export function getCatalogPrimaryAction(
-  item: Pick<CatalogItem, "item_type" | "can_bid" | "can_purchase" | "contract_kind">
+  item: Pick<CatalogItem, "item_type" | "can_bid" | "can_purchase" | "contract_kind" | "product_type">
 ): CatalogPrimaryAction {
+  const normalizedContractKind = String(item.contract_kind || "").trim().toLowerCase();
+  const normalizedProductType = String(item.product_type || "").trim().toLowerCase();
+
   if (item.item_type === "drop" && item.can_bid) {
     return "bid";
   }
@@ -43,13 +46,25 @@ export function getCatalogPrimaryAction(
     return "details";
   }
 
-  if (item.item_type === "product" || item.item_type === "release") {
+  if (item.item_type === "product") {
+    if (normalizedProductType === "digital" || normalizedContractKind === "artdrop") {
+      return "collect";
+    }
+
+    return "cart";
+  }
+
+  if (item.item_type === "release") {
+    if (normalizedContractKind === "artdrop") {
+      return "collect";
+    }
+
     return "cart";
   }
 
   if (
     item.item_type === "drop" &&
-    (item.contract_kind === "creativeReleaseEscrow" || item.contract_kind === "productStore")
+    (normalizedContractKind === "creativereleaseescrow" || normalizedContractKind === "productstore")
   ) {
     return "cart";
   }

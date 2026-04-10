@@ -73,6 +73,9 @@ export default function createPersonalizationRoutes(supabase) {
   }
 
   function getCatalogPrimaryAction(item) {
+    const normalizedContractKind = String(item?.contract_kind || '').trim().toLowerCase();
+    const normalizedProductType = String(item?.product_type || '').trim().toLowerCase();
+
     if (item?.item_type === 'drop' && item?.can_bid) {
       return 'bid';
     }
@@ -81,13 +84,25 @@ export default function createPersonalizationRoutes(supabase) {
       return 'details';
     }
 
-    if (item?.item_type === 'product' || item?.item_type === 'release') {
+    if (item?.item_type === 'product') {
+      if (normalizedProductType === 'digital' || normalizedContractKind === 'artdrop') {
+        return 'collect';
+      }
+
+      return 'cart';
+    }
+
+    if (item?.item_type === 'release') {
+      if (normalizedContractKind === 'artdrop') {
+        return 'collect';
+      }
+
       return 'cart';
     }
 
     if (
       item?.item_type === 'drop' &&
-      (item?.contract_kind === 'creativeReleaseEscrow' || item?.contract_kind === 'productStore')
+      (normalizedContractKind === 'creativereleaseescrow' || normalizedContractKind === 'productstore')
     ) {
       return 'cart';
     }
@@ -461,7 +476,7 @@ export default function createPersonalizationRoutes(supabase) {
       if (userWallet) params.set('ref', userWallet);
       const { data: catalogItem } = await supabase
         .from('catalog_with_engagement')
-        .select('item_type, title, price_eth, can_purchase, can_bid, contract_kind')
+        .select('item_type, title, price_eth, can_purchase, can_bid, product_type, contract_kind')
         .eq('id', item_id)
         .eq('item_type', item_type)
         .maybeSingle();
@@ -470,6 +485,7 @@ export default function createPersonalizationRoutes(supabase) {
         item_type,
         can_purchase: Boolean(catalogItem?.can_purchase),
         can_bid: Boolean(catalogItem?.can_bid),
+        product_type: catalogItem?.product_type || null,
         contract_kind: catalogItem?.contract_kind || null,
       });
       const itemTitle = String(catalogItem?.title || 'this collectible').trim();

@@ -20,6 +20,7 @@ type DiscoverActionInput = {
   item_type: DiscoverActionItemType;
   can_bid?: boolean;
   can_purchase?: boolean;
+  product_type?: "digital" | "physical" | "hybrid" | string | null;
   contract_kind?: "artDrop" | "productStore" | "creativeReleaseEscrow" | string | null;
   price_eth?: number | null;
 };
