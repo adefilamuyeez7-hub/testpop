@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Inbox, Loader2, MessageSquare, Plus, Send, Sparkles, Star, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -83,12 +83,12 @@ const InboxPage = () => {
   });
   const [busy, setBusy] = useState<null | "channel" | "post" | "thread" | "broadcast" | "message" | "feedbackMessage" | "feedbackCurate">(null);
 
-  const ownedCreators = overview?.owned_creators || [];
-  const relationships = overview?.relationships || [];
-  const channels = overview?.channels || [];
-  const posts = overview?.recent_posts || [];
-  const threads = overview?.threads || [];
-  const feedbackThreads = overview?.feedback_threads || [];
+  const ownedCreators = useMemo(() => overview?.owned_creators || [], [overview]);
+  const relationships = useMemo(() => overview?.relationships || [], [overview]);
+  const channels = useMemo(() => overview?.channels || [], [overview]);
+  const posts = useMemo(() => overview?.recent_posts || [], [overview]);
+  const threads = useMemo(() => overview?.threads || [], [overview]);
+  const feedbackThreads = useMemo(() => overview?.feedback_threads || [], [overview]);
 
   const selectedThread = useMemo(
     () => threads.find((thread) => thread.id === selectedThreadId) || null,
@@ -111,7 +111,7 @@ const InboxPage = () => {
     [channels, postForm.artistId],
   );
 
-  async function loadOverview(preferredThreadId?: string | null) {
+  const loadOverview = useCallback(async (preferredThreadId?: string | null) => {
     if (!address || !isConnected) {
       setOverview(null);
       return;
@@ -124,7 +124,7 @@ const InboxPage = () => {
       const nextOverview = await getFanHubOverview();
       setOverview(nextOverview);
       const defaultArtistId = nextOverview.owned_creators[0]?.id || nextOverview.relationships[0]?.artist_id || "";
-      setSelectedThreadId(preferredThreadId || selectedThreadId || nextOverview.threads[0]?.id || null);
+      setSelectedThreadId((current) => preferredThreadId || current || nextOverview.threads[0]?.id || null);
       setSelectedFeedbackThreadId((current) => current || nextOverview.feedback_threads[0]?.id || null);
       setThreadForm((prev) => ({ ...prev, artistId: prev.artistId || defaultArtistId }));
       setBroadcastForm((prev) => ({ ...prev, artistId: prev.artistId || nextOverview.owned_creators[0]?.id || "" }));
@@ -141,11 +141,11 @@ const InboxPage = () => {
     } finally {
       setLoading(false);
     }
-  }
+  }, [address, isConnected]);
 
   useEffect(() => {
     void loadOverview();
-  }, [address, isConnected]);
+  }, [loadOverview]);
 
   useEffect(() => {
     if (!selectedThreadId || !isConnected) {

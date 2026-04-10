@@ -11,7 +11,6 @@ import { decodeEventLog, getAddress, parseEther } from "viem";
 import { ACTIVE_CHAIN } from "@/lib/wagmi";
 import { ARTIST_DROP_ABI } from "@/lib/contracts/artDropArtist";
 import { POAP_CAMPAIGN_ABI, POAP_CAMPAIGN_ADDRESS } from "@/lib/contracts/poapCampaign";
-import { openWalletApprovalModal } from "@/lib/appKit";
 
 const unsupportedSharedArtDropMessage =
   "The shared ArtDrop contract path is retired. Use the per-artist contract hooks from useContractsArtist or the artist-specific exports in useContracts.";
@@ -88,6 +87,11 @@ function parsePositiveEth(amount: string | number) {
   }
 
   return weiAmount;
+}
+
+async function openWalletApprovalModalLazy() {
+  const { openWalletApprovalModal } = await import("@/lib/appKit");
+  await openWalletApprovalModal();
 }
 
 export function useWallet() {
@@ -217,7 +221,7 @@ export function usePlaceBid() {
     const value = parsePositiveEth(bidAmount);
     const resolvedContractAddress = normalizeAddress(contractAddress) ?? POAP_CAMPAIGN_ADDRESS;
 
-    void openWalletApprovalModal().catch((modalError) => {
+    void openWalletApprovalModalLazy().catch((modalError) => {
       console.warn("Unable to open wallet approval modal:", modalError);
     });
 

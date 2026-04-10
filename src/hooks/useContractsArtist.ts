@@ -20,7 +20,6 @@ import {
 import { decodeEventLog, parseEther, getAddress } from "viem";
 import { ACTIVE_CHAIN } from "@/lib/wagmi";
 import { ARTIST_DROP_ABI } from "@/lib/contracts/artDropArtist";
-import { openWalletApprovalModal } from "@/lib/appKit";
 
 // Helper to validate decoded events
 interface DecodedEvent {
@@ -35,6 +34,11 @@ function isDecodedEvent(value: unknown): value is DecodedEvent {
     "eventName" in value &&
     "args" in value
   );
+}
+
+async function openWalletApprovalModalLazy() {
+  const { openWalletApprovalModal } = await import("@/lib/appKit");
+  await openWalletApprovalModal();
 }
 
 /**
@@ -112,7 +116,7 @@ export function useCreateDropArtist(artistContractAddress?: string | null) {
       contractAddress: normalized,
     });
 
-    void openWalletApprovalModal().catch((error) => {
+    void openWalletApprovalModalLazy().catch((error) => {
       console.warn("Unable to open wallet approval modal:", error);
     });
 
@@ -197,7 +201,7 @@ export function useMintArtist(artistContractAddress?: string | null) {
       userAddress: address,
     });
 
-    void openWalletApprovalModal().catch((error) => {
+    void openWalletApprovalModalLazy().catch((error) => {
       console.warn("Unable to open wallet approval modal:", error);
     });
 
@@ -278,7 +282,7 @@ export function useSubscribeToArtistContract(artistContractAddress?: string | nu
       subscriber: address,
     });
 
-    void openWalletApprovalModal().catch((error) => {
+    void openWalletApprovalModalLazy().catch((error) => {
       console.warn("Unable to open wallet approval modal:", error);
     });
 

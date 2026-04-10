@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ExternalLink,
   Gavel,
@@ -596,21 +596,21 @@ function DiscoverCard({
   const [ctaBusy, setCtaBusy] = useState(false);
   const [collectingDrop, setCollectingDrop] = useState<ActionableDiscoverDrop | null>(null);
 
-  async function loadComments() {
+  const loadComments = useCallback(async () => {
     try {
       setCommentsLoading(true);
-      const loadedComments = await fetchPublicComments(post, 2);
+      const loadedComments = await fetchPublicComments({ id: post.id, item_type: post.item_type }, 2);
       setComments(loadedComments);
     } catch (error) {
       console.error("Failed to load comments:", error);
     } finally {
       setCommentsLoading(false);
     }
-  }
+  }, [post.id, post.item_type]);
 
   useEffect(() => {
     void loadComments();
-  }, [post.id, post.item_type]);
+  }, [loadComments]);
 
   useEffect(() => {
     if (!isMintSuccess || !address || !collectingDrop) {
@@ -847,11 +847,16 @@ function DetailsModal({
   const [ctaBusy, setCtaBusy] = useState(false);
   const [collectingDrop, setCollectingDrop] = useState<ActionableDiscoverDrop | null>(null);
 
+  const modalTrackingItem = useMemo(
+    () => ({ id: post.id, item_type: post.item_type }),
+    [post.id, post.item_type]
+  );
+
   useEffect(() => {
-    void trackItemEvent(post, "view", { source: "discover_modal" });
+    void trackItemEvent(modalTrackingItem, "view", { source: "discover_modal" });
 
     let cancelled = false;
-    Promise.all([fetchItemAnalytics(post), fetchPublicComments(post, 6)])
+    Promise.all([fetchItemAnalytics(modalTrackingItem), fetchPublicComments(modalTrackingItem, 6)])
       .then(([nextAnalytics, nextComments]) => {
         if (cancelled) return;
         setAnalytics(nextAnalytics);
@@ -866,7 +871,7 @@ function DetailsModal({
     return () => {
       cancelled = true;
     };
-  }, [post.id, post.item_type]);
+  }, [modalTrackingItem]);
 
   useEffect(() => {
     if (!isMintSuccess || !address || !collectingDrop) {
@@ -1173,20 +1178,20 @@ function CommentsSheet({
   const [newComment, setNewComment] = useState("");
   const [sending, setSending] = useState(false);
 
-  async function loadComments() {
+  const loadComments = useCallback(async () => {
     try {
       setLoading(true);
-      setComments(await fetchPublicComments(post, 24));
+      setComments(await fetchPublicComments({ id: post.id, item_type: post.item_type }, 24));
     } catch (error) {
       console.error("Failed to load comments:", error);
     } finally {
       setLoading(false);
     }
-  }
+  }, [post.id, post.item_type]);
 
   useEffect(() => {
     void loadComments();
-  }, [post.id, post.item_type]);
+  }, [loadComments]);
 
   async function handleSubmit() {
     const body = newComment.trim();
