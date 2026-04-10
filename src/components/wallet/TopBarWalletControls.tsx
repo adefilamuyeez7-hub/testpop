@@ -25,7 +25,7 @@ function NotificationsPanel({ onClose }: { onClose: () => void }) {
         {
           id: "welcome",
           title: "Welcome to POPUP",
-          body: "Explore drops, subscribe to artists, and collect onchain.",
+          body: "Explore drops, discover creator projects, and collect onchain.",
           time: "Just now",
           icon: "Welcome",
           read: false,
