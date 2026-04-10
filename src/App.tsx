@@ -17,7 +17,9 @@ import { initializePushNotifications } from "@/lib/webPush";
 // Critical routes (landing, public) load first; heavier routes (studio, admin) load on demand
 
 // Public routes
-const WalletIndexRoute = lazy(() => import("./routes/WalletIndexRoute"));
+const RebootHomePage = lazy(() => import("./pages/RebootHomePage"));
+const RebootDiscoverFeedPage = lazy(() => import("./pages/RebootDiscoverFeedPage"));
+const RebootProfileDashboardPage = lazy(() => import("./pages/RebootProfileDashboardPage"));
 const WalletArtistApplicationRoute = lazy(() => import("./routes/WalletArtistApplicationRoute"));
 const DropsPage = lazy(() => import("./pages/DropsPage"));
 const DropDetailPage = lazy(() => import("./pages/DropDetailPage"));
@@ -26,7 +28,6 @@ const WalletArtistProfileRoute = lazy(() => import("./routes/WalletArtistProfile
 const InboxPage = lazy(() => import("./pages/InboxPage"));
 
 // User profile routes
-const WalletProfileRoute = lazy(() => import("./routes/WalletProfileRoute"));
 const WalletCollectionRoute = lazy(() => import("./routes/WalletCollectionRoute"));
 const WalletPOAPsRoute = lazy(() => import("./routes/WalletPOAPsRoute"));
 const WalletSubscriptionsRoute = lazy(() => import("./routes/WalletSubscriptionsRoute"));
@@ -82,7 +83,7 @@ const App = () => {
                   <Routes>
                     <Route path="/share/:type/:id" element={<ShareLandingPage />} />
                     <Route element={<AppLayout />}>
-                      <Route path="/" element={<WalletIndexRoute />} />
+                      <Route path="/" element={<RebootHomePage />} />
                       <Route path="/apply" element={<WalletArtistApplicationRoute />} />
                       <Route path="/drops" element={<DropsPage />} />
                       <Route path="/drops/:id" element={<DropDetailPage />} />
@@ -90,11 +91,11 @@ const App = () => {
                       <Route path="/artists/:id" element={<WalletArtistProfileRoute />} />
                       <Route path="/invest" element={<InvestBoardPage />} />
                       <Route path="/inbox" element={<InboxPage />} />
-                      <Route path="/profile" element={<WalletProfileRoute />} />
+                      <Route path="/profile" element={<RebootProfileDashboardPage />} />
                       <Route path="/collection" element={<WalletCollectionRoute />} />
                       <Route path="/poaps" element={<WalletPOAPsRoute />} />
                       <Route path="/subscriptions" element={<WalletSubscriptionsRoute />} />
-                      <Route path="/discover" element={<UnifiedDiscoverFeed />} />
+                      <Route path="/discover" element={<RebootDiscoverFeedPage />} />
                       <Route path="/catalog" element={<Navigate to="/discover" replace />} />
                       <Route path="/catalog/:type/:id" element={<LegacyCatalogItemRoute />} />
                       <Route path="/releases/:id" element={<LegacyCatalogItemRoute forcedType="release" />} />
