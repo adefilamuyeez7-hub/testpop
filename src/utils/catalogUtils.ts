@@ -21,6 +21,7 @@ export interface CatalogItem {
   creator_id: string;
   creator_wallet: string;
   product_type?: "digital" | "physical" | "hybrid" | string | null;
+  source_kind?: string | null;
   contract_kind?: "artDrop" | "productStore" | "creativeReleaseEscrow" | string | null;
   contract_listing_id?: number | null;
   contract_product_id?: number | null;
@@ -33,10 +34,11 @@ export interface CatalogItem {
 export type CatalogPrimaryAction = "bid" | "cart" | "collect" | "details";
 
 export function getCatalogPrimaryAction(
-  item: Pick<CatalogItem, "item_type" | "can_bid" | "can_purchase" | "contract_kind" | "product_type">
+  item: Pick<CatalogItem, "item_type" | "can_bid" | "can_purchase" | "contract_kind" | "product_type" | "source_kind">
 ): CatalogPrimaryAction {
   const normalizedContractKind = String(item.contract_kind || "").trim().toLowerCase();
   const normalizedProductType = String(item.product_type || "").trim().toLowerCase();
+  const normalizedSourceKind = String(item.source_kind || "").trim().toLowerCase();
 
   if (item.item_type === "drop" && item.can_bid) {
     return "bid";
@@ -46,25 +48,20 @@ export function getCatalogPrimaryAction(
     return "details";
   }
 
-  if (item.item_type === "product") {
-    if (normalizedProductType === "digital" || normalizedContractKind === "artdrop") {
-      return "collect";
-    }
-
-    return "cart";
-  }
-
-  if (item.item_type === "release") {
-    if (normalizedContractKind === "artdrop") {
-      return "collect";
-    }
-
+  if (item.item_type === "product" || item.item_type === "release") {
     return "cart";
   }
 
   if (
     item.item_type === "drop" &&
-    (normalizedContractKind === "creativereleaseescrow" || normalizedContractKind === "productstore")
+    (
+      normalizedContractKind === "creativereleaseescrow" ||
+      normalizedContractKind === "productstore" ||
+      normalizedSourceKind === "release_product" ||
+      normalizedSourceKind === "catalog_product" ||
+      normalizedProductType === "physical" ||
+      normalizedProductType === "hybrid"
+    )
   ) {
     return "cart";
   }

@@ -214,6 +214,7 @@ function getSharePreviewMeta(item, req) {
   const itemType = String(item?.item_type || "item").trim();
   const summary = String(item?.description || "").trim();
   const actionLabel = getShareActionLabel(item);
+  const imageUrl = resolveShareMetaImageUrl(item, req);
   const description = summary
     || (priceValue > 0
       ? `${title} is live on POPUP for ${priceValue} ETH. ${actionLabel} from the shared action card.`
@@ -222,7 +223,7 @@ function getSharePreviewMeta(item, req) {
   return {
     title,
     description,
-    imageUrl: `${baseUrl}/og/share/${itemType}/${item?.id || ""}.svg`,
+    imageUrl,
     canonicalUrl: `${baseUrl}${req.originalUrl || req.url || `/share/${itemType}/${item?.id || ""}`}`,
     itemType,
     actionLabel,
@@ -241,6 +242,10 @@ function injectShareMetaTags(template, meta) {
     `<meta property="og:title" content="${escapedTitle}" />`,
     `<meta property="og:description" content="${escapedDescription}" />`,
     `<meta property="og:image" content="${escapedImageUrl}" />`,
+    `<meta property="og:image:secure_url" content="${escapedImageUrl}" />`,
+    `<meta property="og:image:width" content="1200" />`,
+    `<meta property="og:image:height" content="630" />`,
+    `<meta property="og:image:alt" content="${escapedTitle}" />`,
     `<meta property="og:url" content="${escapedCanonicalUrl}" />`,
     `<meta property="og:type" content="product" />`,
     `<meta property="og:site_name" content="POPUP" />`,
@@ -248,6 +253,7 @@ function injectShareMetaTags(template, meta) {
     `<meta name="twitter:title" content="${escapedTitle}" />`,
     `<meta name="twitter:description" content="${escapedDescription}" />`,
     `<meta name="twitter:image" content="${escapedImageUrl}" />`,
+    `<meta name="twitter:image:alt" content="${escapedTitle}" />`,
     `<meta name="popup:item_type" content="${escapedItemType}" />`,
     `<link rel="canonical" href="${escapedCanonicalUrl}" />`,
   ].join("\n    ");
@@ -276,20 +282,63 @@ function formatSharePrice(value) {
   return `${numeric} ETH`;
 }
 
-function getShareActionLabel(item) {
-  if (item?.can_bid) return "Bid now";
-  if (item?.can_purchase === false) return "View details";
+function getCatalogPrimaryActionForShare(item) {
+  const normalizedContractKind = String(item?.contract_kind || "").trim().toLowerCase();
+  const normalizedProductType = String(item?.product_type || "").trim().toLowerCase();
+  const normalizedSourceKind = String(item?.source_kind || "").trim().toLowerCase();
 
-  switch (String(item?.item_type || "")) {
-    case "drop":
-      return "Collect now";
-    case "release":
-      return "Add to cart";
-    case "product":
-      return "Buy now";
-    default:
-      return "Open action";
+  if (item?.item_type === "drop" && item?.can_bid) {
+    return "bid";
   }
+
+  if (!item?.can_purchase) {
+    return "details";
+  }
+
+  if (item?.item_type === "product" || item?.item_type === "release") {
+    return "cart";
+  }
+
+  if (
+    item?.item_type === "drop" &&
+    (
+      normalizedContractKind === "creativereleaseescrow" ||
+      normalizedContractKind === "productstore" ||
+      normalizedSourceKind === "release_product" ||
+      normalizedSourceKind === "catalog_product" ||
+      normalizedProductType === "physical" ||
+      normalizedProductType === "hybrid"
+    )
+  ) {
+    return "cart";
+  }
+
+  return "collect";
+}
+
+function getShareActionLabel(item) {
+  switch (getCatalogPrimaryActionForShare(item)) {
+    case "bid":
+      return "Bid now";
+    case "cart":
+      return "Add to cart";
+    case "collect":
+      return "Collect now";
+    case "details":
+    default:
+      return "View details";
+  }
+}
+
+function resolveShareMetaImageUrl(item, req) {
+  const baseUrl = resolveRequestBaseUrl(req);
+  const normalized = normalizeIpfsUrl(item?.image_url || "");
+
+  if (normalized) {
+    return `${baseUrl}/api/media/proxy?url=${encodeURIComponent(normalized)}`;
+  }
+
+  return `${baseUrl}/popup-logo.png`;
 }
 
 function splitTextIntoLines(value = "", maxCharsPerLine = 28, maxLines = 2) {
@@ -440,6 +489,72 @@ function buildShareCardSvg(item, req) {
   <rect x="760" y="552" width="360" height="22" rx="11" fill="rgba(255,255,255,0.08)"/>
   <image href="${brandMark}" x="1072" y="546" width="36" height="36"/>
 </svg>`;
+}
+
+async function enrichShareItemActionFields(itemType, itemId, existingItem = null) {
+  const baseItem = existingItem && typeof existingItem === "object" ? existingItem : {};
+
+  if (itemType === "product") {
+    const { data, error } = await supabase
+      .from("products")
+      .select("product_type, contract_kind")
+      .eq("id", itemId)
+      .maybeSingle();
+    if (error) throw error;
+
+    return {
+      ...baseItem,
+      product_type: data?.product_type || baseItem.product_type || null,
+      contract_kind: data?.contract_kind || baseItem.contract_kind || null,
+    };
+  }
+
+  if (itemType === "release") {
+    const { data, error } = await supabase
+      .from("creative_releases")
+      .select("contract_kind")
+      .eq("id", itemId)
+      .maybeSingle();
+    if (error) throw error;
+
+    return {
+      ...baseItem,
+      contract_kind: data?.contract_kind || baseItem.contract_kind || null,
+    };
+  }
+
+  if (itemType === "drop") {
+    const { data, error } = await supabase
+      .from("drops")
+      .select("contract_kind, metadata")
+      .eq("id", itemId)
+      .maybeSingle();
+    if (error) throw error;
+
+    const metadata =
+      data?.metadata && typeof data.metadata === "object" && !Array.isArray(data.metadata)
+        ? data.metadata
+        : null;
+
+    return {
+      ...baseItem,
+      contract_kind:
+        data?.contract_kind ||
+        (typeof metadata?.contract_kind === "string" ? metadata.contract_kind : null) ||
+        baseItem.contract_kind ||
+        null,
+      product_type:
+        (typeof metadata?.product_type === "string" ? metadata.product_type : null) ||
+        baseItem.product_type ||
+        null,
+      source_kind:
+        (typeof metadata?.source_kind === "string" ? metadata.source_kind : null) ||
+        baseItem.source_kind ||
+        null,
+    };
+  }
+
+  return baseItem;
 }
 
 function loadEnvFile(envPath) {
@@ -4970,9 +5085,11 @@ app.get("/og/share/:type/:id.svg", async (req, res, next) => {
       return next();
     }
 
+    const enrichedItem = await enrichShareItemActionFields(type, id, item);
+
     res.setHeader("Cache-Control", "public, max-age=300, s-maxage=300");
     res.setHeader("Content-Type", "image/svg+xml; charset=utf-8");
-    return res.status(200).send(buildShareCardSvg(item, req));
+    return res.status(200).send(buildShareCardSvg(enrichedItem, req));
   } catch (error) {
     console.error("[GET /og/share/:type/:id.svg] Failed to render share card:", error);
     return next();
@@ -5002,9 +5119,11 @@ app.get("/share/:type/:id", async (req, res, next) => {
       throw error;
     }
 
+    const enrichedItem = item ? await enrichShareItemActionFields(type, id, item) : null;
+
     const template = fs.readFileSync(frontendIndexPath, "utf8");
-    const html = item
-      ? injectShareMetaTags(template, getSharePreviewMeta(item, req))
+    const html = enrichedItem
+      ? injectShareMetaTags(template, getSharePreviewMeta(enrichedItem, req))
       : template;
 
     res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");

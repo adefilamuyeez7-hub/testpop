@@ -60,6 +60,102 @@ export default function catalogRoutes(supabase) {
     };
   }
 
+  async function enrichCatalogItemsWithActionFields(items) {
+    const list = Array.isArray(items) ? items : [];
+    if (list.length === 0) {
+      return [];
+    }
+
+    const dropIds = [];
+    const productIds = [];
+    const releaseIds = [];
+
+    for (const item of list) {
+      if (!item?.id) continue;
+      if (item.item_type === 'drop') dropIds.push(item.id);
+      if (item.item_type === 'product') productIds.push(item.id);
+      if (item.item_type === 'release') releaseIds.push(item.id);
+    }
+
+    const [dropsResult, productsResult, releasesResult] = await Promise.all([
+      dropIds.length > 0
+        ? supabase
+            .from('drops')
+            .select('id, contract_kind, metadata')
+            .in('id', dropIds)
+        : Promise.resolve({ data: [], error: null }),
+      productIds.length > 0
+        ? supabase
+            .from('products')
+            .select('id, product_type, contract_kind')
+            .in('id', productIds)
+        : Promise.resolve({ data: [], error: null }),
+      releaseIds.length > 0
+        ? supabase
+            .from('creative_releases')
+            .select('id, contract_kind')
+            .in('id', releaseIds)
+        : Promise.resolve({ data: [], error: null }),
+    ]);
+
+    if (dropsResult.error) throw dropsResult.error;
+    if (productsResult.error) throw productsResult.error;
+    if (releasesResult.error) throw releasesResult.error;
+
+    const dropsById = new Map((dropsResult.data || []).map((row) => [row.id, row]));
+    const productsById = new Map((productsResult.data || []).map((row) => [row.id, row]));
+    const releasesById = new Map((releasesResult.data || []).map((row) => [row.id, row]));
+
+    return list.map((rawItem) => {
+      const item = normalizeCatalogItem(rawItem);
+      if (!item?.id) return item;
+
+      if (item.item_type === 'drop') {
+        const drop = dropsById.get(item.id);
+        const metadata =
+          drop?.metadata && typeof drop.metadata === 'object' && !Array.isArray(drop.metadata)
+            ? drop.metadata
+            : null;
+
+        return {
+          ...item,
+          contract_kind:
+            drop?.contract_kind ||
+            (typeof metadata?.contract_kind === 'string' ? metadata.contract_kind : null) ||
+            item.contract_kind ||
+            null,
+          source_kind:
+            (typeof metadata?.source_kind === 'string' ? metadata.source_kind : null) ||
+            item.source_kind ||
+            null,
+          product_type:
+            (typeof metadata?.product_type === 'string' ? metadata.product_type : null) ||
+            item.product_type ||
+            null,
+        };
+      }
+
+      if (item.item_type === 'product') {
+        const product = productsById.get(item.id);
+        return {
+          ...item,
+          product_type: product?.product_type || item.product_type || null,
+          contract_kind: product?.contract_kind || item.contract_kind || null,
+        };
+      }
+
+      if (item.item_type === 'release') {
+        const release = releasesById.get(item.id);
+        return {
+          ...item,
+          contract_kind: release?.contract_kind || item.contract_kind || null,
+        };
+      }
+
+      return item;
+    });
+  }
+
   async function loadCheckoutProduct(type, id) {
     if (type === 'product') {
       const { data, error } = await supabase
@@ -192,8 +288,10 @@ export default function catalogRoutes(supabase) {
 
       if (error) throw error;
 
+      const enrichedItems = await enrichCatalogItemsWithActionFields(data || []);
+
       res.json({
-        data: (data || []).map(normalizeCatalogItem),
+        data: enrichedItems,
         pagination: {
           page: pageNumber,
           limit: pageSize,
@@ -231,6 +329,7 @@ export default function catalogRoutes(supabase) {
 
       if (itemError) throw itemError;
       if (!item) return res.status(404).json({ error: 'Item not found' });
+      const [enrichedItem] = await enrichCatalogItemsWithActionFields([item]);
       const checkoutProduct = await loadCheckoutProduct(type, id);
 
       const { data: comments, error: commentsError } = await supabase
@@ -257,7 +356,7 @@ export default function catalogRoutes(supabase) {
       if (commentsError) throw commentsError;
 
       res.json({
-        item: normalizeCatalogItem(item),
+        item: enrichedItem || normalizeCatalogItem(item),
         comments: comments || [],
         checkout_product: checkoutProduct,
       });
@@ -318,8 +417,10 @@ export default function catalogRoutes(supabase) {
 
       if (error) throw error;
 
+      const enrichedItems = await enrichCatalogItemsWithActionFields(data || []);
+
       res.json({
-        data: (data || []).map(normalizeCatalogItem),
+        data: enrichedItems,
         pagination: {
           page: pageNumber,
           limit: pageSize,

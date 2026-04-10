@@ -75,6 +75,7 @@ export default function createPersonalizationRoutes(supabase) {
   function getCatalogPrimaryAction(item) {
     const normalizedContractKind = String(item?.contract_kind || '').trim().toLowerCase();
     const normalizedProductType = String(item?.product_type || '').trim().toLowerCase();
+    const normalizedSourceKind = String(item?.source_kind || '').trim().toLowerCase();
 
     if (item?.item_type === 'drop' && item?.can_bid) {
       return 'bid';
@@ -84,25 +85,20 @@ export default function createPersonalizationRoutes(supabase) {
       return 'details';
     }
 
-    if (item?.item_type === 'product') {
-      if (normalizedProductType === 'digital' || normalizedContractKind === 'artdrop') {
-        return 'collect';
-      }
-
-      return 'cart';
-    }
-
-    if (item?.item_type === 'release') {
-      if (normalizedContractKind === 'artdrop') {
-        return 'collect';
-      }
-
+    if (item?.item_type === 'product' || item?.item_type === 'release') {
       return 'cart';
     }
 
     if (
       item?.item_type === 'drop' &&
-      (normalizedContractKind === 'creativereleaseescrow' || normalizedContractKind === 'productstore')
+      (
+        normalizedContractKind === 'creativereleaseescrow' ||
+        normalizedContractKind === 'productstore' ||
+        normalizedSourceKind === 'release_product' ||
+        normalizedSourceKind === 'catalog_product' ||
+        normalizedProductType === 'physical' ||
+        normalizedProductType === 'hybrid'
+      )
     ) {
       return 'cart';
     }
@@ -154,6 +150,70 @@ export default function createPersonalizationRoutes(supabase) {
       .find(Boolean);
 
     return frontendOrigin || "https://testpop-one.vercel.app";
+  }
+
+  async function enrichCatalogActionFields(itemType, itemId, existingItem = null) {
+    const baseItem = existingItem && typeof existingItem === 'object' ? existingItem : {};
+
+    if (itemType === 'product') {
+      const { data, error } = await supabase
+        .from('products')
+        .select('product_type, contract_kind')
+        .eq('id', itemId)
+        .maybeSingle();
+      if (error) throw error;
+      return {
+        ...baseItem,
+        product_type: data?.product_type || baseItem.product_type || null,
+        contract_kind: data?.contract_kind || baseItem.contract_kind || null,
+      };
+    }
+
+    if (itemType === 'release') {
+      const { data, error } = await supabase
+        .from('creative_releases')
+        .select('contract_kind')
+        .eq('id', itemId)
+        .maybeSingle();
+      if (error) throw error;
+      return {
+        ...baseItem,
+        contract_kind: data?.contract_kind || baseItem.contract_kind || null,
+      };
+    }
+
+    if (itemType === 'drop') {
+      const { data, error } = await supabase
+        .from('drops')
+        .select('contract_kind, metadata')
+        .eq('id', itemId)
+        .maybeSingle();
+      if (error) throw error;
+
+      const metadata =
+        data?.metadata && typeof data.metadata === 'object' && !Array.isArray(data.metadata)
+          ? data.metadata
+          : null;
+
+      return {
+        ...baseItem,
+        contract_kind:
+          data?.contract_kind ||
+          (typeof metadata?.contract_kind === 'string' ? metadata.contract_kind : null) ||
+          baseItem.contract_kind ||
+          null,
+        source_kind:
+          (typeof metadata?.source_kind === 'string' ? metadata.source_kind : null) ||
+          baseItem.source_kind ||
+          null,
+        product_type:
+          (typeof metadata?.product_type === 'string' ? metadata.product_type : null) ||
+          baseItem.product_type ||
+          null,
+      };
+    }
+
+    return baseItem;
   }
 
   // ============================================
@@ -481,15 +541,16 @@ export default function createPersonalizationRoutes(supabase) {
         .eq('item_type', item_type)
         .maybeSingle();
 
+      const enrichedCatalogItem = await enrichCatalogActionFields(item_type, item_id, catalogItem || null);
       const shareIntent = getShareIntent({
         item_type,
-        can_purchase: Boolean(catalogItem?.can_purchase),
-        can_bid: Boolean(catalogItem?.can_bid),
-        product_type: catalogItem?.product_type || null,
-        contract_kind: catalogItem?.contract_kind || null,
+        can_purchase: Boolean(enrichedCatalogItem?.can_purchase),
+        can_bid: Boolean(enrichedCatalogItem?.can_bid),
+        product_type: enrichedCatalogItem?.product_type || null,
+        contract_kind: enrichedCatalogItem?.contract_kind || null,
       });
-      const itemTitle = String(catalogItem?.title || 'this collectible').trim();
-      const priceValue = Number(catalogItem?.price_eth || 0);
+      const itemTitle = String(enrichedCatalogItem?.title || 'this collectible').trim();
+      const priceValue = Number(enrichedCatalogItem?.price_eth || 0);
       params.set('intent', shareIntent);
       params.set('auto', '1');
       const shareText = priceValue > 0

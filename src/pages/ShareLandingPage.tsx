@@ -35,6 +35,7 @@ type ShareCatalogItem = {
   can_purchase?: boolean;
   can_bid?: boolean;
   product_type?: "digital" | "physical" | "hybrid" | string | null;
+  source_kind?: string | null;
   contract_kind?: "artDrop" | "productStore" | "creativeReleaseEscrow" | string | null;
   comment_count?: number;
   created_at?: string;
@@ -102,6 +103,7 @@ function getPrimaryCta(item: ShareCatalogItem) {
     can_bid: Boolean(item.can_bid),
     can_purchase: Boolean(item.can_purchase),
     product_type: item.product_type,
+    source_kind: item.source_kind,
     contract_kind: item.contract_kind,
   });
 
@@ -160,6 +162,7 @@ function resolveShareIntent(searchParams: URLSearchParams, item?: ShareCatalogIt
     can_bid: Boolean(item.can_bid),
     can_purchase: Boolean(item.can_purchase),
     product_type: item.product_type,
+    source_kind: item.source_kind,
     contract_kind: item.contract_kind,
   });
 
