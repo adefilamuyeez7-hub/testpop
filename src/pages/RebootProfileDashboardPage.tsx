@@ -1,9 +1,11 @@
-import type { ComponentType } from "react";
+import { type ComponentType, useEffect, useMemo, useState } from "react";
 import {
   Boxes,
   Compass,
   ExternalLink,
   LayoutDashboard,
+  Loader2,
+  Lock,
   Package,
   Shield,
   Sparkles,
@@ -15,6 +17,8 @@ import {
 import { Link, useNavigate } from "react-router-dom";
 import { useAccount } from "wagmi";
 import { useWallet } from "@/hooks/useContracts";
+import { getRuntimeSession } from "@/lib/runtimeSession";
+import { establishSecureSession } from "@/lib/secureAuth";
 import { useCartStore } from "@/stores/cartStore";
 import { useCollectionStore } from "@/stores/collectionStore";
 import { REBOOT_USER_FLOW } from "@/lib/rebootPlatform";
@@ -26,6 +30,7 @@ type DashboardModule = {
   href: string;
   icon: ComponentType<{ className?: string }>;
   metric?: string;
+  requiredRole?: "creator" | "admin";
 };
 
 function shortWallet(value?: string | null) {
@@ -39,6 +44,8 @@ export default function RebootProfileDashboardPage() {
   const navigate = useNavigate();
   const { address } = useAccount();
   const { connectWallet } = useWallet();
+  const [runtimeRole, setRuntimeRole] = useState<string>("");
+  const [roleLoading, setRoleLoading] = useState(false);
   const cartItems = useCartStore((state) => state.items);
   const collectionItems = useCollectionStore((state) => state.items);
 
@@ -46,6 +53,47 @@ export default function RebootProfileDashboardPage() {
     (item) => item.ownerWallet.toLowerCase() === String(address || "").toLowerCase()
   ).length;
   const cartCount = cartItems.reduce((sum, item) => sum + item.quantity, 0);
+  const normalizedAddress = String(address || "").toLowerCase();
+
+  useEffect(() => {
+    let active = true;
+
+    async function resolveRole() {
+      if (!normalizedAddress) {
+        setRuntimeRole("");
+        setRoleLoading(false);
+        return;
+      }
+
+      const runtimeSession = getRuntimeSession();
+      const sessionWallet = String(runtimeSession.wallet || "").toLowerCase();
+      if (runtimeSession.role && sessionWallet === normalizedAddress) {
+        setRuntimeRole(runtimeSession.role);
+        setRoleLoading(false);
+        return;
+      }
+
+      setRoleLoading(true);
+      try {
+        const session = await establishSecureSession(normalizedAddress);
+        if (!active) return;
+        setRuntimeRole(String(session.role || ""));
+      } catch {
+        if (!active) return;
+        setRuntimeRole("");
+      } finally {
+        if (active) setRoleLoading(false);
+      }
+    }
+
+    void resolveRole();
+    return () => {
+      active = false;
+    };
+  }, [normalizedAddress]);
+
+  const hasCreatorAccess = runtimeRole === "artist" || runtimeRole === "admin";
+  const hasAdminAccess = runtimeRole === "admin";
 
   const collectorModules: DashboardModule[] = [
     {
@@ -94,6 +142,7 @@ export default function RebootProfileDashboardPage() {
       desc: "View campaign metrics, conversion trends, and collector activity.",
       href: "/creator/analytics",
       icon: LayoutDashboard,
+      requiredRole: "creator",
     },
     {
       id: "portfolio",
@@ -101,6 +150,7 @@ export default function RebootProfileDashboardPage() {
       desc: "Upload and curate creator showcase content.",
       href: "/studio?tab=portfolio",
       icon: UserRoundSearch,
+      requiredRole: "creator",
     },
     {
       id: "creator-card",
@@ -108,6 +158,7 @@ export default function RebootProfileDashboardPage() {
       desc: "Launch a limited tradeable creator card onchain.",
       href: "/studio?tab=creator-card",
       icon: Sparkles,
+      requiredRole: "creator",
     },
     {
       id: "studio",
@@ -115,6 +166,7 @@ export default function RebootProfileDashboardPage() {
       desc: "Launch drop, auction, and bid campaign forms.",
       href: "/studio",
       icon: Package,
+      requiredRole: "creator",
     },
     {
       id: "admin",
@@ -122,8 +174,23 @@ export default function RebootProfileDashboardPage() {
       desc: "Manage creator whitelist, approvals, and platform guardrails.",
       href: "/admin",
       icon: Shield,
+      requiredRole: "admin",
     },
   ];
+
+  const gatedCreatorAdminModules = useMemo(
+    () =>
+      creatorAdminModules.map((module) => {
+        const allowed =
+          module.requiredRole === "admin"
+            ? hasAdminAccess
+            : module.requiredRole === "creator"
+              ? hasCreatorAccess
+              : true;
+        return { ...module, allowed };
+      }),
+    [creatorAdminModules, hasAdminAccess, hasCreatorAccess]
+  );
 
   return (
     <div className="space-y-6 px-4 py-6 md:px-2">
@@ -211,19 +278,49 @@ export default function RebootProfileDashboardPage() {
 
       <section className="space-y-3">
         <h2 className="text-lg font-semibold text-slate-900">Creator + Admin Modules</h2>
+        {!address ? (
+          <div className="rounded-[16px] border border-dashed border-slate-300 bg-slate-50 px-4 py-3 text-xs text-slate-600">
+            Connect your wallet to unlock creator and admin role-gated modules.
+          </div>
+        ) : roleLoading ? (
+          <div className="inline-flex items-center gap-2 rounded-full border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600">
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            Verifying role access...
+          </div>
+        ) : (
+          <div className="inline-flex items-center gap-2 rounded-full border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600">
+            Active role: {runtimeRole || "collector"}
+          </div>
+        )}
         <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
-          {creatorAdminModules.map((module) => (
-            <Link
-              key={module.id}
-              to={module.href}
-              className="group rounded-[20px] border border-slate-200 bg-white p-4 transition hover:border-slate-900 hover:shadow-[0_16px_36px_-24px_rgba(15,23,42,0.55)]"
-            >
-              <div className="inline-flex h-10 w-10 items-center justify-center rounded-xl bg-slate-100 text-slate-800 group-hover:bg-slate-900 group-hover:text-white">
-                <module.icon className="h-5 w-5" />
-              </div>
-              <h3 className="mt-4 text-base font-semibold text-slate-950">{module.title}</h3>
-              <p className="mt-1 text-sm text-slate-600">{module.desc}</p>
-            </Link>
+          {gatedCreatorAdminModules.map((module) => (
+            module.allowed ? (
+              <Link
+                key={module.id}
+                to={module.href}
+                className="group rounded-[20px] border border-slate-200 bg-white p-4 transition hover:border-slate-900 hover:shadow-[0_16px_36px_-24px_rgba(15,23,42,0.55)]"
+              >
+                <div className="inline-flex h-10 w-10 items-center justify-center rounded-xl bg-slate-100 text-slate-800 group-hover:bg-slate-900 group-hover:text-white">
+                  <module.icon className="h-5 w-5" />
+                </div>
+                <h3 className="mt-4 text-base font-semibold text-slate-950">{module.title}</h3>
+                <p className="mt-1 text-sm text-slate-600">{module.desc}</p>
+              </Link>
+            ) : (
+              <article
+                key={module.id}
+                className="rounded-[20px] border border-slate-200 bg-slate-50 p-4 opacity-75"
+              >
+                <div className="inline-flex h-10 w-10 items-center justify-center rounded-xl bg-slate-200 text-slate-600">
+                  <Lock className="h-5 w-5" />
+                </div>
+                <h3 className="mt-4 text-base font-semibold text-slate-800">{module.title}</h3>
+                <p className="mt-1 text-sm text-slate-600">{module.desc}</p>
+                <p className="mt-3 text-xs font-semibold uppercase tracking-[0.15em] text-slate-500">
+                  {module.requiredRole === "admin" ? "Admin role required" : "Creator role required"}
+                </p>
+              </article>
+            )
           ))}
         </div>
       </section>

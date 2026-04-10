@@ -2,7 +2,10 @@ import { useEffect, useMemo, useState } from "react";
 import { Loader2, MessageCircle, Send, ShoppingBag } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
+import { useWallet } from "@/hooks/useContracts";
+import { createItemFeedbackThread } from "@/lib/db";
 import { resolveMediaUrl } from "@/lib/pinata";
+import { establishSecureSession } from "@/lib/secureAuth";
 import {
   buildRebootShareUrl,
   createRebootShare,
@@ -28,6 +31,7 @@ function getCreatorLabel(item: RebootCatalogItem) {
 
 export default function RebootDiscoverFeedPage() {
   const navigate = useNavigate();
+  const { address, isConnected, connectWallet } = useWallet();
   const [items, setItems] = useState<RebootCatalogItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [busyActionId, setBusyActionId] = useState<string | null>(null);
@@ -104,22 +108,52 @@ export default function RebootDiscoverFeedPage() {
     setOpenCommentId((current) => (current === item.id ? null : item.id));
   }
 
-  function submitComment(item: RebootCatalogItem) {
+  async function submitComment(item: RebootCatalogItem) {
     const body = String(drafts[item.id] || "").trim();
     if (!body) {
       toast.error("Write a comment first.");
       return;
     }
 
-    toast.success("Comment draft captured. Opening thread view.");
-    navigate(`${buildRebootShareUrl(item, "details")}#comments`, {
-      state: {
-        from: "discover-reboot",
-        draftComment: body,
-      },
-    });
-    setDrafts((current) => ({ ...current, [item.id]: "" }));
-    setOpenCommentId(null);
+    if (!isConnected || !address) {
+      try {
+        await connectWallet();
+        toast.info("Connect your wallet, then post your comment.");
+      } catch {
+        toast.error("Wallet connection is required to post comments.");
+      }
+      return;
+    }
+
+    try {
+      setBusyActionId(item.id);
+      await establishSecureSession(address);
+      await createItemFeedbackThread({
+        itemType: item.item_type,
+        itemId: item.id,
+        feedbackType: "review",
+        visibility: "public",
+        body,
+      });
+
+      setItems((current) =>
+        current.map((entry) =>
+          entry.id === item.id
+            ? {
+                ...entry,
+                comment_count: Number(entry.comment_count || 0) + 1,
+              }
+            : entry
+        )
+      );
+      setDrafts((current) => ({ ...current, [item.id]: "" }));
+      setOpenCommentId(null);
+      toast.success("Comment posted to the public thread.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to post comment.");
+    } finally {
+      setBusyActionId(null);
+    }
   }
 
   if (loading) {
@@ -230,16 +264,18 @@ export default function RebootDiscoverFeedPage() {
                       <button
                         type="button"
                         onClick={() => setOpenCommentId(null)}
+                        disabled={busy}
                         className="rounded-full border border-slate-300 px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:border-slate-900 hover:text-slate-950"
                       >
                         Cancel
                       </button>
                       <button
                         type="button"
-                        onClick={() => submitComment(item)}
+                        onClick={() => void submitComment(item)}
+                        disabled={busy}
                         className="inline-flex items-center gap-1.5 rounded-full bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-slate-800"
                       >
-                        <Send className="h-3.5 w-3.5" />
+                        {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
                         Post
                       </button>
                     </div>
