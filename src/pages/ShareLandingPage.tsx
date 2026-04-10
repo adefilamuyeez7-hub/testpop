@@ -1,17 +1,18 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowRight, ExternalLink, Gavel, Loader2, MessageCircle, Share2, ShoppingBag } from "lucide-react";
+import { ArrowRight, ExternalLink, Gavel, Heart, Loader2, MessageCircle, Share2, ShoppingBag } from "lucide-react";
 import { parseEther } from "viem";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { supabase } from "@/lib/db";
+import { createItemFeedbackThread, type ProductFeedbackThread, supabase } from "@/lib/db";
 import { SECURE_API_BASE } from "@/lib/apiBase";
 import { resolveMediaUrl } from "@/lib/pinata";
-import { getRuntimeApiToken } from "@/lib/runtimeSession";
 import { useWallet } from "@/hooks/useContracts";
 import { useMintArtist } from "@/hooks/useContractsArtist";
 import { queueWalletAppHandoff } from "@/lib/appKit";
 import { toast } from "@/components/ui/use-toast";
 import { useCartStore } from "@/stores/cartStore";
 import { useCollectionStore } from "@/stores/collectionStore";
+import { getFavorites, toggleProductFavorite } from "@/lib/favoritesStore";
+import { establishSecureSession } from "@/lib/secureAuth";
 import { formatPrice, formatSupply, getCatalogPrimaryAction } from "@/utils/catalogUtils";
 import { ACTIVE_CHAIN } from "@/lib/wagmi";
 import {
@@ -50,19 +51,6 @@ type ShareComment = {
   }>;
 };
 
-type ShareCommentMutation = {
-  id: string;
-  title?: string | null;
-  rating?: number | null;
-  created_at?: string;
-  buyer_wallet: string;
-  latest_message?: {
-    id: string;
-    body: string;
-    created_at?: string;
-  } | null;
-};
-
 type CreatorProfile = {
   id: string;
   name?: string | null;
@@ -78,29 +66,6 @@ const API_BASE = SECURE_API_BASE || "/api";
 function buildApiUrl(path: string) {
   const normalizedPath = path.startsWith("/") ? path : `/${path}`;
   return `${API_BASE}${normalizedPath}`;
-}
-
-async function requestJson<T>(path: string, init?: RequestInit, token?: string): Promise<T> {
-  const headers = new Headers(init?.headers || {});
-  if (!headers.has("Content-Type") && init?.body) {
-    headers.set("Content-Type", "application/json");
-  }
-  if (token) {
-    headers.set("Authorization", `Bearer ${token}`);
-  }
-
-  const response = await fetch(buildApiUrl(path), {
-    ...init,
-    headers,
-  });
-  const text = await response.text();
-  const payload = text ? JSON.parse(text) : {};
-
-  if (!response.ok) {
-    throw new Error(payload?.error || payload?.message || "Request failed");
-  }
-
-  return payload as T;
 }
 
 function truncateWallet(wallet?: string | null, start = 6, end = 4) {
@@ -202,7 +167,7 @@ function resolveShareIntent(searchParams: URLSearchParams, item?: ShareCatalogIt
 
 async function trackShareLandingEvent(
   item: Pick<ShareCatalogItem, "id" | "item_type">,
-  eventType: "view" | "purchase" | "comment",
+  eventType: "view" | "like" | "purchase" | "comment",
   data: Record<string, unknown> = {},
 ) {
   try {
@@ -226,7 +191,7 @@ function mergeComments(currentComments: ShareComment[], incomingComment: ShareCo
   return [incomingComment, ...filtered];
 }
 
-function toShareComment(thread: ShareCommentMutation): ShareComment {
+function toShareComment(thread: ProductFeedbackThread): ShareComment {
   return {
     id: thread.id,
     title: thread.title || null,
@@ -236,28 +201,19 @@ function toShareComment(thread: ShareCommentMutation): ShareComment {
   };
 }
 
-async function postPublicComment(
+function getLikeTargetId(
   item: Pick<ShareCatalogItem, "id" | "item_type">,
-  body: string,
-  token: string,
+  checkoutProductId?: string | null,
 ) {
-  const response = await requestJson<{
-    success: boolean;
-    thread: ShareCommentMutation;
-  }>(
-    `/fan-hub/items/${item.item_type}/${item.id}/feedback`,
-    {
-      method: "POST",
-      body: JSON.stringify({
-        feedbackType: "review",
-        visibility: "public",
-        body,
-      }),
-    },
-    token,
-  );
+  if (item.item_type === "product") {
+    return item.id;
+  }
 
-  return response.thread;
+  if (item.item_type === "release") {
+    return checkoutProductId || null;
+  }
+
+  return checkoutProductId || `drop:${item.id}`;
 }
 
 const ShareLandingPage = () => {
@@ -282,6 +238,8 @@ const ShareLandingPage = () => {
   const [ctaBusy, setCtaBusy] = useState(false);
   const [commentBusy, setCommentBusy] = useState(false);
   const [collectingDrop, setCollectingDrop] = useState<ActionableDiscoverDrop | null>(null);
+  const [favoriteProductIds, setFavoriteProductIds] = useState<Set<string>>(new Set());
+  const [likeTargetId, setLikeTargetId] = useState<string | null>(null);
   const shareFlowSearch = useMemo(() => buildShareFlowSearch(searchParams), [searchParams]);
   const checkoutFlowSearch = useMemo(() => buildCheckoutFlowSearch(searchParams), [searchParams]);
   const shareId = searchParams.get("share");
@@ -291,6 +249,16 @@ const ShareLandingPage = () => {
   const creatorAvatarUrl = useMemo(() => getCreatorAvatarUrl(creator), [creator]);
   const autoActionCompletedRef = useRef(false);
   const resumeAutoActionRef = useRef(false);
+  const commentInputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    if (!address) {
+      setFavoriteProductIds(new Set());
+      return;
+    }
+
+    setFavoriteProductIds(new Set(getFavorites(address).favoriteProducts));
+  }, [address]);
 
   useEffect(() => {
     if (!shareId) return;
@@ -320,6 +288,11 @@ const ShareLandingPage = () => {
 
         setItem(payload.item || null);
         setComments(payload.comments || []);
+        setLikeTargetId(
+          payload.item
+            ? getLikeTargetId(payload.item, payload.checkout_product?.id || null)
+            : null,
+        );
 
         if (payload.item) {
           void trackShareLandingEvent(payload.item, "view", {
@@ -388,6 +361,7 @@ const ShareLandingPage = () => {
 
   const primaryCta = useMemo(() => (item ? getPrimaryCta(item) : null), [item]);
   const shareIntent = useMemo(() => resolveShareIntent(searchParams, item), [item, searchParams]);
+  const isLiked = Boolean(likeTargetId && favoriteProductIds.has(likeTargetId));
 
   async function runPrimaryAction(source: "manual" | "auto" | "resume" | "wallet" = "manual") {
     if (!item || !primaryCta) return;
@@ -526,18 +500,16 @@ const ShareLandingPage = () => {
       return;
     }
 
-    const token = getRuntimeApiToken();
-    if (!token) {
-      toast({
-        title: "Secure session pending",
-        description: "Your wallet is connected. Give POPUP a moment to finish secure sign-in.",
-      });
-      return;
-    }
-
     try {
       setCommentBusy(true);
-      const thread = await postPublicComment(item, body, token);
+      await establishSecureSession(address);
+      const thread = await createItemFeedbackThread({
+        itemType: item.item_type,
+        itemId: item.id,
+        feedbackType: "review",
+        visibility: "public",
+        body,
+      });
       setNewComment("");
       setComments((current) => mergeComments(current, toShareComment(thread)));
       await trackShareLandingEvent(item, "comment", {
@@ -558,6 +530,47 @@ const ShareLandingPage = () => {
     } finally {
       setCommentBusy(false);
     }
+  }
+
+  async function handleToggleLike() {
+    if (!item || !likeTargetId) {
+      toast({
+        title: "Like unavailable",
+        description: "This shared item is not ready for likes yet.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (!address) {
+      await connectWallet();
+      toast({
+        title: "Wallet connection requested",
+        description: "Connect your wallet, then save this item to your likes.",
+      });
+      return;
+    }
+
+    const added = toggleProductFavorite(address, likeTargetId);
+    setFavoriteProductIds(new Set(getFavorites(address).favoriteProducts));
+    await trackShareLandingEvent(item, "like", {
+      source: "share_landing",
+      share_id: shareId,
+      ref: referrerWallet,
+      like_target_id: likeTargetId,
+      liked: added,
+    });
+    toast({
+      title: added ? "Saved to likes" : "Removed from likes",
+      description: added
+        ? "This item is now in your liked list."
+        : "This item is no longer in your liked list.",
+    });
+  }
+
+  function focusCommentComposer() {
+    commentInputRef.current?.focus();
+    commentInputRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
   }
 
   if (loading) {
@@ -690,6 +703,28 @@ const ShareLandingPage = () => {
                     {shareIntent === "checkout" ? "Continue in wallet flow" : "Resume in wallet app"}
                   </button>
                 ) : null}
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <button
+                    type="button"
+                    onClick={() => void handleToggleLike()}
+                    className={`inline-flex h-12 w-full items-center justify-center gap-2 rounded-full border px-6 text-sm font-medium transition ${
+                      isLiked
+                        ? "border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100"
+                        : "border-slate-200 bg-white text-slate-700 hover:bg-slate-100"
+                    }`}
+                  >
+                    <Heart className={`h-4 w-4 ${isLiked ? "fill-current" : ""}`} />
+                    {isLiked ? "Liked" : "Like"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={focusCommentComposer}
+                    className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-6 text-sm font-medium text-slate-700 transition hover:bg-slate-100"
+                  >
+                    <MessageCircle className="h-4 w-4" />
+                    Comment
+                  </button>
+                </div>
                 <button
                   type="button"
                   onClick={() => navigate(`/discover${shareFlowSearch}`)}
@@ -775,6 +810,7 @@ const ShareLandingPage = () => {
 
             <div className="mt-5 flex gap-3 border-t border-slate-200 pt-5">
               <input
+                ref={commentInputRef}
                 type="text"
                 value={newComment}
                 onChange={(event) => setNewComment(event.target.value)}
