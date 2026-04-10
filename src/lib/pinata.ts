@@ -2,8 +2,9 @@ import { getRuntimeApiToken } from "@/lib/runtimeSession";
 
 const DEFAULT_PINATA_API_BASE = "/api/pinata";
 const PINATA_API_BASE = (import.meta.env.VITE_PINATA_API_BASE_URL || DEFAULT_PINATA_API_BASE).replace(/\/$/, "");
-const DEFAULT_IPFS_GATEWAY_BASE = "https://ipfs.io/ipfs";
+const DEFAULT_IPFS_GATEWAY_BASE = "https://gateway.pinata.cloud/ipfs";
 const IPFS_GATEWAY_BASE = (import.meta.env.VITE_IPFS_GATEWAY_URL || DEFAULT_IPFS_GATEWAY_BASE).replace(/\/$/, "");
+const USE_MEDIA_PROXY = String(import.meta.env.VITE_USE_MEDIA_PROXY || "true").toLowerCase() !== "false";
 
 type PinataUploadResponse = {
   cid: string;
@@ -99,21 +100,27 @@ function isTransientOrInvalidMediaValue(value: string): boolean {
 
 export function ipfsToHttp(uri: string): string {
   const normalized = uri.trim();
+  if (!normalized) return "";
+  if (normalized.startsWith("/api/media/proxy")) return normalized;
+
+  const toProxyUrl = (value: string) => `/api/media/proxy?url=${encodeURIComponent(value)}`;
   const httpGatewayMatch = normalized.match(/^https?:\/\/[^/]+\/ipfs\/(.+)$/i);
   if (httpGatewayMatch?.[1]) {
-    return `${IPFS_GATEWAY_BASE}/${httpGatewayMatch[1]}`;
+    const canonical = `ipfs://${httpGatewayMatch[1]}`;
+    return USE_MEDIA_PROXY ? toProxyUrl(canonical) : `${IPFS_GATEWAY_BASE}/${httpGatewayMatch[1]}`;
   }
 
   if (normalized.startsWith("ipfs://ipfs/")) {
-    return `${IPFS_GATEWAY_BASE}/${normalized.slice("ipfs://ipfs/".length)}`;
+    const canonical = `ipfs://${normalized.slice("ipfs://ipfs/".length)}`;
+    return USE_MEDIA_PROXY ? toProxyUrl(canonical) : `${IPFS_GATEWAY_BASE}/${canonical.slice("ipfs://".length)}`;
   }
 
   if (normalized.startsWith("ipfs://")) {
-    return `${IPFS_GATEWAY_BASE}/${normalized.slice(7)}`;
+    return USE_MEDIA_PROXY ? toProxyUrl(normalized) : `${IPFS_GATEWAY_BASE}/${normalized.slice(7)}`;
   }
 
   if (isBareIpfsCid(normalized)) {
-    return `${IPFS_GATEWAY_BASE}/${normalized}`;
+    return USE_MEDIA_PROXY ? toProxyUrl(`ipfs://${normalized}`) : `${IPFS_GATEWAY_BASE}/${normalized}`;
   }
 
   return normalized;

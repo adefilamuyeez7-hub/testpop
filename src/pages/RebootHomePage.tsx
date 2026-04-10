@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { ArrowRight, Gift, Loader2, Rocket, User } from "lucide-react";
+import { Gift, Loader2, User } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { resolveMediaUrl } from "@/lib/pinata";
@@ -7,9 +7,6 @@ import {
   buildRebootShareUrl,
   createRebootShare,
   fetchRebootCatalog,
-  REBOOT_CAMPAIGN_MODES,
-  REBOOT_CREATOR_CONTENT_TYPES,
-  REBOOT_USER_FLOW,
   type RebootCatalogItem,
 } from "@/lib/rebootPlatform";
 import { formatPrice } from "@/utils/catalogUtils";
@@ -90,36 +87,7 @@ export default function RebootHomePage() {
   }
 
   return (
-    <div className="space-y-8 px-4 py-6 md:px-2">
-      <section className="overflow-hidden rounded-[28px] border border-[#1b3558] bg-[radial-gradient(circle_at_top,_rgba(20,184,166,0.38),_transparent_35%),linear-gradient(135deg,_#081628_0%,_#0d2239_45%,_#17345a_100%)] px-6 py-8 text-white shadow-[0_34px_70px_-34px_rgba(2,6,23,0.8)]">
-        <p className="text-xs font-semibold uppercase tracking-[0.24em] text-cyan-200/90">POPUP Reboot</p>
-        <h1 className="mt-3 max-w-4xl text-3xl font-black leading-tight md:text-5xl">
-          Build creator commerce around three surfaces: Home, Discover, and Profile.
-        </h1>
-        <p className="mt-4 max-w-3xl text-sm text-slate-200/90 md:text-base">
-          Homepage highlights featured projects in deck-slide format, discover works like a social feed, and profile
-          becomes the operating dashboard for collectors, creators, and admins.
-        </p>
-        <div className="mt-6 flex flex-wrap gap-2">
-          <button
-            type="button"
-            onClick={() => navigate("/discover")}
-            className="inline-flex items-center gap-2 rounded-full bg-white px-4 py-2 text-sm font-semibold text-slate-950 transition hover:bg-cyan-100"
-          >
-            Open Discover
-            <ArrowRight className="h-4 w-4" />
-          </button>
-          <button
-            type="button"
-            onClick={() => navigate("/profile")}
-            className="inline-flex items-center gap-2 rounded-full border border-white/35 bg-white/10 px-4 py-2 text-sm font-semibold text-white transition hover:bg-white/20"
-          >
-            Open Profile
-            <User className="h-4 w-4" />
-          </button>
-        </div>
-      </section>
-
+    <div className="space-y-4 px-4 py-6 md:px-2">
       <section className="space-y-4">
         <div className="flex items-end justify-between">
           <div>
@@ -213,68 +181,6 @@ export default function RebootHomePage() {
             </div>
           </div>
         )}
-      </section>
-
-      <section className="space-y-3 rounded-[24px] border border-slate-200 bg-white p-5">
-        <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">User Type Flows</p>
-        <div className="grid gap-3 md:grid-cols-2">
-          {REBOOT_USER_FLOW.map((flow) => (
-            <article
-              key={flow.id}
-              className="rounded-[18px] border border-slate-200 bg-slate-50 px-4 py-4 transition hover:border-slate-300 hover:bg-white"
-            >
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <h3 className="text-base font-semibold text-slate-950">{flow.title}</h3>
-                  <p className="mt-1 text-sm text-slate-600">{flow.summary}</p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => navigate(flow.route)}
-                  className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-slate-300 text-slate-700 transition hover:border-slate-900 hover:text-slate-950"
-                  aria-label={`Open ${flow.title}`}
-                >
-                  <ArrowRight className="h-4 w-4" />
-                </button>
-              </div>
-              <ul className="mt-3 space-y-1">
-                {flow.capabilities.map((capability) => (
-                  <li key={capability} className="text-xs leading-5 text-slate-600">
-                    {capability}
-                  </li>
-                ))}
-              </ul>
-            </article>
-          ))}
-        </div>
-      </section>
-
-      <section className="space-y-4 rounded-[24px] border border-slate-200 bg-white p-5">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Creator Launch System</p>
-          <h2 className="mt-1 text-2xl font-bold text-slate-900">Content Types x Campaign Forms</h2>
-        </div>
-
-        <div className="grid gap-3 md:grid-cols-2">
-          {REBOOT_CREATOR_CONTENT_TYPES.map((contentType) => (
-            <div key={contentType.id} className="rounded-[18px] border border-slate-200 bg-slate-50 px-4 py-4">
-              <p className="text-sm font-semibold text-slate-950">{contentType.title}</p>
-              <p className="mt-1 text-sm text-slate-600">{contentType.description}</p>
-            </div>
-          ))}
-        </div>
-
-        <div className="grid gap-3 md:grid-cols-3">
-          {REBOOT_CAMPAIGN_MODES.map((mode) => (
-            <div key={mode.id} className="rounded-[18px] border border-slate-200 px-4 py-4">
-              <div className="inline-flex items-center gap-2 rounded-full bg-slate-900 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-white">
-                <Rocket className="h-3.5 w-3.5" />
-                {mode.title}
-              </div>
-              <p className="mt-3 text-sm text-slate-600">{mode.description}</p>
-            </div>
-          ))}
-        </div>
       </section>
     </div>
   );

@@ -1,6 +1,7 @@
 import type { Drop, Product } from "@/lib/db";
 import { getProductsByCreativeRelease } from "@/lib/db";
 import { resolveDropBehavior } from "@/lib/dropBehavior";
+import { resolveContractProductId } from "@/lib/productMetadata";
 import { fetchDropByIdFromSupabase, fetchProductByIdFromSupabase } from "@/lib/supabaseStore";
 import type { CollectedDropItem } from "@/stores/collectionStore";
 import { getCatalogPrimaryAction } from "@/utils/catalogUtils";
@@ -253,13 +254,32 @@ export function addProductToCart(
 ) {
   const resolvedPriceEth = Number(product.price_eth || 0);
   const priceWei = BigInt(Math.max(0, Math.round(resolvedPriceEth * 1e18)));
+  const resolvedContractProductId = resolveContractProductId(
+    product.metadata && typeof product.metadata === "object" ? product.metadata : null,
+    product.contract_product_id
+  );
+  const resolvedContractKind = (() => {
+    if (product.contract_kind === "creativeReleaseEscrow" || product.contract_kind === "productStore") {
+      return product.contract_kind;
+    }
+
+    const metadataContractKind =
+      product.metadata &&
+      typeof product.metadata === "object" &&
+      !Array.isArray(product.metadata) &&
+      typeof product.metadata.contract_kind === "string"
+        ? product.metadata.contract_kind
+        : "";
+
+    return metadataContractKind === "creativeReleaseEscrow" ? "creativeReleaseEscrow" : "productStore";
+  })();
 
   addItem(
     product.id,
     product.creative_release_id ?? null,
-    product.contract_kind ?? "productStore",
+    resolvedContractKind,
     Number.isFinite(Number(product.contract_listing_id)) ? Number(product.contract_listing_id) : null,
-    Number.isFinite(Number(product.contract_product_id)) ? Number(product.contract_product_id) : null,
+    resolvedContractProductId,
     1,
     priceWei,
     product.name || fallbackTitle || "Untitled Product",

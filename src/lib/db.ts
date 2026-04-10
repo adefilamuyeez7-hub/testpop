@@ -251,6 +251,17 @@ export interface OrderWithItems extends Order {
   }>;
 }
 
+export interface GiftOrder extends OrderWithItems {
+  gift?: {
+    recipient_wallet: string;
+    sender_wallet?: string | null;
+    status?: "pending" | "accepted" | "declined";
+    note?: string | null;
+    gifted_at?: string | null;
+    accepted_at?: string | null;
+  } | null;
+}
+
 export interface Entitlement {
   id: string;
   order_id?: string | null;
@@ -1484,6 +1495,40 @@ export async function getOrdersByBuyer(
   } catch (error: any) {
     console.error("❌ getOrdersByBuyer failed:", error.message);
     return [];
+  }
+}
+
+export async function getGiftOrders(options: {
+  direction?: "received" | "sent";
+  status?: "pending" | "accepted" | "declined";
+  wallet?: string;
+} = {}): Promise<GiftOrder[]> {
+  try {
+    const params = new URLSearchParams();
+    if (options.direction) params.set("direction", options.direction);
+    if (options.status) params.set("status", options.status);
+    if (options.wallet) params.set("wallet", options.wallet.toLowerCase());
+
+    const suffix = params.toString();
+    const result = await secureApiRequest<GiftOrder[]>(`/gifts${suffix ? `?${suffix}` : ""}`);
+    return Array.isArray(result) ? result : [];
+  } catch (error: any) {
+    console.error("getGiftOrders failed:", error.message);
+    return [];
+  }
+}
+
+export async function acceptGiftOrder(orderId: string): Promise<GiftOrder | null> {
+  try {
+    if (!orderId) return null;
+    const payload = await secureApiRequest<{ success?: boolean; order?: GiftOrder }>(
+      `/gifts/${encodeURIComponent(orderId)}/accept`,
+      { method: "POST" },
+    );
+    return payload?.order || null;
+  } catch (error: any) {
+    console.error("acceptGiftOrder failed:", error.message);
+    return null;
   }
 }
 

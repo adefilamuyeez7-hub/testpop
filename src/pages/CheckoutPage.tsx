@@ -33,6 +33,9 @@ export function CheckoutPage() {
   const [postalCode, setPostalCode] = useState("");
   const [country, setCountry] = useState<CheckoutCountry>(detectCheckoutCountry());
   const [notes, setNotes] = useState("");
+  const [isGift, setIsGift] = useState(false);
+  const [giftRecipientWallet, setGiftRecipientWallet] = useState("");
+  const [giftNote, setGiftNote] = useState("");
   const [orderPlaced, setOrderPlaced] = useState(false);
   const [isCheckingOut, setIsCheckingOut] = useState(false);
   const [checkoutProgress, setCheckoutProgress] = useState("");
@@ -71,7 +74,18 @@ export function CheckoutPage() {
       return;
     }
 
-      const completedPurchases: Array<{ productId: string; name: string; txHash: `0x${string}` }> = [];
+    const normalizedGiftRecipient = giftRecipientWallet.trim().toLowerCase();
+    const isValidGiftWallet = /^0x[a-fA-F0-9]{40}$/.test(giftRecipientWallet.trim());
+    if (isGift && !isValidGiftWallet) {
+      toast.error("Enter a valid recipient wallet address.");
+      return;
+    }
+    if (isGift && normalizedGiftRecipient === address.toLowerCase()) {
+      toast.error("Recipient wallet must be different from your connected wallet.");
+      return;
+    }
+
+    const completedPurchases: Array<{ productId: string; name: string; txHash: `0x${string}` }> = [];
 
     try {
       checkoutInFlightRef.current = true;
@@ -95,6 +109,12 @@ export function CheckoutPage() {
           contract_listing_id: item.contractListingId,
           contract_product_id: item.contractProductId,
           quantity: item.quantity,
+          gift: isGift
+            ? {
+                recipient_wallet: normalizedGiftRecipient,
+                note: giftNote.trim() || null,
+              }
+            : null,
         });
 
         let purchase: {
@@ -195,6 +215,14 @@ export function CheckoutPage() {
               postal_code: postalCode,
               country,
               notes,
+              ...(isGift
+                ? {
+                    gift_recipient_wallet: normalizedGiftRecipient,
+                    gift_note: giftNote.trim() || null,
+                    gift_status: "pending",
+                    gift_sender_wallet: address.toLowerCase(),
+                  }
+                : {}),
             },
           });
         } catch (recordError) {
@@ -378,6 +406,45 @@ export function CheckoutPage() {
                     className="resize-none"
                     rows={3}
                   />
+                </div>
+
+                <div className="space-y-3 rounded-lg border border-border/70 bg-muted/20 p-4">
+                  <label htmlFor="gift-toggle" className="flex cursor-pointer items-center gap-3">
+                    <input
+                      id="gift-toggle"
+                      type="checkbox"
+                      checked={isGift}
+                      onChange={(event) => setIsGift(event.target.checked)}
+                      className="h-4 w-4 rounded border-input"
+                    />
+                    <span className="text-sm font-medium">Send this checkout as a gift</span>
+                  </label>
+
+                  {isGift ? (
+                    <div className="space-y-3">
+                      <div>
+                        <Label htmlFor="gift-recipient">Recipient Wallet *</Label>
+                        <Input
+                          id="gift-recipient"
+                          value={giftRecipientWallet}
+                          onChange={(event) => setGiftRecipientWallet(event.target.value)}
+                          placeholder="0x..."
+                          required={isGift}
+                        />
+                      </div>
+                      <div>
+                        <Label htmlFor="gift-note">Gift Note</Label>
+                        <Textarea
+                          id="gift-note"
+                          value={giftNote}
+                          onChange={(event) => setGiftNote(event.target.value)}
+                          placeholder="Optional note shown to the recipient."
+                          className="resize-none"
+                          rows={2}
+                        />
+                      </div>
+                    </div>
+                  ) : null}
                 </div>
 
                 <Button

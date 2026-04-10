@@ -82,6 +82,10 @@ const LIVE_DROP_STATUSES = ["live", "active", "published"];
 const PUBLIC_PRODUCT_STATUSES = ["published", "active"];
 const DEFAULT_IPFS_GATEWAY_BASE = "https://gateway.pinata.cloud/ipfs";
 const IPFS_GATEWAY_BASE = (process.env.VITE_IPFS_GATEWAY_URL || DEFAULT_IPFS_GATEWAY_BASE).replace(/\/$/, "");
+const SHARE_ITEM_TYPES = new Set(["drop", "product", "release"]);
+const SHARE_BOT_UA_PATTERN =
+  /(twitterbot|xbot|facebookexternalhit|facebot|linkedinbot|telegrambot|slackbot|discordbot|whatsapp|skypeuripreview|pinterest|embedly|googlebot|bingbot)/i;
+const GIFT_ORDER_STATUSES = new Set(["pending", "accepted", "declined"]);
 
 const ARTIST_SUBSCRIPTION_ABI = [
   "function getSubscriberCount() view returns (uint256)",
@@ -282,6 +286,198 @@ const upload = multer({
 
 function normalizeWallet(wallet = "") {
   return wallet.trim().toLowerCase();
+}
+
+function escapeHtml(value = "") {
+  return String(value)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
+function resolveRequestOrigin(req) {
+  const forwardedProto = String(req.headers["x-forwarded-proto"] || "")
+    .split(",")[0]
+    .trim();
+  const forwardedHost = String(req.headers["x-forwarded-host"] || "")
+    .split(",")[0]
+    .trim();
+  const host = forwardedHost || req.get("host") || "localhost:3000";
+  const protocol = forwardedProto || req.protocol || "https";
+  return `${protocol}://${host}`;
+}
+
+function toAbsoluteUrl(req, value = "") {
+  const normalized = String(value || "").trim();
+  if (!normalized) return "";
+  if (/^https?:\/\//i.test(normalized)) return normalized;
+  const origin = resolveRequestOrigin(req);
+  if (normalized.startsWith("/")) return `${origin}${normalized}`;
+  return `${origin}/${normalized}`;
+}
+
+function isShareCrawlerRequest(req) {
+  const userAgent = String(req.get("user-agent") || "");
+  if (SHARE_BOT_UA_PATTERN.test(userAgent)) {
+    return true;
+  }
+
+  const purpose = String(req.get("sec-purpose") || "").toLowerCase();
+  const fetchDest = String(req.get("sec-fetch-dest") || "").toLowerCase();
+  return purpose.includes("prefetch") || fetchDest === "empty";
+}
+
+function formatSharePrice(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric <= 0) {
+    return null;
+  }
+
+  const precision = numeric >= 1 ? 2 : 4;
+  return `${numeric.toFixed(precision).replace(/\.?0+$/, "")} ETH`;
+}
+
+function resolveShareItemImage(req, item) {
+  const candidates = [
+    item?.image_url,
+    item?.preview_uri,
+    item?.image_ipfs_uri,
+    item?.delivery_uri,
+  ];
+
+  for (const candidate of candidates) {
+    const value = String(candidate || "").trim();
+    if (!value) continue;
+
+    const proxied = resolveMediaProxyTarget(value) || value;
+    const absolute = toAbsoluteUrl(req, proxied);
+    if (absolute) return absolute;
+  }
+
+  return toAbsoluteUrl(req, "/popup-logo.png");
+}
+
+function summarizeShareDescription(item) {
+  const itemType = String(item?.item_type || "item")
+    .trim()
+    .toLowerCase();
+  const typeLabel = itemType === "drop"
+    ? "drop"
+    : itemType === "release"
+    ? "creative release"
+    : "product";
+  const priced = formatSharePrice(item?.price_eth);
+  const fallback = priced
+    ? `${priced} • POPUP ${typeLabel}`
+    : `Shared POPUP ${typeLabel}`;
+  const source = String(item?.description || "").trim() || fallback;
+  return source.length > 220 ? `${source.slice(0, 217)}...` : source;
+}
+
+function buildShareMetaHtml({
+  title,
+  description,
+  image,
+  url,
+  type,
+}) {
+  const safeTitle = escapeHtml(title || "POPUP");
+  const safeDescription = escapeHtml(description || "Shared POPUP collectible");
+  const safeImage = escapeHtml(image || "");
+  const safeUrl = escapeHtml(url || "");
+  const safeType = escapeHtml(type || "website");
+
+  return `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>${safeTitle}</title>
+    <meta name="description" content="${safeDescription}" />
+    <meta name="robots" content="noindex, nofollow" />
+    <meta property="og:site_name" content="POPUP" />
+    <meta property="og:type" content="${safeType}" />
+    <meta property="og:title" content="${safeTitle}" />
+    <meta property="og:description" content="${safeDescription}" />
+    <meta property="og:url" content="${safeUrl}" />
+    <meta property="og:image" content="${safeImage}" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="${safeTitle}" />
+    <meta name="twitter:description" content="${safeDescription}" />
+    <meta name="twitter:image" content="${safeImage}" />
+  </head>
+  <body>
+    <noscript><a href="${safeUrl}">Open shared POPUP link</a></noscript>
+  </body>
+</html>`;
+}
+
+function parseGiftMetadata(rawShippingAddress) {
+  if (!rawShippingAddress || typeof rawShippingAddress !== "object" || Array.isArray(rawShippingAddress)) {
+    return null;
+  }
+
+  const recipientWallet = normalizeWallet(
+    typeof rawShippingAddress.gift_recipient_wallet === "string"
+      ? rawShippingAddress.gift_recipient_wallet
+      : typeof rawShippingAddress.recipient_wallet === "string"
+      ? rawShippingAddress.recipient_wallet
+      : ""
+  );
+
+  if (!recipientWallet) {
+    return null;
+  }
+
+  const senderWallet = normalizeWallet(
+    typeof rawShippingAddress.gift_sender_wallet === "string"
+      ? rawShippingAddress.gift_sender_wallet
+      : ""
+  );
+  const statusCandidate = typeof rawShippingAddress.gift_status === "string"
+    ? rawShippingAddress.gift_status.trim().toLowerCase()
+    : "pending";
+  const status = GIFT_ORDER_STATUSES.has(statusCandidate) ? statusCandidate : "pending";
+  const note = typeof rawShippingAddress.gift_note === "string"
+    ? rawShippingAddress.gift_note.trim()
+    : "";
+  const giftedAt = typeof rawShippingAddress.gifted_at === "string" && rawShippingAddress.gifted_at.trim()
+    ? rawShippingAddress.gifted_at.trim()
+    : null;
+  const acceptedAt = typeof rawShippingAddress.gift_accepted_at === "string" && rawShippingAddress.gift_accepted_at.trim()
+    ? rawShippingAddress.gift_accepted_at.trim()
+    : null;
+
+  return {
+    recipientWallet,
+    senderWallet: senderWallet || null,
+    status,
+    note: note || null,
+    giftedAt,
+    acceptedAt,
+  };
+}
+
+function applyGiftMetadataToShippingAddress(shippingAddressJsonb, buyerWallet) {
+  const gift = parseGiftMetadata(shippingAddressJsonb);
+  if (!gift) {
+    return shippingAddressJsonb;
+  }
+
+  const senderWallet = normalizeWallet(buyerWallet) || gift.senderWallet;
+  const status = gift.status === "accepted" ? "accepted" : "pending";
+
+  return {
+    ...(shippingAddressJsonb || {}),
+    gift_recipient_wallet: gift.recipientWallet,
+    gift_sender_wallet: senderWallet || null,
+    gift_status: status,
+    gift_note: gift.note || null,
+    gifted_at: gift.giftedAt || new Date().toISOString(),
+    gift_accepted_at: status === "accepted" ? gift.acceptedAt || new Date().toISOString() : null,
+  };
 }
 
 function requireEnv(value, label) {
@@ -2526,6 +2722,8 @@ function normalizeShippingAddress(rawShipping) {
     return null;
   }
 
+  const gift = parseGiftMetadata(rawShipping);
+
   const shipping = {
     name: typeof rawShipping.name === "string" ? rawShipping.name.trim() : "",
     email: typeof rawShipping.email === "string" ? rawShipping.email.trim() : "",
@@ -2552,6 +2750,16 @@ function normalizeShippingAddress(rawShipping) {
   return {
     ...shipping,
     full_address: fullAddress,
+    ...(gift
+      ? {
+          gift_recipient_wallet: gift.recipientWallet,
+          gift_sender_wallet: gift.senderWallet,
+          gift_status: gift.status,
+          gift_note: gift.note,
+          gifted_at: gift.giftedAt,
+          gift_accepted_at: gift.acceptedAt,
+        }
+      : {}),
   };
 }
 
@@ -2895,18 +3103,41 @@ registerRoute("get", "/products/:id/assets", authRequired, async (req, res) => {
       return res.status(404).json({ error: productError?.message || "Product not found" });
     }
 
-    const { data: ownedOrder } = await supabase
-      .from("orders")
-      .select("id")
-      .eq("buyer_wallet", req.auth.wallet)
-      .eq("product_id", product.id)
-      .in("status", ["paid", "processing", "shipped", "delivered"])
-      .maybeSingle();
+    const [
+      { data: ownedOrder },
+      { data: ownedEntitlement },
+      { data: acceptedGiftOrder },
+    ] = await Promise.all([
+      supabase
+        .from("orders")
+        .select("id")
+        .eq("buyer_wallet", req.auth.wallet)
+        .eq("product_id", product.id)
+        .in("status", ["paid", "processing", "shipped", "delivered"])
+        .maybeSingle(),
+      supabase
+        .from("entitlements")
+        .select("id")
+        .eq("buyer_wallet", req.auth.wallet)
+        .eq("product_id", product.id)
+        .in("status", ["granted", "pending"])
+        .maybeSingle(),
+      supabase
+        .from("orders")
+        .select("id")
+        .eq("product_id", product.id)
+        .eq("shipping_address_jsonb->>gift_recipient_wallet", req.auth.wallet)
+        .eq("shipping_address_jsonb->>gift_status", "accepted")
+        .in("status", ["paid", "processing", "shipped", "delivered"])
+        .maybeSingle(),
+    ]);
 
     const canViewPrivate =
       req.auth.role === "admin" ||
       normalizeWallet(product.creator_wallet) === req.auth.wallet ||
-      Boolean(ownedOrder?.id);
+      Boolean(ownedOrder?.id) ||
+      Boolean(ownedEntitlement?.id) ||
+      Boolean(acceptedGiftOrder?.id);
 
     let query = supabase
       .from("product_assets")
@@ -3158,7 +3389,8 @@ app.post("/orders", authRequired, async (req, res) => {
     return res.status(400).json({ error: "At least one order item is required" });
   }
 
-  const shippingAddressJsonb = normalizeShippingAddress(order.shipping_address_jsonb ?? order.shipping_address);
+  let shippingAddressJsonb = normalizeShippingAddress(order.shipping_address_jsonb ?? order.shipping_address);
+  shippingAddressJsonb = applyGiftMetadataToShippingAddress(shippingAddressJsonb, buyerWallet);
   const shippingEth = roundEth(order.shipping_eth ?? 0);
   const taxEth = roundEth(order.tax_eth ?? 0);
   const currency = typeof order.currency === "string" && order.currency.trim() ? order.currency.trim() : "ETH";
@@ -3545,6 +3777,209 @@ app.patch("/orders/:id", authRequired, async (req, res) => {
   }
 
   return res.json(data);
+});
+
+registerRoute("get", "/gifts", authRequired, async (req, res) => {
+  try {
+    const direction = String(req.query.direction || "received").trim().toLowerCase() === "sent"
+      ? "sent"
+      : "received";
+    const requestedWallet = normalizeWallet(
+      typeof req.query.wallet === "string" && req.query.wallet.trim()
+        ? req.query.wallet
+        : req.auth.wallet
+    );
+    const statusFilterCandidate = typeof req.query.status === "string"
+      ? req.query.status.trim().toLowerCase()
+      : "";
+    const statusFilter = GIFT_ORDER_STATUSES.has(statusFilterCandidate) ? statusFilterCandidate : "";
+
+    if (!sameWalletOrAdmin(requestedWallet, req.auth)) {
+      return res.status(403).json({ error: "Cannot view another wallet's gifts" });
+    }
+
+    const walletPath =
+      direction === "sent"
+        ? "shipping_address_jsonb->>gift_sender_wallet"
+        : "shipping_address_jsonb->>gift_recipient_wallet";
+
+    let query = supabase
+      .from("orders")
+      .select(ORDER_SELECT)
+      .eq(walletPath, requestedWallet)
+      .order("created_at", { ascending: false });
+
+    if (statusFilter) {
+      query = query.eq("shipping_address_jsonb->>gift_status", statusFilter);
+    }
+
+    let { data, error } = await query;
+
+    if (error && isMissingOrderSchemaCompatError(error)) {
+      let legacyQuery = supabase
+        .from("orders")
+        .select(LEGACY_ORDER_SELECT)
+        .eq(walletPath, requestedWallet)
+        .order("created_at", { ascending: false });
+
+      if (statusFilter) {
+        legacyQuery = legacyQuery.eq("shipping_address_jsonb->>gift_status", statusFilter);
+      }
+
+      ({ data, error } = await legacyQuery);
+    }
+
+    if (error) {
+      return res.status(400).json({ error: error.message });
+    }
+
+    const normalized = (data || [])
+      .map(normalizeOrderRecord)
+      .map((order) => {
+        const gift = parseGiftMetadata(order.shipping_address_jsonb);
+        if (!gift) return null;
+
+        if (direction === "sent" && gift.senderWallet !== requestedWallet) {
+          return null;
+        }
+        if (direction === "received" && gift.recipientWallet !== requestedWallet) {
+          return null;
+        }
+        if (statusFilter && gift.status !== statusFilter) {
+          return null;
+        }
+
+        return {
+          ...order,
+          gift: {
+            recipient_wallet: gift.recipientWallet,
+            sender_wallet: gift.senderWallet,
+            status: gift.status,
+            note: gift.note,
+            gifted_at: gift.giftedAt,
+            accepted_at: gift.acceptedAt,
+          },
+        };
+      })
+      .filter(Boolean);
+
+    return res.json(normalized);
+  } catch (error) {
+    return res.status(500).json({ error: error.message || "Failed to load gifts" });
+  }
+});
+
+registerRoute("post", "/gifts/:id/accept", authRequired, async (req, res) => {
+  try {
+    const order = await getOrderById(req.params.id);
+    if (!order) {
+      return res.status(404).json({ error: "Gift order not found" });
+    }
+
+    const gift = parseGiftMetadata(order.shipping_address_jsonb);
+    if (!gift) {
+      return res.status(400).json({ error: "This order is not marked as a gift" });
+    }
+
+    if (req.auth.role !== "admin" && gift.recipientWallet !== req.auth.wallet) {
+      return res.status(403).json({ error: "Only the intended recipient can accept this gift" });
+    }
+
+    if (gift.status === "accepted") {
+      return res.json({ success: true, order });
+    }
+
+    const now = new Date().toISOString();
+    const nextShippingAddress = {
+      ...(order.shipping_address_jsonb && typeof order.shipping_address_jsonb === "object" ? order.shipping_address_jsonb : {}),
+      gift_recipient_wallet: gift.recipientWallet,
+      gift_sender_wallet: gift.senderWallet || normalizeWallet(order.buyer_wallet),
+      gift_status: "accepted",
+      gift_note: gift.note || null,
+      gifted_at: gift.giftedAt || now,
+      gift_accepted_at: now,
+    };
+
+    const { error: updateOrderError } = await supabase
+      .from("orders")
+      .update({
+        shipping_address_jsonb: nextShippingAddress,
+        updated_at: now,
+      })
+      .eq("id", order.id);
+
+    if (updateOrderError) {
+      return res.status(400).json({ error: updateOrderError.message || "Failed to accept gift" });
+    }
+
+    const senderWallet = normalizeWallet(order.buyer_wallet);
+    const recipientWallet = gift.recipientWallet;
+    const { data: transferredEntitlements, error: transferEntitlementsError } = await supabase
+      .from("entitlements")
+      .update({
+        buyer_wallet: recipientWallet,
+        updated_at: now,
+      })
+      .eq("order_id", order.id)
+      .eq("buyer_wallet", senderWallet)
+      .select("id");
+
+    if (transferEntitlementsError) {
+      console.warn("Gift entitlement transfer warning:", transferEntitlementsError.message);
+    }
+
+    if (!transferredEntitlements || transferredEntitlements.length === 0) {
+      const normalizedItems = Array.isArray(order.order_items) && order.order_items.length > 0
+        ? order.order_items
+        : order.product_id
+        ? [{
+            id: null,
+            product_id: order.product_id,
+            products: firstRelationRecord(order.products),
+          }]
+        : [];
+
+      const fallbackEntitlements = normalizedItems
+        .map((item) => {
+          if (!item?.product_id) return null;
+          const product = firstRelationRecord(item.products);
+          return {
+            order_id: order.id,
+            order_item_id: item.id || null,
+            product_id: item.product_id,
+            buyer_wallet: recipientWallet,
+            access_type: product?.product_type === "physical" ? "license" : "download",
+            status: "granted",
+            grant_reason: "gift_accepted",
+            granted_at: now,
+            metadata: {
+              gift_order_id: order.id,
+              gift_sender_wallet: senderWallet,
+              gift_recipient_wallet: recipientWallet,
+            },
+          };
+        })
+        .filter(Boolean);
+
+      if (fallbackEntitlements.length > 0) {
+        const { error: insertEntitlementsError } = await supabase
+          .from("entitlements")
+          .insert(fallbackEntitlements);
+
+        if (insertEntitlementsError) {
+          console.warn("Gift entitlement fallback insert warning:", insertEntitlementsError.message);
+        }
+      }
+    }
+
+    const hydratedOrder = await getOrderById(order.id);
+    return res.json({
+      success: true,
+      order: hydratedOrder,
+    });
+  } catch (error) {
+    return res.status(500).json({ error: error.message || "Failed to accept gift" });
+  }
 });
 
 registerRoute("post", "/artist-applications", authRequired, async (req, res) => {
@@ -4652,6 +5087,87 @@ const getAdminArtistsImpl = async (req, res) => {
 // Register at both /admin/artists and /api/admin/artists
 app.get("/admin/artists", authRequired, adminRequired, getAdminArtistsImpl);
 app.get("/api/admin/artists", authRequired, adminRequired, getAdminArtistsImpl);
+
+app.get("/share/:type/:id", async (req, res, next) => {
+  const requestedType = String(req.params.type || "").trim().toLowerCase();
+  const requestedId = String(req.params.id || "").trim();
+  const crawlerRequest = isShareCrawlerRequest(req);
+
+  if (!SHARE_ITEM_TYPES.has(requestedType) || !requestedId) {
+    return next();
+  }
+
+  const searchIndex = req.originalUrl ? req.originalUrl.indexOf("?") : -1;
+  const querySuffix = searchIndex >= 0 ? req.originalUrl.slice(searchIndex) : "";
+  const shareUrl = toAbsoluteUrl(req, `/share/${requestedType}/${requestedId}${querySuffix}`);
+
+  try {
+    const { data: item, error } = await supabase
+      .from("catalog_with_engagement")
+      .select("*")
+      .eq("item_type", requestedType)
+      .eq("id", requestedId)
+      .maybeSingle();
+
+    if (error) {
+      throw error;
+    }
+
+    if (!item) {
+      if (!crawlerRequest) {
+        return next();
+      }
+
+      const html = buildShareMetaHtml({
+        title: "POPUP shared link",
+        description: "Open this shared POPUP link to view the latest collectible card.",
+        image: toAbsoluteUrl(req, "/popup-logo.png"),
+        url: shareUrl,
+        type: "website",
+      });
+      res.setHeader("Cache-Control", "public, max-age=120, s-maxage=120");
+      res.setHeader("Content-Type", "text/html; charset=utf-8");
+      return res.status(200).send(html);
+    }
+
+    if (!crawlerRequest) {
+      if (fs.existsSync(frontendIndexPath)) {
+        res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+        res.setHeader("Content-Type", "text/html");
+        return res.sendFile(frontendIndexPath);
+      }
+      return next();
+    }
+
+    const html = buildShareMetaHtml({
+      title: String(item.title || "POPUP shared collectible").trim(),
+      description: summarizeShareDescription(item),
+      image: resolveShareItemImage(req, item),
+      url: shareUrl,
+      type: requestedType === "product" ? "product" : "article",
+    });
+
+    res.setHeader("Cache-Control", "public, max-age=300, s-maxage=300");
+    res.setHeader("Content-Type", "text/html; charset=utf-8");
+    return res.status(200).send(html);
+  } catch (error) {
+    if (crawlerRequest) {
+      console.warn("Share meta route warning:", error?.message || error);
+      const fallbackHtml = buildShareMetaHtml({
+        title: "POPUP shared link",
+        description: "Open this shared POPUP link to view the full action card.",
+        image: toAbsoluteUrl(req, "/popup-logo.png"),
+        url: shareUrl,
+        type: "website",
+      });
+      res.setHeader("Cache-Control", "public, max-age=120, s-maxage=120");
+      res.setHeader("Content-Type", "text/html; charset=utf-8");
+      return res.status(200).send(fallbackHtml);
+    }
+
+    return next();
+  }
+});
 
 const port = Number(PORT) || 3000;
 

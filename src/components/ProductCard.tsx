@@ -8,6 +8,7 @@ import { useCartStore } from "@/stores/cartStore";
 import { useProductStore } from "@/stores/productStore";
 import { formatEther } from "viem";
 import { toast } from "sonner";
+import { resolveContractProductId } from "@/lib/productMetadata";
 
 interface ProductCardProps {
   id: string;
@@ -49,9 +50,10 @@ export function ProductCard({
   const [isAdding, setIsAdding] = useState(false);
   const { addItem } = useCartStore();
   const { setSelectedProduct } = useProductStore();
+  const resolvedContractProductId = resolveContractProductId(null, contractProductId);
   const isOnchainReady =
     (contractKind === "creativeReleaseEscrow" && typeof contractListingId === "number" && contractListingId > 0) ||
-    (typeof contractProductId === "number" && contractProductId > 0);
+    (typeof resolvedContractProductId === "number" && resolvedContractProductId > 0);
 
   const handleQuickAdd = async (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -72,7 +74,7 @@ export function ProductCard({
         creativeReleaseId ?? null,
         contractKind ?? "productStore",
         contractListingId ?? null,
-        contractProductId ?? null,
+        resolvedContractProductId ?? null,
         1,
         price,
         name,

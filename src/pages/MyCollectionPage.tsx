@@ -9,13 +9,16 @@ import { ipfsToHttp } from "@/lib/pinata";
 import { resolveDropCoverImage, sameMediaTarget } from "@/lib/mediaPreview";
 import { useCollectionStore, type CollectedDropItem } from "@/stores/collectionStore";
 import {
+  acceptGiftOrder,
   getEntitlementsByBuyer,
   getFulfillmentsByOrder,
+  getGiftOrders,
   getOrdersByBuyer,
   getProductAssets,
   createProductFeedbackThread,
   type Entitlement,
   type Fulfillment,
+  type GiftOrder,
   type OrderWithItems,
   type ProductAsset,
 } from "@/lib/db";
@@ -44,6 +47,59 @@ function getCollectionItemKey(item: CollectedDropItem) {
   }
 
   return `${normalizedWallet}:${item.id}`;
+}
+
+type ParsedGiftMetadata = {
+  recipientWallet: string;
+  senderWallet: string | null;
+  status: "pending" | "accepted" | "declined";
+  note: string | null;
+  giftedAt: string | null;
+  acceptedAt: string | null;
+};
+
+function parseGiftMetadata(order: Pick<OrderWithItems, "shipping_address_jsonb">): ParsedGiftMetadata | null {
+  const raw = order.shipping_address_jsonb;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return null;
+  }
+
+  const recipientWallet = typeof raw.gift_recipient_wallet === "string"
+    ? raw.gift_recipient_wallet.trim().toLowerCase()
+    : "";
+
+  if (!recipientWallet) {
+    return null;
+  }
+
+  const senderWallet = typeof raw.gift_sender_wallet === "string"
+    ? raw.gift_sender_wallet.trim().toLowerCase()
+    : "";
+  const statusCandidate = typeof raw.gift_status === "string"
+    ? raw.gift_status.trim().toLowerCase()
+    : "pending";
+  const status = statusCandidate === "accepted" || statusCandidate === "declined" ? statusCandidate : "pending";
+  const note = typeof raw.gift_note === "string" ? raw.gift_note.trim() : "";
+  const giftedAt = typeof raw.gifted_at === "string" && raw.gifted_at.trim() ? raw.gifted_at.trim() : null;
+  const acceptedAt = typeof raw.gift_accepted_at === "string" && raw.gift_accepted_at.trim()
+    ? raw.gift_accepted_at.trim()
+    : null;
+
+  return {
+    recipientWallet,
+    senderWallet: senderWallet || null,
+    status,
+    note: note || null,
+    giftedAt,
+    acceptedAt,
+  };
+}
+
+function truncateWallet(wallet?: string | null, start = 6, end = 4) {
+  const value = String(wallet || "").trim();
+  if (!value) return "";
+  if (value.length <= start + end) return value;
+  return `${value.slice(0, start)}...${value.slice(-end)}`;
 }
 
 function inferCollectedAssetType(item: Pick<CollectedDropItem, "assetType" | "deliveryUri" | "previewUri" | "imageUrl">): AssetType {
@@ -248,8 +304,35 @@ function toOrderCollectionItems(
       product?.delivery_uri ||
       undefined;
     const deliveryAssetType = inferProductAssetType(deliveryAsset);
+    const productMetadata =
+      product?.metadata && typeof product.metadata === "object" && !Array.isArray(product.metadata)
+        ? (product.metadata as Record<string, unknown>)
+        : {};
+    const contentKind = typeof productMetadata.content_kind === "string"
+      ? productMetadata.content_kind.trim().toLowerCase()
+      : "";
+    const metadataDeliveryAssetType = typeof productMetadata.delivery_asset_type === "string"
+      ? productMetadata.delivery_asset_type.trim().toLowerCase()
+      : "";
+    const uriDrivenType = detectAssetTypeFromUri(deliveryUri || previewUri || "");
+    const fallbackAssetType: AssetType =
+      deliveryAsset
+        ? deliveryAssetType
+        : metadataDeliveryAssetType === "epub"
+        ? "epub"
+        : metadataDeliveryAssetType === "pdf"
+        ? "pdf"
+        : contentKind === "ebook"
+        ? uriDrivenType === "epub" || uriDrivenType === "pdf"
+          ? uriDrivenType
+          : "pdf"
+        : contentKind === "downloadable"
+        ? "digital"
+        : contentKind === "artwork"
+        ? "image"
+        : (product?.asset_type as AssetType) || "image";
     const inferredAssetType = inferCollectedAssetType({
-      assetType: deliveryAsset ? deliveryAssetType : product?.asset_type || undefined,
+      assetType: fallbackAssetType,
       deliveryUri,
       previewUri,
       imageUrl: product?.image_url || undefined,
@@ -322,6 +405,9 @@ const MyCollectionPage = ({ embedded = false }: MyCollectionPageProps) => {
   const addCollectedDrop = useCollectionStore((state) => state.addCollectedDrop);
   const [purchasedCollection, setPurchasedCollection] = useState<CollectedDropItem[]>([]);
   const [purchasedCollectionLoading, setPurchasedCollectionLoading] = useState(false);
+  const [pendingGiftOrders, setPendingGiftOrders] = useState<GiftOrder[]>([]);
+  const [acceptingGiftOrderId, setAcceptingGiftOrderId] = useState<string | null>(null);
+  const [giftRefreshNonce, setGiftRefreshNonce] = useState(0);
   const [feedbackSubmitting, setFeedbackSubmitting] = useState(false);
   const [feedbackForm, setFeedbackForm] = useState({
     visibility: "public" as "public" | "private",
@@ -363,6 +449,7 @@ const MyCollectionPage = ({ embedded = false }: MyCollectionPageProps) => {
   useEffect(() => {
     if (!isConnected || !address) {
       setPurchasedCollection([]);
+      setPendingGiftOrders([]);
       setPurchasedCollectionLoading(false);
       return;
     }
@@ -373,13 +460,45 @@ const MyCollectionPage = ({ embedded = false }: MyCollectionPageProps) => {
       setPurchasedCollectionLoading(true);
 
       try {
-        await establishSecureSession(address.toLowerCase());
-        const orders = await getOrdersByBuyer(address.toLowerCase(), { accessibleOnly: true });
+        const normalizedAddress = address.toLowerCase();
+        await establishSecureSession(normalizedAddress);
+        const [orders, receivedGiftOrders] = await Promise.all([
+          getOrdersByBuyer(normalizedAddress, { accessibleOnly: true }),
+          getGiftOrders({ direction: "received" }),
+        ]);
         if (!active) return;
+
+        const normalizedGiftOrders = (receivedGiftOrders || []).filter((order) => {
+          const gift = parseGiftMetadata(order);
+          return gift?.recipientWallet === normalizedAddress;
+        });
+        const pendingGifts = normalizedGiftOrders.filter((order) => {
+          const gift = parseGiftMetadata(order);
+          return gift?.status === "pending";
+        });
+        const acceptedGiftOrders = normalizedGiftOrders.filter((order) => {
+          const gift = parseGiftMetadata(order);
+          return gift?.status === "accepted";
+        });
+
+        setPendingGiftOrders(pendingGifts);
+
+        const mergedOrdersById = new Map<string, OrderWithItems>();
+        for (const order of orders || []) {
+          if (order?.id) {
+            mergedOrdersById.set(order.id, order);
+          }
+        }
+        for (const giftOrder of acceptedGiftOrders) {
+          if (giftOrder?.id) {
+            mergedOrdersById.set(giftOrder.id, giftOrder);
+          }
+        }
+        const collectionOrders = Array.from(mergedOrdersById.values());
 
         const productIds = Array.from(
           new Set(
-            (orders || []).flatMap((order) => {
+            collectionOrders.flatMap((order) => {
               const normalizedOrder = order as OrderWithItems;
               const itemProductIds = normalizedOrder.order_items?.map((item) => item.product_id).filter(Boolean) || [];
               return normalizedOrder.product_id ? [...itemProductIds, normalizedOrder.product_id] : itemProductIds;
@@ -388,9 +507,9 @@ const MyCollectionPage = ({ embedded = false }: MyCollectionPageProps) => {
         );
 
         const [entitlements, fulfillmentGroups, productAssetEntries] = await Promise.all([
-          getEntitlementsByBuyer(address.toLowerCase()),
+          getEntitlementsByBuyer(normalizedAddress),
           Promise.all(
-            (orders || []).map(async (order) => ({
+            collectionOrders.map(async (order) => ({
               orderId: order.id,
               fulfillments: await getFulfillmentsByOrder(order.id),
             })),
@@ -417,16 +536,19 @@ const MyCollectionPage = ({ embedded = false }: MyCollectionPageProps) => {
         );
         const productAssetsByProductId = new Map<string, ProductAsset[]>(productAssetEntries);
 
-        const mappedItems = (orders || []).flatMap((order) =>
+        const mappedItems = collectionOrders.flatMap((order) =>
           toOrderCollectionItems(order as OrderWithItems, address, productAssetsByProductId).map((item) => {
             const productId = item.productId || order.product_id || null;
             const entitlementKey = `${order.id}:${productId || ""}`;
             const itemEntitlements = entitlementsByOrderAndProduct.get(entitlementKey) || [];
             const orderFulfillments = fulfillmentsByOrder.get(order.id) || [];
             const itemFulfillment = orderFulfillments.find((fulfillment) => fulfillment.product_id === productId) || orderFulfillments[0];
+            const gift = parseGiftMetadata(order);
+            const giftCollectedAt = gift?.status === "accepted" ? gift.acceptedAt || gift.giftedAt : null;
 
             return {
               ...item,
+              collectedAt: giftCollectedAt || item.collectedAt,
               entitlementCount: itemEntitlements.length,
               fulfillmentStatus: itemFulfillment?.status || undefined,
             };
@@ -438,6 +560,7 @@ const MyCollectionPage = ({ embedded = false }: MyCollectionPageProps) => {
         console.error("Failed to load purchased collection:", error);
         if (active) {
           setPurchasedCollection([]);
+          setPendingGiftOrders([]);
         }
       } finally {
         if (active) {
@@ -451,7 +574,7 @@ const MyCollectionPage = ({ embedded = false }: MyCollectionPageProps) => {
     return () => {
       active = false;
     };
-  }, [address, isConnected]);
+  }, [address, giftRefreshNonce, isConnected]);
 
   useEffect(() => {
     if (!highlightedId) return;
@@ -544,6 +667,29 @@ const MyCollectionPage = ({ embedded = false }: MyCollectionPageProps) => {
         return <ImageViewer src={src} alt={selectedItem.title} onClose={() => setSelectedItem(null)} />;
     }
   };
+
+  async function handleAcceptGift(orderId: string) {
+    if (!orderId || !address) {
+      toast.error("Connect your wallet to accept this gift.");
+      return;
+    }
+
+    setAcceptingGiftOrderId(orderId);
+    try {
+      await establishSecureSession(address.toLowerCase());
+      const acceptedOrder = await acceptGiftOrder(orderId);
+      if (!acceptedOrder) {
+        throw new Error("Gift acceptance did not return an updated order.");
+      }
+
+      toast.success("Gift accepted. The release is now in your collection.");
+      setGiftRefreshNonce((current) => current + 1);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Unable to accept this gift right now.");
+    } finally {
+      setAcceptingGiftOrderId(null);
+    }
+  }
 
   async function handleSubmitCollectorFeedback() {
     if (!selectedItem?.productId) {
@@ -792,6 +938,53 @@ const MyCollectionPage = ({ embedded = false }: MyCollectionPageProps) => {
           </button>
         ))}
       </div>
+
+      {pendingGiftOrders.length > 0 ? (
+        <div className="px-4 pt-4 space-y-3">
+          <div className="rounded-2xl border border-primary/30 bg-primary/5 p-4">
+            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-primary">Gift inbox</p>
+            <p className="mt-2 text-sm text-muted-foreground">
+              {pendingGiftOrders.length} gift{pendingGiftOrders.length > 1 ? "s are" : " is"} waiting for your acceptance.
+            </p>
+          </div>
+
+          {pendingGiftOrders.map((order) => {
+            const gift = parseGiftMetadata(order);
+            const firstOrderItem = order.order_items?.[0];
+            const firstProduct = Array.isArray(firstOrderItem?.products)
+              ? firstOrderItem.products[0]
+              : firstOrderItem?.products;
+            const fallbackProduct = Array.isArray(order.products) ? order.products[0] : order.products;
+            const title = firstProduct?.name || fallbackProduct?.name || "Gifted collectible";
+            const senderLabel = gift?.senderWallet ? truncateWallet(gift.senderWallet, 8, 4) : "Collector";
+
+            return (
+              <div key={order.id} className="rounded-2xl border border-border bg-card p-4">
+                <p className="text-sm font-semibold text-foreground">{title}</p>
+                <p className="mt-1 text-xs text-muted-foreground">Gifted by {senderLabel}</p>
+                {gift?.note ? (
+                  <p className="mt-2 text-sm text-muted-foreground">"{gift.note}"</p>
+                ) : null}
+                <Button
+                  type="button"
+                  className="mt-3 rounded-full"
+                  disabled={acceptingGiftOrderId === order.id}
+                  onClick={() => void handleAcceptGift(order.id)}
+                >
+                  {acceptingGiftOrderId === order.id ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Accepting...
+                    </>
+                  ) : (
+                    "Accept gift"
+                  )}
+                </Button>
+              </div>
+            );
+          })}
+        </div>
+      ) : null}
 
       {purchasedCollectionLoading && collectedDrops.length === 0 && (
         <div className="px-4 py-12 text-center">

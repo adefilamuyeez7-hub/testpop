@@ -1,6 +1,6 @@
 ﻿import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -1670,10 +1670,22 @@ type ArtistStudioPageProps = {
   embedded?: boolean;
 };
 
+const STUDIO_TAB_IDS = new Set(["home", "drops", "raises", "analytics", "profile"]);
+
+function resolveStudioTab(value?: string | null) {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (STUDIO_TAB_IDS.has(normalized)) {
+    return normalized;
+  }
+
+  return "home";
+}
+
 const ArtistStudioPage = ({ embedded = false }: ArtistStudioPageProps) => {
   const queryClient = useQueryClient();
   const { address, balance, disconnect } = useWallet();
-  const [tab, setTab] = useState("home");
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [tab, setTab] = useState(() => resolveStudioTab(searchParams.get("tab")));
   const [drops, setDrops] = useState<Drop[]>(seedDrops);
   
   // Integration with real-time notification system
@@ -1734,6 +1746,29 @@ const ArtistStudioPage = ({ embedded = false }: ArtistStudioPageProps) => {
     loading: creatorProductsLoading,
     refetch: refetchCreatorProducts,
   } = useSupabaseProductsByCreator(address);
+
+  useEffect(() => {
+    const nextTab = resolveStudioTab(searchParams.get("tab"));
+    setTab((current) => (current === nextTab ? current : nextTab));
+  }, [searchParams]);
+
+  const selectTab = useCallback(
+    (nextTab: string) => {
+      const normalized = resolveStudioTab(nextTab);
+      setTab(normalized);
+      setSearchParams((previous) => {
+        const next = new URLSearchParams(previous);
+        if (normalized === "home") {
+          next.delete("tab");
+        } else {
+          next.set("tab", normalized);
+        }
+        return next;
+      }, { replace: true });
+    },
+    [setSearchParams]
+  );
+
   const refreshPublicDropQueries = useCallback(async () => {
     await queryClient.invalidateQueries({ queryKey: ["drops"] });
   }, [queryClient]);
@@ -2422,9 +2457,9 @@ const ArtistStudioPage = ({ embedded = false }: ArtistStudioPageProps) => {
                 </div>
               </div>
               {!profileComplete && (
-                <button onClick={() => setTab("profile")}
+                <button onClick={() => selectTab("profile")}
                   className="w-full flex items-center justify-between px-3 py-2 rounded-xl bg-primary/10 text-primary text-xs font-semibold">
-                  <span>âš¡ Complete your profile to go live</span>
+                  <span>Complete your profile to go live</span>
                   <ChevronRight className="h-4 w-4" />
                 </button>
               )}
@@ -2448,19 +2483,19 @@ const ArtistStudioPage = ({ embedded = false }: ArtistStudioPageProps) => {
                   <p className="text-sm font-semibold text-foreground">New Drop</p>
                   <p className="text-[10px] text-muted-foreground mt-0.5">Buy, auction, or campaign</p>
                 </button>
-                <button onClick={() => setTab("analytics")}
+                <button onClick={() => selectTab("analytics")}
                   className="p-4 rounded-2xl bg-card border border-border text-left hover:border-primary/40 transition-colors">
                   <Activity className="h-5 w-5 text-primary mb-2" />
                   <p className="text-sm font-semibold text-foreground">Analytics</p>
                   <p className="text-[10px] text-muted-foreground mt-0.5">Revenue & growth</p>
                 </button>
-                <button onClick={() => setTab("profile")}
+                <button onClick={() => selectTab("profile")}
                   className="p-4 rounded-2xl bg-card border border-border text-left hover:border-primary/40 transition-colors">
                   <Edit3 className="h-5 w-5 text-primary mb-2" />
                   <p className="text-sm font-semibold text-foreground">Edit Profile</p>
                   <p className="text-[10px] text-muted-foreground mt-0.5">Bio / links / pricing</p>
                 </button>
-                <button onClick={() => setTab("raises")}
+                <button onClick={() => selectTab("raises")}
                   className="p-4 rounded-2xl bg-card border border-border text-left hover:border-primary/40 transition-colors">
                   <Gavel className="h-5 w-5 text-primary mb-2" />
                   <p className="text-sm font-semibold text-foreground">IP Raise</p>
@@ -2492,7 +2527,7 @@ const ArtistStudioPage = ({ embedded = false }: ArtistStudioPageProps) => {
                       : "Once approved, admins can move the raise live for investment."}
                   </p>
                 </div>
-                <Button size="sm" variant="outline" className="rounded-full" onClick={() => setTab("raises")}>
+                <Button size="sm" variant="outline" className="rounded-full" onClick={() => selectTab("raises")}>
                   Open
                 </Button>
               </div>
@@ -2503,7 +2538,7 @@ const ArtistStudioPage = ({ embedded = false }: ArtistStudioPageProps) => {
               <div>
                 <div className="flex items-center justify-between mb-3">
                   <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Live Now</p>
-                  <button onClick={() => setTab("drops")} className="text-xs text-primary">View all</button>
+                  <button onClick={() => selectTab("drops")} className="text-xs text-primary">View all</button>
                 </div>
                 {drops.filter(d => d.status === "live").map(d => (
                   <div key={d.id} className="flex items-center gap-3 p-3 rounded-xl bg-card border border-border mb-2">
@@ -3207,7 +3242,7 @@ const ArtistStudioPage = ({ embedded = false }: ArtistStudioPageProps) => {
       <nav className={`${embedded ? "sticky bottom-0 z-50 bg-background/90 backdrop-blur-xl border-t border-border" : "fixed bottom-0 left-0 right-0 z-50 bg-background/90 backdrop-blur-xl border-t border-border max-w-lg mx-auto"}`}>
         <div className="flex items-center justify-around h-16 px-2">
           {navItems.map(item => (
-            <button key={item.id} onClick={() => setTab(item.id)}
+            <button key={item.id} onClick={() => selectTab(item.id)}
               className={`flex flex-col items-center gap-0.5 px-3 py-1.5 rounded-xl transition-all ${tab === item.id ? "text-primary" : "text-muted-foreground hover:text-foreground"}`}>
               <item.icon className={`h-5 w-5 ${tab === item.id ? "stroke-[2.5]" : ""}`} />
               <span className="text-[10px] font-medium">{item.label}</span>
