@@ -171,7 +171,7 @@ const DropDetailPage = () => {
       metadataUri: dropRecord.metadata_ipfs_uri || "",
       deliveryUri: dropRecord.delivery_uri || dropRecord.image_ipfs_uri || "",
       previewUri: dropRecord.preview_uri || undefined,
-      isGated: Boolean(dropRecord.is_gated),
+      isGated: Boolean(dropRecord.is_gated) || Boolean(dropRecord.contract_address),
       contractAddress: dropRecord.contract_address || null,
       contractDropId: dropRecord.contract_drop_id !== null && dropRecord.contract_drop_id !== undefined ? Number(dropRecord.contract_drop_id) : null,
       contractKind: normalizedContractKind as "artDrop" | "poapCampaign" | "poapCampaignV2" | "creativeReleaseEscrow" | "productStore" | null,
@@ -426,6 +426,7 @@ const DropDetailPage = () => {
   }
 
   const handleCollectSuccess = ({ ownerWallet, mintedTokenId }: { ownerWallet: string; mintedTokenId: number | null }) => {
+    const isOnchainCollect = Boolean(drop.contractAddress);
     const collectedItem = {
       id: drop.id,
       ownerWallet,
@@ -435,6 +436,7 @@ const DropDetailPage = () => {
       previewUri: drop.previewUri,
       deliveryUri: drop.deliveryUri,
       assetType: drop.assetType,
+      isGated: isOnchainCollect || drop.isGated,
       mintedTokenId,
       contractAddress: drop.contractAddress,
       contractDropId: drop.contractDropId,

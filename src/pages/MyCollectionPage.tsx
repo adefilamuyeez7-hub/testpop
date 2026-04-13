@@ -346,6 +346,10 @@ function toOrderCollectionItems(
       metadata: product?.metadata || undefined,
     });
 
+    const normalizedProductType = String(product?.product_type || "").trim().toLowerCase();
+    const isPhysicalDelivery = normalizedProductType === "physical";
+    const isGated = !isPhysicalDelivery && Boolean(product?.is_gated);
+
     return {
       id: `${typedOrder.id}:${item.id || item.product_id || index}`,
       ownerWallet,
@@ -357,7 +361,7 @@ function toOrderCollectionItems(
       previewUri,
       deliveryUri,
       assetType: inferredAssetType,
-      isGated: Boolean(product?.is_gated),
+      isGated,
       contractKind: typedOrder.contract_kind ?? null,
       orderStatus: typedOrder.status || undefined,
       collectedAt: typedOrder.created_at || new Date().toISOString(),

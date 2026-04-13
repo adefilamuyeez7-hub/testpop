@@ -36,6 +36,7 @@ export type FreshFeedItem = {
   fulfillment_label?: string;
   in_app_action?: FreshInAppAction;
   in_app_action_label?: string;
+  is_gated?: boolean;
   creator_id: string;
   creator_name: string;
   creator_wallet: string;
@@ -70,6 +71,7 @@ export type FreshCartItem = {
   in_app_action_label?: string;
   readable_url: string | null;
   download_url: string | null;
+  is_gated?: boolean;
   creator_name: string;
   creator_handle: string;
 };
@@ -102,6 +104,7 @@ export type FreshOrder = {
     in_app_action_label?: string;
     readable_url: string | null;
     download_url: string | null;
+    is_gated?: boolean;
   }>;
   gift_token?: string | null;
   fulfillment?: {
@@ -134,6 +137,8 @@ export type FreshProduct = {
   in_app_action_label?: string;
   readable_url: string | null;
   download_url: string | null;
+  is_gated?: boolean;
+  owned?: boolean;
   creator_name: string;
   creator_handle: string;
   creator_avatar_url?: string | null;
@@ -158,6 +163,8 @@ export type FreshProfile = {
     in_app_action_label?: string;
     readable_url: string | null;
     download_url: string | null;
+    is_gated?: boolean;
+    owned?: boolean;
     creator_name: string;
     acquired_at: string;
   }>;
@@ -266,8 +273,9 @@ export async function fetchFreshComments(postId: string) {
   );
 }
 
-export async function fetchFreshProduct(productId: string) {
-  return requestJson<FreshProduct>(`/fresh/products/${encodeURIComponent(productId)}`);
+export async function fetchFreshProduct(productId: string, collectorId?: string) {
+  const query = collectorId ? `?collector_id=${encodeURIComponent(collectorId)}` : "";
+  return requestJson<FreshProduct>(`/fresh/products/${encodeURIComponent(productId)}${query}`);
 }
 
 export async function postFreshComment(postId: string, collectorId: string, body: string) {

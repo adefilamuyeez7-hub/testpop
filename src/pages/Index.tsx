@@ -473,6 +473,7 @@ const Index = () => {
   useEffect(() => {
     if (isMintSuccessArtist && mintingDropId && collectingDrop && address) {
       console.log("✅ Mint succeeded! Refetching drops...");
+      const isOnchainCollect = Boolean(collectingDrop.contractAddress);
       const collectedItem = {
         id: collectingDrop.id,
         ownerWallet: address,
@@ -482,6 +483,7 @@ const Index = () => {
         previewUri: collectingDrop.previewUri,
         deliveryUri: collectingDrop.deliveryUri,
         assetType: collectingDrop.assetType,
+        isGated: isOnchainCollect,
         mintedTokenId: mintedArtistTokenId,
         contractAddress: collectingDrop.contractAddress,
         contractDropId: collectingDrop.contractDropId,

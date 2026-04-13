@@ -37,7 +37,7 @@ export default function FreshProductDetailPage() {
     async function load() {
       try {
         setLoading(true);
-        const payload = await fetchFreshProduct(id);
+        const payload = await fetchFreshProduct(id, collectorId);
         if (!active) return;
         setProduct(payload);
       } catch (error) {
@@ -56,7 +56,7 @@ export default function FreshProductDetailPage() {
     return () => {
       active = false;
     };
-  }, [id]);
+  }, [collectorId, id]);
 
   async function handleCollectInApp() {
     if (!product) return;
@@ -96,6 +96,8 @@ export default function FreshProductDetailPage() {
   }
 
   const isViewInApp = product.in_app_action === "view_in_app";
+  const isGated = Boolean(product.is_gated);
+  const hasAccess = !isGated || Boolean(product.owned);
   const primaryActionLabel = product.in_app_action_label || (isViewInApp ? "View in app" : "Collect in app");
 
   return (
@@ -109,10 +111,16 @@ export default function FreshProductDetailPage() {
       </section>
 
       <section id="fresh-product-media" className="rounded-2xl border border-slate-200 bg-white p-4">
+        {!hasAccess ? (
+          <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+            This onchain collectible unlocks after you collect. Your gated pass will appear in your collection.
+          </div>
+        ) : null}
+
         {product.render_mode === "image" ? (
           <div className="space-y-3">
             <img src={product.image_url} alt={product.title} className="max-h-[520px] w-full rounded-xl object-contain" />
-            {product.download_url ? (
+            {hasAccess && product.download_url ? (
               <a
                 href={product.download_url}
                 target="_blank"
@@ -127,7 +135,7 @@ export default function FreshProductDetailPage() {
 
         {product.render_mode === "ebook" ? (
           <div className="space-y-3">
-            {product.readable_url ? (
+            {hasAccess && product.readable_url ? (
               <iframe
                 src={product.readable_url}
                 title={product.title}
@@ -136,7 +144,7 @@ export default function FreshProductDetailPage() {
             ) : (
               <p className="text-sm text-slate-600">Ebook preview unavailable.</p>
             )}
-            {product.download_url ? (
+            {hasAccess && product.download_url ? (
               <a
                 href={product.download_url}
                 target="_blank"
@@ -151,7 +159,7 @@ export default function FreshProductDetailPage() {
 
         {product.render_mode === "video" ? (
           <div className="space-y-3">
-            {product.readable_url || product.download_url ? (
+            {hasAccess && (product.readable_url || product.download_url) ? (
               <video
                 controls
                 playsInline
@@ -165,7 +173,7 @@ export default function FreshProductDetailPage() {
             ) : (
               <p className="text-sm text-slate-600">Video preview unavailable.</p>
             )}
-            {product.download_url ? (
+            {hasAccess && product.download_url ? (
               <a
                 href={product.download_url}
                 target="_blank"
@@ -180,7 +188,7 @@ export default function FreshProductDetailPage() {
 
         {product.render_mode === "pdf" ? (
           <div className="space-y-3">
-            {product.readable_url ? (
+            {hasAccess && product.readable_url ? (
               <iframe
                 src={product.readable_url}
                 title={product.title}
@@ -189,7 +197,7 @@ export default function FreshProductDetailPage() {
             ) : (
               <p className="text-sm text-slate-600">PDF preview unavailable.</p>
             )}
-            {product.download_url ? (
+            {hasAccess && product.download_url ? (
               <a
                 href={product.download_url}
                 target="_blank"
@@ -205,7 +213,7 @@ export default function FreshProductDetailPage() {
         {product.render_mode === "download" ? (
           <div className="space-y-3">
             {product.image_url ? <img src={product.image_url} alt={product.title} className="h-72 w-full rounded-xl object-cover" /> : null}
-            {product.download_url ? (
+            {hasAccess && product.download_url ? (
               <a
                 href={product.download_url}
                 target="_blank"

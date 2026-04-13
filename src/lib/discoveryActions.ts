@@ -212,6 +212,7 @@ export function buildCollectionRecord(
       ? drop.artists.name || "Unknown Artist"
       : "Unknown Artist";
 
+  const isOnchainCollect = Boolean(drop.contract_address);
   return {
     id: drop.id,
     ownerWallet,
@@ -226,7 +227,7 @@ export function buildCollectionRecord(
     previewUri: drop.preview_uri || undefined,
     deliveryUri: drop.delivery_uri || undefined,
     assetType: drop.asset_type || "image",
-    isGated: Boolean(drop.is_gated),
+    isGated: isOnchainCollect || Boolean(drop.is_gated),
     mintedTokenId,
     contractAddress: drop.contract_address || null,
     contractKind: (drop.contract_kind as "artDrop" | "productStore" | "creativeReleaseEscrow" | null) || null,

@@ -495,6 +495,7 @@ function resolveProductRender(product) {
 function resolveInAppAction(product, render) {
   const resolvedRender = render || resolveProductRender(product);
   const mode = String(resolvedRender?.render_mode || "").trim().toLowerCase();
+  const deliveryMode = String(resolvedRender?.delivery_mode || "").trim().toLowerCase();
 
   if (mode === "video" || mode === "pdf" || mode === "ebook") {
     return {
@@ -503,10 +504,22 @@ function resolveInAppAction(product, render) {
     };
   }
 
+  if (deliveryMode === "collect_onchain") {
+    return {
+      in_app_action: "collect_in_app",
+      in_app_action_label: "Collect onchain",
+    };
+  }
+
   return {
     in_app_action: "collect_in_app",
     in_app_action_label: "Collect in app",
   };
+}
+
+function isOnchainGated(product, render) {
+  const resolvedRender = render || resolveProductRender(product);
+  return String(resolvedRender?.delivery_mode || "").trim().toLowerCase() === "collect_onchain";
 }
 
 function summarizeCart(db, collectorId) {
@@ -521,6 +534,7 @@ function summarizeCart(db, collectorId) {
       const unitPriceEth = Number(product.price_eth) || 0;
       const render = resolveProductRender(product);
       const inAppAction = resolveInAppAction(product, render);
+      const isGated = isOnchainGated(product, render);
       return {
         product_id: product.id,
         creator_id: product.creator_id,
@@ -537,6 +551,7 @@ function summarizeCart(db, collectorId) {
         in_app_action_label: inAppAction.in_app_action_label,
         readable_url: render.readable_url,
         download_url: render.download_url,
+        is_gated: isGated,
         creator_name: creator?.name || "Creator",
         creator_handle: creator?.handle || "",
       };
@@ -556,6 +571,7 @@ function buildFeedItem(db, collectorId, post) {
   if (!product || !creator) return null;
   const render = resolveProductRender(product);
   const inAppAction = resolveInAppAction(product, render);
+  const isGated = isOnchainGated(product, render);
 
   const likeCount = db.likes.filter((like) => like.post_id === post.id).length;
   const commentCount = db.comments.filter((comment) => comment.post_id === post.id).length;
@@ -576,6 +592,7 @@ function buildFeedItem(db, collectorId, post) {
     fulfillment_label: resolveFulfillmentLabel(render.delivery_mode),
     in_app_action: inAppAction.in_app_action,
     in_app_action_label: inAppAction.in_app_action_label,
+    is_gated: isGated,
     creator_id: creator.id,
     creator_wallet: creator.wallet || creator.handle,
     creator_name: creator.name,
@@ -620,6 +637,7 @@ function grantCollection(db, collectorId, orderId, items) {
       product_id: item.product_id,
       quantity: Math.max(1, Number(item.quantity) || 1),
       delivery_mode: item.delivery_mode || null,
+      is_gated: String(item.delivery_mode || "").trim().toLowerCase() === "collect_onchain",
       acquired_at: nowIso(),
     });
   }
@@ -633,6 +651,7 @@ function buildProfile(db, collectorId) {
       const creator = product ? firstById(db.creators, product.creator_id) : null;
       const render = product ? resolveProductRender(product) : null;
       const inAppAction = product ? resolveInAppAction(product, render) : null;
+      const isGated = entry.is_gated ?? (product ? isOnchainGated(product, render) : false);
       return {
         id: entry.id,
         product_id: entry.product_id,
@@ -646,6 +665,8 @@ function buildProfile(db, collectorId) {
         in_app_action_label: inAppAction?.in_app_action_label || "Collect in app",
         readable_url: render?.readable_url || null,
         download_url: render?.download_url || null,
+        is_gated: isGated,
+        owned: true,
         creator_name: creator?.name || "Creator",
         acquired_at: entry.acquired_at,
       };
@@ -697,10 +718,16 @@ function escapeHtml(value) {
     .replace(/'/g, "&#39;");
 }
 
-function buildProductResponse(db, product) {
+function buildProductResponse(db, product, collectorId = "") {
   const creator = firstById(db.creators, product.creator_id);
   const render = resolveProductRender(product);
   const inAppAction = resolveInAppAction(product, render);
+  const isGated = isOnchainGated(product, render);
+  const isOwned =
+    collectorId &&
+    db.collections.some(
+      (entry) => entry.collector_id === collectorId && entry.product_id === product.id,
+    );
   return {
     id: product.id,
     creator_id: product.creator_id,
@@ -716,6 +743,8 @@ function buildProductResponse(db, product) {
     in_app_action_label: inAppAction.in_app_action_label,
     readable_url: render.readable_url,
     download_url: render.download_url,
+    is_gated: isGated,
+    owned: Boolean(isOwned),
     creator_name: creator?.name || "Creator",
     creator_handle: creator?.handle || "",
     creator_avatar_url: creator?.profile_image || null,
@@ -1020,7 +1049,8 @@ app.get("/fresh/products/:id", (req, res) => {
   const db = readDb();
   const product = firstById(db.products, String(req.params.id || "").trim());
   if (!product) return res.status(404).json({ error: "Product not found" });
-  return res.json(buildProductResponse(db, product));
+  const collectorId = normalizeCollectorId(req.query?.collector_id || req.get("x-collector-id") || "");
+  return res.json(buildProductResponse(db, product, collectorId));
 });
 
 app.get("/fresh/cart/:collectorId", (req, res) => {
@@ -1123,6 +1153,7 @@ app.post("/fresh/checkout", (req, res) => {
     if (!product) return null;
     const render = resolveProductRender(product);
     const inAppAction = resolveInAppAction(product, render);
+    const isGated = isOnchainGated(product, render);
     if (inAppAction.in_app_action === "view_in_app") {
       return {
         blocked: true,
@@ -1147,6 +1178,7 @@ app.post("/fresh/checkout", (req, res) => {
       in_app_action_label: inAppAction.in_app_action_label,
       readable_url: render.readable_url,
       download_url: render.download_url,
+      is_gated: isGated,
     };
   });
 
