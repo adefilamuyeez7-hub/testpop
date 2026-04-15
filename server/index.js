@@ -10,10 +10,23 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createClient } from "@supabase/supabase-js";
 import { ethers } from "ethers";
-import { dropUpdateSchema, validateInput } from "./validation.js";
+import {
+  dropUpdateSchema,
+  productCreateSchema,
+  orderCreateSchema,
+  validateInput,
+} from "./validation.js";
 import { appJwtSecret } from "./config.js";
 import { getPinataAuthMode, requirePinataAuthStrategies } from "./pinataAuth.js";
 import { validateCSRF, generateCSRFToken, getCSRFTokenEndpoint } from "./middleware/csrf.js";
+import authRoutes, {
+  normalizeWallet,
+  authRequired,
+  authChallengeLimiter,
+  authVerifyLimiter,
+  adminRequired,
+  sameWalletOrAdmin,
+} from "./routes/auth.js";
 import notificationRoutes from "./api/notifications.js";
 import fanHubRoutes from "./api/fanHub.js";
 import catalogRoutes from "./routes/catalog.js";
@@ -955,152 +968,13 @@ function getContractDeploymentReadiness() {
 }
 
 // ──────────────────────────────────────────────
-//  Nonce Management (Supabase-backed for multi-instance support)
+//  Authentication functions now in routes/auth.js
+//  - issueNonce, getValidNonceRecord, cleanupExpiredNonces
+//  - makeChallengeMessage, issueAppToken, issueSupabaseToken
+//  - resolveRole, authRequired, adminRequired, sameWalletOrAdmin
 // ──────────────────────────────────────────────
-async function issueNonce(wallet) {
-  // The Supabase nonce schema expects 32 bytes of lowercase hex without a 0x prefix.
-  const nonce = ethers.hexlify(ethers.randomBytes(32)).slice(2).toLowerCase();
-  const issuedAt = new Date().toISOString();
-  const expiresAt = new Date(Date.now() + 5 * 60 * 1000).toISOString(); // 5 min
 
-  const { error } = await supabase.from("nonces").insert({
-    wallet: normalizeWallet(wallet),
-    nonce,
-    issued_at: issuedAt,
-    expires_at: expiresAt,
-    used: false,
-  });
-
-  if (error) {
-    console.error("Failed to store nonce:", error);
-    throw new Error(`Failed to issue nonce: ${error.message}`);
-  }
-
-  return { nonce, issuedAt };
-}
-
-async function getValidNonceRecord(wallet, nonce) {
-  const normalized = normalizeWallet(wallet);
-  const now = new Date().toISOString();
-
-  const { data, error: selectError } = await supabase
-    .from("nonces")
-    .select("id, nonce, issued_at, expires_at")
-    .eq("wallet", normalized)
-    .eq("nonce", nonce)
-    .eq("used", false)
-    .maybeSingle();
-
-  if (selectError) {
-    throw new Error(`Nonce verification failed: ${selectError.message}`);
-  }
-
-  if (!data) {
-    throw new Error("Invalid or expired nonce");
-  }
-
-  // Check expiration
-  if (data.expires_at < now) {
-    throw new Error("Challenge expired");
-  }
-
-  return data;
-}
-
-async function cleanupExpiredNonces() {
-  const now = new Date().toISOString();
-  const { error } = await supabase
-    .from("nonces")
-    .delete()
-    .lt("expires_at", now)
-    .eq("used", false);
-
-  if (error) {
-    console.warn("Nonce cleanup warning:", error.message);
-  }
-}
-
-function makeChallengeMessage(wallet, nonce) {
-  return [
-    "PopUp secure sign-in",
-    "",
-    `Wallet: ${wallet}`,
-    `Nonce: ${nonce}`,
-    "",
-    "This signature proves wallet ownership for PopUp API access.",
-    "It does not move funds or approve token transfers.",
-  ].join("\n");
-}
-
-function issueAppToken(payload) {
-  return jwt.sign(payload, appJwtSecret, {
-    algorithm: "HS256",
-    expiresIn: "12h",
-    issuer: "popup-api",
-    audience: "popup-client",
-  });
-}
-
-function issueSupabaseToken({ wallet, role }) {
-  if (!SUPABASE_JWT_SECRET) return null;
-
-  const now = Math.floor(Date.now() / 1000);
-  return jwt.sign(
-    {
-      aud: "authenticated",
-      exp: now + 60 * 60,
-      iat: now,
-      iss: "popup-api",
-      role: "authenticated",
-      wallet,
-      app_role: role,
-      role_name: role,
-      sub: wallet,
-    },
-    SUPABASE_JWT_SECRET,
-    { algorithm: "HS256" }
-  );
-}
-
-async function resolveRole(wallet) {
-  const normalized = normalizeWallet(wallet);
-  const adminWallets = ADMIN_WALLETS.split(",").map(normalizeWallet).filter(Boolean);
-  if (adminWallets.includes(normalized)) return "admin";
-
-  const { data } = await supabase
-    .from("whitelist")
-    .select("status")
-    .eq("wallet", normalized)
-    .maybeSingle();
-
-  if (data?.status === "approved") return "artist";
-  return "collector";
-}
-
-function authRequired(req, res, next) {
-  try {
-    const header = req.headers.authorization || "";
-    const [, token] = header.match(/^Bearer\s+(.+)$/i) || [];
-    if (!token) return res.status(401).json({ error: "Missing bearer token" });
-
-    const decoded = jwt.verify(token, appJwtSecret, {
-      algorithms: ["HS256"],
-      issuer: "popup-api",
-      audience: "popup-client",
-    });
-
-    req.auth = {
-      wallet: normalizeWallet(decoded.wallet || ""),
-      role: decoded.role || "collector",
-    };
-
-    if (!req.auth.wallet) return res.status(401).json({ error: "Invalid session" });
-    return next();
-  } catch (_error) {
-    return res.status(401).json({ error: "Invalid or expired token" });
-  }
-}
-
+// Keep authOptional for optional JWT verification
 function authOptional(req, _res, next) {
   try {
     const header = req.headers.authorization || "";
@@ -1130,17 +1004,6 @@ function authOptional(req, _res, next) {
     req.auth = null;
     return next();
   }
-}
-
-function adminRequired(req, res, next) {
-  if (req.auth?.role !== "admin") {
-    return res.status(403).json({ error: "Admin access required" });
-  }
-  return next();
-}
-
-function sameWalletOrAdmin(targetWallet, auth) {
-  return auth?.role === "admin" || normalizeWallet(targetWallet) === auth?.wallet;
 }
 
 async function getArtistRecordByWallet(wallet) {
@@ -1869,105 +1732,9 @@ app.get("/debug/dist-status", (req, res) => {
 });
 
 // ╔═══════════════════════════════════════════════════════════════════════════╗
-// ║ AUTH ROUTES - Registered at both /path and /api/path for Vercel           ║
+// ║ AUTH ROUTES - Now handled by routes/auth.js module                         ║
+// ║ See: /auth and /api/auth endpoints mounted via authRoutes router           ║
 // ╚═══════════════════════════════════════════════════════════════════════════╝
-
-const authChallengeImpl = async (req, res) => {
-  try {
-    const wallet = normalizeWallet(req.body?.wallet);
-    if (!wallet) {
-      return res.status(400).json({ error: "Wallet address is required" });
-    }
-
-    if (!ethers.isAddress(wallet)) {
-      return res.status(400).json({ error: "Invalid wallet address" });
-    }
-
-    cleanupExpiredNonces().catch((cleanupError) => {
-      console.warn("Nonce cleanup failed (continuing):", cleanupError?.message || cleanupError);
-    });
-
-    const { nonce, issuedAt } = await issueNonce(wallet);
-    const message = makeChallengeMessage(wallet, nonce);
-
-    return res.json({ wallet, nonce, issuedAt, message });
-  } catch (error) {
-    console.error("Challenge error:", error);
-    const isDev = NODE_ENV === 'development';
-    return res.status(500).json({ error: isDev ? error.message : "Failed to issue challenge" });
-  }
-};
-
-// Register at both /auth/challenge and /api/auth/challenge
-app.post("/auth/challenge", authChallengeLimiter, authChallengeImpl);
-app.post("/api/auth/challenge", authChallengeLimiter, authChallengeImpl);
-
-const authVerifyImpl = async (req, res) => {
-  try {
-    const wallet = normalizeWallet(req.body?.wallet);
-    const signature = req.body?.signature;
-    const nonce = req.body?.nonce;
-
-    if (!ethers.isAddress(wallet) || !signature || !nonce) {
-      return res.status(400).json({ error: "Wallet, signature, and nonce are required" });
-    }
-
-    await cleanupExpiredNonces().catch((cleanupError) => {
-      console.warn("Nonce cleanup failed before verification:", cleanupError?.message || cleanupError);
-    });
-    const nonceRecord = await getValidNonceRecord(wallet, nonce);
-
-    const message = makeChallengeMessage(wallet, nonceRecord.nonce);
-    const recovered = normalizeWallet(ethers.verifyMessage(message, signature));
-
-    if (recovered !== wallet) {
-      console.warn("Failed signature verification for an auth request");
-      return res.status(401).json({ error: "Signature verification failed" });
-    }
-
-    const { error: updateError } = await supabase
-      .from("nonces")
-      .update({ used: true, used_at: new Date().toISOString() })
-      .eq("id", nonceRecord.id);
-
-    if (updateError) {
-      console.error("Failed to mark nonce as used:", updateError);
-      return res.status(500).json({ error: "Failed to finalize authenticated session" });
-    }
-
-    const role = await resolveRole(wallet);
-    const apiToken = issueAppToken({ wallet, role });
-    const supabaseToken = issueSupabaseToken({ wallet, role });
-
-    if (isVerboseServerLogging) {
-      console.log(`Auth verified for wallet ${wallet} with role ${role}`);
-    }
-    return res.json({
-      wallet,
-      role,
-      apiToken,
-      supabaseToken,
-      expiresInSeconds: 12 * 60 * 60,
-    });
-  } catch (error) {
-    console.error("Verification error:", error);
-    const isDev = NODE_ENV === 'development';
-    return res.status(500).json({ error: isDev ? error.message : "Verification failed" });
-  }
-};
-
-// Register at both /auth/verify and /api/auth/verify
-app.post("/auth/verify", authVerifyLimiter, authVerifyImpl);
-app.post("/api/auth/verify", authVerifyLimiter, authVerifyImpl);
-
-app.get("/auth/session", authRequired, (req, res) => {
-  return res.json({ wallet: req.auth.wallet, role: req.auth.role });
-});
-
-// Also at /api/auth/session
-app.get("/api/auth/session", authRequired, (req, res) => {
-  return res.json({ wallet: req.auth.wallet, role: req.auth.role });
-});
 
 app.post("/artists/profile", authRequired, csrfProtection, async (req, res) => {
   const wallet = normalizeWallet(req.body?.wallet);
@@ -2074,6 +1841,13 @@ app.post("/maintenance/cleanup-drops", authRequired, async (req, res) => {
 
 app.post("/drops", authRequired, csrfProtection, async (req, res) => {
   const drop = sanitizeDropPayload(req.body || {}, { includeArtistId: true });
+  
+  // Validate drop payload
+  const validation = validateInput(dropUpdateSchema, drop);
+  if (!validation.success) {
+    return res.status(400).json({ error: "Invalid drop data", details: validation.error });
+  }
+  
   const artistId = drop.artist_id;
   if (!artistId) return res.status(400).json({ error: "artist_id is required" });
 
@@ -2570,6 +2344,12 @@ app.post("/products", authRequired, csrfProtection, async (req, res) => {
     return res.status(403).json({ error: "Cannot create products for another wallet" });
   }
 
+  // Validate product data
+  const validation = validateInput(productCreateSchema, product);
+  if (!validation.success) {
+    return res.status(400).json({ error: "Invalid product data", details: validation.error });
+  }
+
   const isAdmin = req.auth.role === "admin";
   let inferredArtistId = product.artist_id ?? null;
   if (!isAdmin) {
@@ -2633,9 +2413,15 @@ app.patch("/products/:id", authRequired, csrfProtection, async (req, res) => {
     return res.status(403).json({ error: "Cannot update another creator product" });
   }
 
+  // Validate product update data
+  const validation = validateInput(productCreateSchema.partial(), req.body);
+  if (!validation.success) {
+    return res.status(400).json({ error: "Invalid product data", details: validation.error });
+  }
+
   const { data, error } = await supabase
     .from("products")
-    .update({ ...req.body, updated_at: new Date().toISOString() })
+    .update({ ...validation.data, updated_at: new Date().toISOString() })
     .eq("id", req.params.id)
     .select("*")
     .single();
@@ -3309,6 +3095,14 @@ app.post("/orders", authRequired, csrfProtection, async (req, res) => {
   if (!buyerWallet) return res.status(400).json({ error: "buyer_wallet is required" });
   if (!sameWalletOrAdmin(buyerWallet, req.auth)) {
     return res.status(403).json({ error: "Cannot create an order for another wallet" });
+  }
+
+  // Validate order data (if using single product variant)
+  if (order.product_id) {
+    const validation = validateInput(orderCreateSchema, order);
+    if (!validation.success) {
+      return res.status(400).json({ error: "Invalid order data", details: validation.error });
+    }
   }
 
   const rawItems = Array.isArray(order.items) && order.items.length > 0
@@ -5140,6 +4934,12 @@ app.get('*', (req, res, next) => {
   // If index.html doesn't exist, continue to 404 handler
   next();
 });
+
+// ============================================
+// AUTH ROUTES (Wallet Authentication)
+// ============================================
+app.use('/auth', authRoutes);
+app.use('/api/auth', authRoutes);
 
 // ============================================
 // NOTIFICATION ROUTES (Creator Interactions)
