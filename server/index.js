@@ -12,8 +12,14 @@ import { createClient } from "@supabase/supabase-js";
 import { ethers } from "ethers";
 import {
   dropUpdateSchema,
+  dropCreateSchema,
   productCreateSchema,
+  productUpdateSchema,
   orderCreateSchema,
+  orderUpdateSchema,
+  artistProfileSchema,
+  whitelistEntrySchema,
+  whitelistUpdateSchema,
   validateInput,
 } from "./validation.js";
 import { appJwtSecret } from "./config.js";
@@ -1737,7 +1743,13 @@ app.get("/debug/dist-status", (req, res) => {
 // ╚═══════════════════════════════════════════════════════════════════════════╝
 
 app.post("/artists/profile", authRequired, csrfProtection, async (req, res) => {
-  const wallet = normalizeWallet(req.body?.wallet);
+  // Validate artist profile payload
+  const validation = validateInput(artistProfileSchema, req.body || {});
+  if (!validation.success) {
+    return res.status(400).json({ error: "Invalid artist profile data", details: validation.error });
+  }
+
+  const wallet = normalizeWallet(validation.data.wallet);
   if (!wallet) {
     return res.status(400).json({ error: "A valid wallet is required" });
   }
@@ -1895,6 +1907,12 @@ app.patch("/drops/:id", authRequired, csrfProtection, async (req, res) => {
   // Require signature for drop updates
   if (!signature || !signatureMessage) {
     return res.status(400).json({ error: "Signature and signatureMessage are required for drop updates" });
+  }
+
+  // Validate drop update payload
+  const validation = validateInput(dropUpdateSchema, req.body || {});
+  if (!validation.success) {
+    return res.status(400).json({ error: "Invalid drop data", details: validation.error });
   }
 
   const { data: existing, error: existingError } = await supabase
@@ -2414,7 +2432,7 @@ app.patch("/products/:id", authRequired, csrfProtection, async (req, res) => {
   }
 
   // Validate product update data
-  const validation = validateInput(productCreateSchema.partial(), req.body);
+  const validation = validateInput(productUpdateSchema, req.body);
   if (!validation.success) {
     return res.status(400).json({ error: "Invalid product data", details: validation.error });
   }
@@ -3071,6 +3089,10 @@ app.get("/orders", authRequired, async (req, res) => {
   }
 
   try {
+    // Get pagination parameters
+    const { page, limit, sort, order } = getPaginationParams(req);
+    const offset = (page - 1) * limit;
+
     const data = await listOrdersForBuyer(requestedWallet);
     const accessibleStatuses = new Set(["paid", "processing", "shipped", "delivered"]);
     const filtered = data.filter((order) => {
@@ -3083,7 +3105,21 @@ app.get("/orders", authRequired, async (req, res) => {
       }
       return true;
     });
-    return res.json(filtered);
+
+    // Sort the filtered data
+    const sorted = filtered.sort((a, b) => {
+      const aVal = a[sort] || 0;
+      const bVal = b[sort] || 0;
+      if (aVal < bVal) return order === 'asc' ? -1 : 1;
+      if (aVal > bVal) return order === 'asc' ? 1 : -1;
+      return 0;
+    });
+
+    // Apply pagination
+    const paginated = sorted.slice(offset, offset + limit);
+    const paginatedResponse = buildPaginatedResponse(paginated, filtered.length, page, limit);
+
+    return res.json(paginatedResponse);
   } catch (error) {
     return res.status(400).json({ error: error.message });
   }
@@ -3289,6 +3325,12 @@ app.post("/orders", authRequired, csrfProtection, async (req, res) => {
 });
 
 app.patch("/orders/:id", authRequired, csrfProtection, async (req, res) => {
+  // Validate order update payload
+  const validation = validateInput(orderUpdateSchema, req.body || {});
+  if (!validation.success) {
+    return res.status(400).json({ error: "Invalid order update data", details: validation.error });
+  }
+
   let { data: existing, error: existingError } = await supabase
     .from("orders")
     .select("id, buyer_wallet, product_id, status, paid_at, approval_status, payout_status, products(creator_wallet), order_items(product_id, products(creator_wallet))")
@@ -3883,7 +3925,13 @@ registerRoute("patch", "/artist-applications/:id", authRequired, adminRequired, 
 });
 
 app.post("/whitelist", authRequired, csrfProtection, async (req, res) => {
-  const entry = req.body || {};
+  // Validate whitelist entry payload
+  const validation = validateInput(whitelistEntrySchema, req.body || {});
+  if (!validation.success) {
+    return res.status(400).json({ error: "Invalid whitelist entry data", details: validation.error });
+  }
+
+  const entry = validation.data;
   const wallet = normalizeWallet(entry.wallet || req.auth.wallet);
   if (!sameWalletOrAdmin(wallet, req.auth)) {
     return res.status(403).json({ error: "Cannot submit whitelist entry for another wallet" });
@@ -3912,7 +3960,13 @@ app.post("/whitelist", authRequired, csrfProtection, async (req, res) => {
 });
 
 app.patch("/whitelist/:id", authRequired, adminRequired, csrfProtection, async (req, res) => {
-  const updates = { ...req.body, updated_at: new Date().toISOString() };
+  // Validate whitelist update payload
+  const validation = validateInput(whitelistUpdateSchema, req.body || {});
+  if (!validation.success) {
+    return res.status(400).json({ error: "Invalid whitelist update data", details: validation.error });
+  }
+
+  const updates = { ...validation.data, updated_at: new Date().toISOString() };
   if (updates.status === "approved" && !updates.approved_at) {
     updates.approved_at = new Date().toISOString();
   }
