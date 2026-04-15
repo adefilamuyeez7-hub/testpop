@@ -2,6 +2,7 @@
 // CSRF Protection for all state-changing operations
 
 import crypto from 'crypto';
+import jwt from 'jsonwebtoken';
 
 /**
  * Generate a CSRF token for session

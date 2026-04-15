@@ -3,10 +3,7 @@
  * These are disabled - onchain contracts have been removed
  */
 
-export function useWallet() {
-  // This is now imported from useWallet.ts instead
-  throw new Error("Use useWallet from @/hooks/useWallet instead");
-}
+export { useWallet } from "./useWallet";
 
 export function useCreateCampaign() {
   return {

@@ -57,13 +57,17 @@ export async function issueNonce(wallet) {
   const issuedAt = new Date().toISOString();
   const expiresAt = new Date(Date.now() + 5 * 60 * 1000).toISOString(); // 5 min
 
-  const { error } = await supabase.from("nonces").insert({
-    wallet: normalizedWallet,
-    nonce,
-    issued_at: issuedAt,
-    expires_at: expiresAt,
-    used: false,
-  });
+  const { error } = await supabase.from("nonces").upsert(
+    {
+      wallet: normalizedWallet,
+      nonce,
+      issued_at: issuedAt,
+      expires_at: expiresAt,
+      used: false,
+      used_at: null,
+    },
+    { onConflict: "wallet" }
+  );
 
   if (error) {
     console.error("Failed to store nonce:", error);

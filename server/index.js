@@ -39,12 +39,6 @@ import notificationRoutes from "./api/notifications.js";
 import fanHubRoutes from "./api/fanHub.js";
 import catalogRoutes from "./routes/catalog.js";
 import createPersonalizationRoutes from "./routes/personalization.js";
-// Phase 2: Backend API Integration Routes
-import productsRoutes from "./routes/products.js";
-import auctionsRoutes from "./routes/auctions.js";
-import giftsRoutes from "./routes/gifts.js";
-import creatorRoutes from "./routes/creator.js";
-import royaltiesRoutes from "./routes/royalties.js";
 
 
 const __filename = fileURLToPath(import.meta.url);
@@ -291,10 +285,6 @@ const upload = multer({
 });
 
 // Nonce storage moved to Supabase (see: auth/challenge and auth/verify endpoints)
-
-function normalizeWallet(wallet = "") {
-  return wallet.trim().toLowerCase();
-}
 
 function escapeHtml(value = "") {
   return String(value)
@@ -1262,8 +1252,8 @@ function createAuthLimiter(max, label) {
   });
 }
 
-const authChallengeLimiter = createAuthLimiter(10, 'Auth challenge');
-const authVerifyLimiter = createAuthLimiter(10, 'Auth verify');
+const legacyAuthChallengeLimiter = createAuthLimiter(10, 'Auth challenge');
+const legacyAuthVerifyLimiter = createAuthLimiter(10, 'Auth verify');
 
 const uploadLimiter = rateLimit({
   windowMs: 60 * 60 * 1000, // 1 hour
@@ -5009,7 +4999,11 @@ const port = Number(PORT) || 3000;
 // ═════════════════════════════════════════════════════════════════════════════
 app.get('*', (req, res, next) => {
   // If it's an API route, skip to 404 handler
-  if (req.originalUrl?.startsWith('/api') || req.path.startsWith('/api')) {
+  if (
+    req.originalUrl?.startsWith('/api') ||
+    req.path.startsWith('/api') ||
+    req.path.startsWith('/auth')
+  ) {
     return next();
   }
   
@@ -5038,16 +5032,6 @@ app.use('/api/notifications', notificationRoutes);
 app.use("/api/fan-hub", fanHubRoutes);
 app.use("/api", catalogRoutes(supabase));
 app.use("/api", createPersonalizationRoutes(supabase));
-
-// ============================================
-// PHASE 2: BACKEND API INTEGRATION ROUTES
-// Smart Contract Transaction Handling
-// ============================================
-app.use('/api/products', productsRoutes);
-app.use('/api/auctions', auctionsRoutes);
-app.use('/api/gifts', giftsRoutes);
-app.use('/api/creator', creatorRoutes);
-app.use('/api/royalties', royaltiesRoutes);
 
 // 404 handler - API routes that don't match
 app.use((_req, res) => {

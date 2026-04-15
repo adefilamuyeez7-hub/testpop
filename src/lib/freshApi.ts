@@ -1,12 +1,15 @@
 import { SECURE_API_BASE } from "@/lib/apiBase";
+import { getRuntimeApiToken } from "@/lib/runtimeSession";
 
 const API_BASE = SECURE_API_BASE || "/api";
 
 async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
+  const token = getRuntimeApiToken();
   const response = await fetch(`${API_BASE}${path}`, {
     ...init,
     headers: {
       "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...(init?.headers || {}),
     },
   });

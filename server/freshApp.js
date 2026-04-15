@@ -5,6 +5,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
+import { verifyApiBearerToken } from "./requestAuth.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -29,6 +30,38 @@ app.use(
 app.options("*", cors());
 app.use(express.json({ limit: "2mb" }));
 app.use(cookieParser());
+
+function getAuthContext(req) {
+  try {
+    return verifyApiBearerToken(req.headers.authorization, process.env);
+  } catch {
+    return null;
+  }
+}
+
+function requireAuthenticatedRequest(req, res, next) {
+  const auth = getAuthContext(req);
+  if (!auth?.wallet) {
+    return res.status(401).json({ error: "Authentication required" });
+  }
+
+  req.auth = auth;
+  return next();
+}
+
+function requireAdminRequest(req, res, next) {
+  const auth = getAuthContext(req);
+  if (!auth?.wallet) {
+    return res.status(401).json({ error: "Authentication required" });
+  }
+
+  if (auth.role !== "admin") {
+    return res.status(403).json({ error: "Admin access required" });
+  }
+
+  req.auth = auth;
+  return next();
+}
 
 function nowIso() {
   return new Date().toISOString();
@@ -860,7 +893,7 @@ app.get("/fresh/bootstrap", (req, res) => {
   });
 });
 
-app.post("/fresh/pinata/metadata", async (req, res, next) => {
+app.post("/fresh/pinata/metadata", requireAuthenticatedRequest, async (req, res, next) => {
   try {
     const name = String(req.body?.name || "popup-asset").trim();
     const metadata = req.body?.metadata && typeof req.body.metadata === "object" ? req.body.metadata : {};
@@ -898,7 +931,7 @@ app.get("/fresh/creator/:creatorId/portfolio", (req, res) => {
   return res.json({ creator_id: creatorId, portfolio });
 });
 
-app.post("/fresh/creator/:creatorId/portfolio", async (req, res, next) => {
+app.post("/fresh/creator/:creatorId/portfolio", requireAuthenticatedRequest, async (req, res, next) => {
   try {
     const creatorId = String(req.params.creatorId || "").trim();
     const db = readDb();
@@ -947,7 +980,7 @@ app.post("/fresh/creator/:creatorId/portfolio", async (req, res, next) => {
   }
 });
 
-app.get("/fresh/admin/overview", (req, res) => {
+app.get("/fresh/admin/overview", requireAdminRequest, (req, res) => {
   const db = readDb();
   res.json({
     creators: db.creators.length,
@@ -959,13 +992,13 @@ app.get("/fresh/admin/overview", (req, res) => {
   });
 });
 
-app.get("/fresh/admin/creators", (req, res) => {
+app.get("/fresh/admin/creators", requireAdminRequest, (req, res) => {
   const db = readDb();
   const creators = db.creators.map((creator) => buildCreatorProfile(db, creator));
   res.json({ creators });
 });
 
-app.get("/fresh/admin/orders", (req, res) => {
+app.get("/fresh/admin/orders", requireAdminRequest, (req, res) => {
   const db = readDb();
   const orders = db.orders
     .slice()
@@ -973,7 +1006,7 @@ app.get("/fresh/admin/orders", (req, res) => {
   res.json({ orders });
 });
 
-app.get("/fresh/admin/gifts", (req, res) => {
+app.get("/fresh/admin/gifts", requireAdminRequest, (req, res) => {
   const db = readDb();
   const gifts = db.gifts
     .slice()
