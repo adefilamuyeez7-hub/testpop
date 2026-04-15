@@ -614,7 +614,7 @@ async function loadCheckoutProducts(productIds) {
 
   const { data, error } = await supabase
     .from("products")
-    .select("id, creative_release_id, name, price_eth, stock, sold, status, product_type, asset_type, preview_uri, delivery_uri, image_url, image_ipfs_uri, is_gated, creator_wallet, metadata, contract_kind, contract_listing_id, contract_product_id")
+    .select("id, creative_release_id, name, price_eth, stock, sold, status, product_type, asset_type, preview_uri, delivery_uri, image_url, image_ipfs_uri, is_gated, creator_wallet, metadata")
     .in("id", uniqueIds);
 
   if (error) {

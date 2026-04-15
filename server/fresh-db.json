@@ -130,7 +130,6 @@
       "delivery_mode": "collect_onchain",
       "onchain": {
         "chain": "base-sepolia",
-        "contract_address": "0xNeonCollectibleContract",
         "drop_id": 1
       }
     },

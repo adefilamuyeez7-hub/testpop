@@ -61,7 +61,7 @@ function isMissingCampaignSubmissionTableError(error) {
 async function findCampaignDropById(dropId) {
   const { data, error } = await supabase
     .from("drops")
-    .select("id, artist_id, title, type, status, ends_at, contract_address, contract_drop_id, contract_kind, artists!inner(wallet)")
+    .select("id, artist_id, title, type, status, ends_at, artists!inner(wallet)")
     .eq("id", dropId)
     .single();
 
