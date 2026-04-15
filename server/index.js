@@ -47,9 +47,6 @@ const LEGACY_DROP_COLUMNS = new Set([
   "metadata_ipfs_uri",
   "status",
   "type",
-  "contract_address",
-  "contract_drop_id",
-  "contract_kind",
   "revenue",
   "ends_at",
   "created_at",
@@ -71,9 +68,6 @@ const DROP_UPDATE_COLUMNS = new Set([
   "is_gated",
   "status",
   "type",
-  "contract_address",
-  "contract_drop_id",
-  "contract_kind",
   "revenue",
   "ends_at",
   "metadata",
@@ -87,11 +81,7 @@ const SHARE_BOT_UA_PATTERN =
   /(twitterbot|xbot|facebookexternalhit|facebot|linkedinbot|telegrambot|slackbot|discordbot|whatsapp|skypeuripreview|pinterest|embedly|googlebot|bingbot)/i;
 const GIFT_ORDER_STATUSES = new Set(["pending", "accepted", "declined"]);
 
-const ARTIST_SUBSCRIPTION_ABI = [
-  "function getSubscriberCount() view returns (uint256)",
-];
 
-function stripUnsupportedDropColumns(drop = {}) {
   return Object.fromEntries(
     Object.entries(drop).filter(([key, value]) => LEGACY_DROP_COLUMNS.has(key) && value !== undefined)
   );
@@ -539,42 +529,6 @@ let artistContractColumnsReady = null;
 let campaignSubmissionsTableReady = null;
 let campaignSigner = null;
 let campaignProvider = null;
-let productStoreProvider = null;
-
-const POAP_CAMPAIGN_V2_ABI = [
-  "function grantContentCredits(uint256 campaignId, address wallet, uint256 quantity)",
-  "function revokeContentCredits(uint256 campaignId, address wallet, uint256 quantity)",
-  "function campaigns(uint256 campaignId) view returns (address artist, string metadataURI, uint8 entryMode, uint8 status, uint256 maxSupply, uint256 minted, uint256 ticketPriceWei, uint64 startTime, uint64 endTime, uint64 redeemStartTime)",
-];
-const PRODUCT_STORE_INTERFACE = new ethers.Interface([
-  "event PurchaseCompleted(uint256 indexed orderId, address indexed buyer, uint256 indexed productId, uint256 quantity, uint256 totalPrice)",
-]);
-const CREATIVE_RELEASE_ESCROW_INTERFACE = new ethers.Interface([
-  "event ReleasePurchased(uint256 indexed orderId, uint256 indexed listingId, address indexed buyer, uint256 quantity, uint256 totalPrice)",
-]);
-
-async function ensureArtistContractColumnsReady() {
-  if (artistContractColumnsReady !== null) {
-    return artistContractColumnsReady;
-  }
-
-  const { error } = await supabase
-    .from("artists")
-    .select("contract_address, contract_deployment_tx, contract_deployed_at")
-    .limit(1);
-
-  if (error && isMissingArtistContractColumnError(error)) {
-    artistContractColumnsReady = false;
-    return false;
-  }
-
-  if (error) {
-    throw new Error(`Unable to verify artist contract metadata columns: ${error.message}`);
-  }
-
-  artistContractColumnsReady = true;
-  return true;
-}
 
 async function findArtistIdByWallet(wallet) {
   const normalized = normalizeWallet(wallet);
@@ -634,9 +588,7 @@ function getCampaignProvider() {
 }
 
 function getProductStoreProvider() {
-  if (productStoreProvider) return productStoreProvider;
-  productStoreProvider = new ethers.JsonRpcProvider(BASE_SEPOLIA_RPC_URL);
-  return productStoreProvider;
+  throw new Error("Product store provider disabled - use payment integration instead");
 }
 
 function normalizeTxHash(txHash) {

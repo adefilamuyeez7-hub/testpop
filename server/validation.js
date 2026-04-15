@@ -16,8 +16,6 @@ export const dropUpdateSchema = z.object({
   is_gated: z.boolean().optional(),
   status: z.enum(["draft", "live", "published", "ended"]).optional(),
   type: z.enum(["drop", "auction", "campaign"]).optional(),
-  contract_address: z.string().regex(/^0x[a-fA-F0-9]{40}$/).optional(),
-  contract_drop_id: z.number().int().min(0).optional(),
   revenue: z.number().min(0).optional(),
   ends_at: z.string().datetime().optional(),
   metadata: z.record(z.any()).optional(),
@@ -39,8 +37,6 @@ export const productCreateSchema = z.object({
   delivery_uri: z.string().optional(),
   is_gated: z.boolean().optional(),
   status: z.enum(["draft", "published"]).optional(),
-  contract_address: z.string().regex(/^0x[a-fA-F0-9]{40}$/).optional(),
-  contract_drop_id: z.number().int().min(0).optional(),
   metadata: z.record(z.any()).optional(),
 });
 

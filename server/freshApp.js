@@ -644,21 +644,6 @@ function buildFeedItem(db, collectorId, post) {
   };
 }
 
-function mintPoapIfEligible(db, collectorId, order) {
-  const orderCount = db.orders.filter((entry) => entry.collector_id === collectorId).length;
-  if (orderCount < 3) return;
-  const exists = db.poaps.some((poap) => poap.collector_id === collectorId && poap.code === "supporter-3");
-  if (exists) return;
-  db.poaps.push({
-    id: `poap-${randomUUID().slice(0, 10)}`,
-    collector_id: collectorId,
-    code: "supporter-3",
-    title: "Supporter Level 3",
-    description: "Completed three purchases as a guest collector.",
-    created_at: order.created_at,
-  });
-}
-
 function grantCollection(db, collectorId, orderId, items) {
   for (const item of items) {
     const existing = db.collections.find(
@@ -1297,7 +1282,6 @@ app.post("/fresh/checkout", (req, res) => {
 
   db.orders.push(order);
   db.carts[collectorId] = [];
-  mintPoapIfEligible(db, collectorId, order);
   writeDb(db);
 
   return res.status(201).json({
