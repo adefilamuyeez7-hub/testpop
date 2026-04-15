@@ -13,6 +13,7 @@ import { ethers } from "ethers";
 import { dropUpdateSchema, validateInput } from "./validation.js";
 import { appJwtSecret } from "./config.js";
 import { getPinataAuthMode, requirePinataAuthStrategies } from "./pinataAuth.js";
+import { validateCSRF, generateCSRFToken, getCSRFTokenEndpoint } from "./middleware/csrf.js";
 import notificationRoutes from "./api/notifications.js";
 import fanHubRoutes from "./api/fanHub.js";
 import catalogRoutes from "./routes/catalog.js";
@@ -1692,6 +1693,19 @@ app.use(express.json({ limit: "8mb" }));
 app.use(cookieParser());
 
 // ═════════════════════════════════════════════════════════════════════════════
+// SECURITY MIDDLEWARE - CSRF, Rate Limiting
+// ═════════════════════════════════════════════════════════════════════════════
+
+// CSRF token endpoint - clients fetch token before form submission
+app.get('/api/csrf-token', (req, res) => {
+  const token = generateCSRFToken();
+  res.json({ token, expiresIn: 900 }); // 15 minutes
+});
+
+// CSRF validation middleware applied to state-changing routes (POST/PUT/DELETE)
+const csrfProtection = validateCSRF;
+
+// ═════════════════════════════════════════════════════════════════════════════
 // STATIC FILE SERVING - Serve frontend SPA from dist folder
 // On Vercel, dist/ is copied to server/ by buildCommand
 // ═════════════════════════════════════════════════════════════════════════════
@@ -1955,7 +1969,7 @@ app.get("/api/auth/session", authRequired, (req, res) => {
   return res.json({ wallet: req.auth.wallet, role: req.auth.role });
 });
 
-app.post("/artists/profile", authRequired, async (req, res) => {
+app.post("/artists/profile", authRequired, csrfProtection, async (req, res) => {
   const wallet = normalizeWallet(req.body?.wallet);
   if (!wallet) {
     return res.status(400).json({ error: "A valid wallet is required" });
@@ -2058,7 +2072,7 @@ app.post("/maintenance/cleanup-drops", authRequired, async (req, res) => {
   }
 });
 
-app.post("/drops", authRequired, async (req, res) => {
+app.post("/drops", authRequired, csrfProtection, async (req, res) => {
   const drop = sanitizeDropPayload(req.body || {}, { includeArtistId: true });
   const artistId = drop.artist_id;
   if (!artistId) return res.status(400).json({ error: "artist_id is required" });
@@ -2100,7 +2114,7 @@ app.post("/drops", authRequired, async (req, res) => {
   return res.json(data);
 });
 
-app.patch("/drops/:id", authRequired, async (req, res) => {
+app.patch("/drops/:id", authRequired, csrfProtection, async (req, res) => {
   const id = req.params.id;
   const { signature, signatureMessage } = req.body;
 
@@ -2167,7 +2181,7 @@ app.patch("/drops/:id", authRequired, async (req, res) => {
   return res.json(data);
 });
 
-app.delete("/drops/:id", authRequired, async (req, res) => {
+app.delete("/drops/:id", authRequired, csrfProtection, async (req, res) => {
   const id = req.params.id;
   const { data: existing, error: existingError } = await supabase
     .from("drops")
@@ -2548,7 +2562,7 @@ registerRoute("patch", "/creative-releases/:id", authRequired, async (req, res) 
   }
 });
 
-app.post("/products", authRequired, async (req, res) => {
+app.post("/products", authRequired, csrfProtection, async (req, res) => {
   const product = req.body || {};
   const creatorWallet = normalizeWallet(product.creator_wallet);
   if (!creatorWallet) return res.status(400).json({ error: "creator_wallet is required" });
@@ -2607,7 +2621,7 @@ app.post("/products", authRequired, async (req, res) => {
   return res.json(data);
 });
 
-app.patch("/products/:id", authRequired, async (req, res) => {
+app.patch("/products/:id", authRequired, csrfProtection, async (req, res) => {
   const { data: existing, error: existingError } = await supabase
     .from("products")
     .select("id, creator_wallet")
@@ -3289,7 +3303,7 @@ app.get("/orders", authRequired, async (req, res) => {
   }
 });
 
-app.post("/orders", authRequired, async (req, res) => {
+app.post("/orders", authRequired, csrfProtection, async (req, res) => {
   const order = req.body || {};
   const buyerWallet = normalizeWallet(order.buyer_wallet);
   if (!buyerWallet) return res.status(400).json({ error: "buyer_wallet is required" });
@@ -3480,7 +3494,7 @@ app.post("/orders", authRequired, async (req, res) => {
   }
 });
 
-app.patch("/orders/:id", authRequired, async (req, res) => {
+app.patch("/orders/:id", authRequired, csrfProtection, async (req, res) => {
   let { data: existing, error: existingError } = await supabase
     .from("orders")
     .select("id, buyer_wallet, product_id, status, paid_at, approval_status, payout_status, products(creator_wallet), order_items(product_id, products(creator_wallet))")
@@ -4074,7 +4088,7 @@ registerRoute("patch", "/artist-applications/:id", authRequired, adminRequired, 
   }
 });
 
-app.post("/whitelist", authRequired, async (req, res) => {
+app.post("/whitelist", authRequired, csrfProtection, async (req, res) => {
   const entry = req.body || {};
   const wallet = normalizeWallet(entry.wallet || req.auth.wallet);
   if (!sameWalletOrAdmin(wallet, req.auth)) {
@@ -4103,7 +4117,7 @@ app.post("/whitelist", authRequired, async (req, res) => {
   return res.json(data);
 });
 
-app.patch("/whitelist/:id", authRequired, adminRequired, async (req, res) => {
+app.patch("/whitelist/:id", authRequired, adminRequired, csrfProtection, async (req, res) => {
   const updates = { ...req.body, updated_at: new Date().toISOString() };
   if (updates.status === "approved" && !updates.approved_at) {
     updates.approved_at = new Date().toISOString();
@@ -4120,7 +4134,7 @@ app.patch("/whitelist/:id", authRequired, adminRequired, async (req, res) => {
   return res.json(data);
 });
 
-app.delete("/whitelist/:id", authRequired, adminRequired, async (req, res) => {
+app.delete("/whitelist/:id", authRequired, adminRequired, csrfProtection, async (req, res) => {
   const { error } = await supabase
     .from("whitelist")
     .delete()

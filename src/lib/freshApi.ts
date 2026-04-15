@@ -333,7 +333,10 @@ export async function removeFreshCartItem(collectorId: string, productId: string
 
 export async function checkoutFresh(options: {
   collectorId: string;
-  paymentMethod: "onchain" | "offramp_partner";
+  paymentMethod: "card" | "crypto" | "offramp_partner";
+  paymentToken?: string; // USDC | USDT
+  paymentChain?: string; // base | polygon | optimism | arbitrum
+  paymentTxHash?: string; // Token transfer transaction hash
   items?: Array<{ product_id: string; quantity: number }>;
   gift?: { recipient_label: string };
 }) {
@@ -350,6 +353,9 @@ export async function checkoutFresh(options: {
     body: JSON.stringify({
       collector_id: options.collectorId,
       payment_method: options.paymentMethod,
+      payment_token: options.paymentToken,
+      payment_chain: options.paymentChain,
+      payment_tx_hash: options.paymentTxHash,
       items: options.items,
       gift: options.gift || null,
     }),
