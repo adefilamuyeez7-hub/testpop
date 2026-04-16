@@ -5,7 +5,7 @@
  * System overview and administrative statistics
  */
 
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -34,8 +34,26 @@ import {
   Activity,
 } from 'lucide-react';
 
-// Mock data - replace with actual API calls
-const volumeData = [
+/**
+ * Fallback data structure for when API fails
+ */
+const FALLBACK_STATS = {
+  totalUsers: 0,
+  activeUsers: 0,
+  totalCreators: 0,
+  activeCreators: 0,
+  totalProducts: 0,
+  activeAuctions: 0,
+  totalGifts: 0,
+  totalVolume: 0,
+  platformFees: 0,
+  creatorPayouts: 0,
+  ordersToday: 0,
+  auctionsToday: 0,
+  giftsToday: 0,
+};
+
+const FALLBACK_VOLUME_DATA = [
   { date: 'Mon', products: 240, auctions: 221, gifts: 120 },
   { date: 'Tue', products: 321, auctions: 281, gifts: 150 },
   { date: 'Wed', products: 281, auctions: 251, gifts: 170 },
@@ -45,7 +63,7 @@ const volumeData = [
   { date: 'Sun', products: 381, auctions: 331, gifts: 180 },
 ];
 
-const revenueData = [
+const FALLBACK_REVENUE_DATA = [
   { date: 'Week 1', revenue: 2400, fees: 240 },
   { date: 'Week 2', revenue: 3210, fees: 321 },
   { date: 'Week 3', revenue: 2290, fees: 229 },
@@ -53,21 +71,64 @@ const revenueData = [
 ];
 
 export function AdminDashboardPage() {
-  const stats = {
-    totalUsers: 12543,
-    activeUsers: 3421,
-    totalCreators: 845,
-    activeCreators: 342,
-    totalProducts: 45320,
-    activeAuctions: 234,
-    totalGifts: 8932,
-    totalVolume: 125.43,
-    platformFees: 12.54,
-    creatorPayouts: 97.21,
-    ordersToday: 124,
-    auctionsToday: 23,
-    giftsToday: 45,
-  };
+  const [stats, setStats] = useState(FALLBACK_STATS);
+  const [volumeData, setVolumeData] = useState(FALLBACK_VOLUME_DATA);
+  const [revenueData, setRevenueData] = useState(FALLBACK_REVENUE_DATA);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const fetchDashboardData = async () => {
+      try {
+        setLoading(true);
+        setError(null);
+
+        // Fetch stats in parallel
+        const [statsRes, volumeRes, revenueRes] = await Promise.all([
+          fetch('/api/admin/dashboard/stats'),
+          fetch('/api/admin/dashboard/volume'),
+          fetch('/api/admin/dashboard/revenue'),
+        ]);
+
+        // Handle stats response
+        if (!statsRes.ok) {
+          console.warn('Failed to fetch stats, using fallback');
+        } else {
+          const statsData = await statsRes.json();
+          setStats(statsData);
+        }
+
+        // Handle volume response
+        if (!volumeRes.ok) {
+          console.warn('Failed to fetch volume data, using fallback');
+        } else {
+          const volumeDataResponse = await volumeRes.json();
+          setVolumeData(volumeDataResponse);
+        }
+
+        // Handle revenue response
+        if (!revenueRes.ok) {
+          console.warn('Failed to fetch revenue data, using fallback');
+        } else {
+          const revenueDataResponse = await revenueRes.json();
+          setRevenueData(revenueDataResponse);
+        }
+      } catch (err) {
+        console.error('Error fetching dashboard data:', err);
+        setError(err instanceof Error ? err.message : 'Failed to load dashboard data');
+        // Fallback to hardcoded data on error
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchDashboardData();
+
+    // Refresh data every 30 seconds
+    const refreshInterval = setInterval(fetchDashboardData, 30000);
+    return () => clearInterval(refreshInterval);
+  }, []);
+
 
   return (
     <div className="space-y-6 p-6 max-w-7xl mx-auto">

@@ -1,9 +1,10 @@
 import express, { Router, Request, Response } from 'express';
+import { supabase } from '../utils/supabase';
 
 const router = Router();
 
-// Mock creators data - replace with database query in production
-const mockCreators = [
+// Fallback mock creators data - used only when database is unavailable
+const fallbackCreators = [
   {
     id: '1',
     address: '0x1234567890abcdef1234567890abcdef12345678',
@@ -128,43 +129,83 @@ const mockCreators = [
 
 /**
  * GET /api/creators
- * Fetch all creators with optional filtering
+ * Fetch all creators with optional filtering and search
+ * Uses database first, falls back to mock data if DB unavailable
  */
 router.get('/', async (req: Request, res: Response) => {
   try {
     const { category, search, sort } = req.query;
 
-    let creators = [...mockCreators];
+    // Try to fetch from database first
+    let query = supabase
+      .from('artists')
+      .select('*');
 
-    // Filter by category
+    // Filter by verified status
     if (category === 'verified') {
-      creators = creators.filter(c => c.verified);
+      query = query.eq('verified', true);
     } else if (category === 'trending') {
-      creators = creators.filter(c => (c.sales24h || 0) > 10);
+      // trending = creators with high sales in 24h
+      query = query.gt('sales24h', 10);
     } else if (category === 'affordable') {
-      creators = creators.filter(c => parseFloat(c.price || '0') < 10);
+      // affordable = price < 10
+      query = query.lt('price', 10);
     }
 
-    // Filter by search query
+    // Search by name or bio
     if (search && typeof search === 'string') {
-      const query = search.toLowerCase();
-      creators = creators.filter(
-        c =>
-          c.name.toLowerCase().includes(query) ||
-          c.bio.toLowerCase().includes(query)
+      query = query.or(
+        `name.ilike.%${search}%,bio.ilike.%${search}%`
       );
     }
 
-    // Sort
+    // Sorting
     if (sort === 'newest') {
-      creators = creators.reverse();
+      query = query.order('created_at', { ascending: false });
     } else if (sort === 'price-low') {
-      creators.sort((a, b) => parseFloat(a.price || '0') - parseFloat(b.price || '0'));
+      query = query.order('price', { ascending: true });
     } else if (sort === 'price-high') {
-      creators.sort((a, b) => parseFloat(b.price || '0') - parseFloat(a.price || '0'));
+      query = query.order('price', { ascending: false });
+    } else {
+      query = query.order('follower_count', { ascending: false });
     }
 
-    return res.json(creators);
+    const { data: creators, error } = await query;
+
+    if (error) {
+      console.warn('Database error, using fallback mock data:', error.message);
+      // Fallback to mock data if database fails
+      let fallbackdata = [...fallbackCreators];
+
+      if (category === 'verified') {
+        fallbackdata = fallbackdata.filter(c => c.verified);
+      } else if (category === 'trending') {
+        fallbackdata = fallbackdata.filter(c => (c.sales24h || 0) > 10);
+      } else if (category === 'affordable') {
+        fallbackdata = fallbackdata.filter(c => parseFloat(c.price || '0') < 10);
+      }
+
+      if (search && typeof search === 'string') {
+        const query = search.toLowerCase();
+        fallbackdata = fallbackdata.filter(
+          c =>
+            c.name.toLowerCase().includes(query) ||
+            c.bio.toLowerCase().includes(query)
+        );
+      }
+
+      if (sort === 'newest') {
+        fallbackdata = fallbackdata.reverse();
+      } else if (sort === 'price-low') {
+        fallbackdata.sort((a, b) => parseFloat(a.price || '0') - parseFloat(b.price || '0'));
+      } else if (sort === 'price-high') {
+        fallbackdata.sort((a, b) => parseFloat(b.price || '0') - parseFloat(a.price || '0'));
+      }
+
+      return res.json(fallbackdata);
+    }
+
+    return res.json(creators || []);
   } catch (error) {
     console.error('Error fetching creators:', error);
     return res.status(500).json({
@@ -173,41 +214,71 @@ router.get('/', async (req: Request, res: Response) => {
   }
 });
 
+
 /**
  * GET /api/creators/:id
- * Fetch a specific creator
+ * Fetch a specific creator from database
  */
 router.get('/:id', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const creator = mockCreators.find(c => c.id === id);
 
-    if (!creator) {
+    // Try database first
+    const { data: creator, error } = await supabase
+      .from('artists')
+      .select('*')
+      .eq('id', id)
+      .single();
+
+    if (error && error.code !== 'PGRST116') {
+      // PGRST116 = no rows returned, try fallback
+      throw error;
+    }
+
+    if (creator) {
+      return res.json(creator);
+    }
+
+    // Fallback to mock data
+    const fallbackCreator = fallbackCreators.find(c => c.id === id);
+    if (!fallbackCreator) {
       return res.status(404).json({ message: 'Creator not found' });
     }
 
-    return res.json(creator);
+    return res.json(fallbackCreator);
   } catch (error) {
     console.error('Error fetching creator:', error);
-    return res.status(500).json({
+    res.status(500).json({
       message: error instanceof Error ? error.message : 'Failed to fetch creator',
     });
   }
 });
 
+
 /**
- * GET /api/creators/trending
- * Get trending creators
+ * GET /api/creators/trending/list
+ * Get trending creators sorted by sales in last 24h
  */
 router.get('/trending/list', async (req: Request, res: Response) => {
   try {
     const limit = Math.min(parseInt((req.query.limit as string) || '10'), 50);
 
-    const trending = mockCreators
-      .sort((a, b) => (b.sales24h || 0) - (a.sales24h || 0))
-      .slice(0, limit);
+    const { data: trending, error } = await supabase
+      .from('artists')
+      .select('*')
+      .gt('sales24h', 0)
+      .order('sales24h', { ascending: false })
+      .limit(limit);
 
-    return res.json(trending);
+    if (error) {
+      console.warn('Using fallback trending creators');
+      const fallbacktrending = fallbackCreators
+        .sort((a, b) => (b.sales24h || 0) - (a.sales24h || 0))
+        .slice(0, limit);
+      return res.json(fallbacktrending);
+    }
+
+    return res.json(trending || []);
   } catch (error) {
     console.error('Error fetching trending creators:', error);
     return res.status(500).json({
@@ -216,20 +287,32 @@ router.get('/trending/list', async (req: Request, res: Response) => {
   }
 });
 
+
 /**
- * GET /api/creators/featured
- * Get featured/verified creators
+ * GET /api/creators/featured/list
+ * Get featured (verified) creators
  */
 router.get('/featured/list', async (req: Request, res: Response) => {
   try {
     const limit = Math.min(parseInt((req.query.limit as string) || '10'), 50);
 
-    const featured = mockCreators
-      .filter(c => c.verified)
-      .sort((a, b) => (b.followerCount || 0) - (a.followerCount || 0))
-      .slice(0, limit);
+    const { data: featured, error } = await supabase
+      .from('artists')
+      .select('*')
+      .eq('verified', true)
+      .order('follower_count', { ascending: false })
+      .limit(limit);
 
-    return res.json(featured);
+    if (error) {
+      console.warn('Using fallback featured creators');
+      const fallbackfeatured = fallbackCreators
+        .filter(c => c.verified)
+        .sort((a, b) => (b.followerCount || 0) - (a.followerCount || 0))
+        .slice(0, limit);
+      return res.json(fallbackfeatured);
+    }
+
+    return res.json(featured || []);
   } catch (error) {
     console.error('Error fetching featured creators:', error);
     return res.status(500).json({
@@ -238,9 +321,10 @@ router.get('/featured/list', async (req: Request, res: Response) => {
   }
 });
 
+
 /**
  * POST /api/creators/batch
- * Get multiple creators by address
+ * Get multiple creators by address from database
  */
 router.post('/batch', async (req: Request, res: Response) => {
   try {
@@ -250,13 +334,25 @@ router.post('/batch', async (req: Request, res: Response) => {
       return res.status(400).json({ message: 'addresses must be an array' });
     }
 
-    const creators = mockCreators.filter(c =>
-      addresses.some(
-        addr => addr.toLowerCase() === c.address.toLowerCase()
-      )
-    );
+    // Normalize addresses to lowercase
+    const normalizedAddresses = addresses.map(a => a.toLowerCase());
 
-    return res.json(creators);
+    const { data: creators, error } = await supabase
+      .from('artists')
+      .select('*')
+      .in('address', normalizedAddresses);
+
+    if (error) {
+      console.warn('Using fallback batch creators');
+      const fallbackCreators_batch = fallbackCreators.filter(c =>
+        normalizedAddresses.some(
+          addr => addr === c.address.toLowerCase()
+        )
+      );
+      return res.json(fallbackCreators_batch);
+    }
+
+    return res.json(creators || []);
   } catch (error) {
     console.error('Error fetching creators in batch:', error);
     return res.status(500).json({
@@ -264,5 +360,6 @@ router.post('/batch', async (req: Request, res: Response) => {
     });
   }
 });
+
 
 export default router;
