@@ -289,8 +289,25 @@ export async function fetchFreshProduct(productId: string, collectorId?: string)
 }
 
 export async function collectFreshOnchain(collectorId: string, productId: string, txHash?: string) {
-  // Onchain contracts have been disabled
-  throw new Error("Onchain collection is disabled");
+  return requestJson<{
+    success: boolean;
+    collector_id: string;
+    product_id: string;
+    tx_hash: string | null;
+    collection_entry: {
+      id: string;
+      collector_id: string;
+      product_id: string;
+      onchain_tx_hash: string | null;
+    };
+  }>("/fresh/collect-onchain", {
+    method: "POST",
+    body: JSON.stringify({
+      collector_id: collectorId,
+      product_id: productId,
+      tx_hash: txHash || null,
+    }),
+  });
 }
 
 export async function postFreshComment(postId: string, collectorId: string, body: string) {

@@ -1110,6 +1110,34 @@ app.get("/fresh/products/:id", (req, res) => {
   return res.json(buildProductResponse(db, product, collectorId));
 });
 
+app.post("/fresh/collect-onchain", (req, res) => {
+  const collectorId = resolveCollectorId(req);
+  const productId = String(req.body?.product_id || "").trim();
+  const txHash = String(req.body?.tx_hash || "").trim();
+
+  if (!productId) {
+    return res.status(400).json({ error: "product_id is required" });
+  }
+
+  try {
+    const db = readDb();
+    const collectionEntry = grantOnchainCollection(db, collectorId, productId, txHash);
+    writeDb(db);
+
+    return res.status(201).json({
+      success: true,
+      collector_id: collectorId,
+      product_id: productId,
+      tx_hash: txHash || null,
+      collection_entry: collectionEntry,
+    });
+  } catch (error) {
+    return res.status(400).json({
+      error: error instanceof Error ? error.message : "Failed to grant onchain collection",
+    });
+  }
+});
+
 
 app.get("/fresh/cart/:collectorId", (req, res) => {
   const collectorId = normalizeCollectorId(req.params.collectorId);

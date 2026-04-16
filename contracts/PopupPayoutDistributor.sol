@@ -5,6 +5,10 @@ import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
+interface IPopupReferralTracker {
+    function markCommissionAsPaid(uint256 purchaseId) external;
+}
+
 /**
  * @title PopupPayoutDistributor
  * @notice Handles creator payouts with fees, royalties, and escrow
@@ -14,6 +18,8 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
  *   - Collaborators (optional split)
  */
 contract PopupPayoutDistributor is Ownable, ReentrancyGuard {
+    uint256 public constant BPS_DIVISOR = 10_000;
+    uint256 public constant AFFILIATE_COMMISSION_BPS = 500; // 5%
     // ═══════════════════════════════════════════════════════════════════════════
     // TYPE DEFINITIONS
     // ═══════════════════════════════════════════════════════════════════════════
@@ -60,6 +66,7 @@ contract PopupPayoutDistributor is Ownable, ReentrancyGuard {
     // Platform settings
     uint256 public platformCommission = 250; // 2.5% in basis points
     address public platformFeeRecipient;
+    IPopupReferralTracker public referralManager;
 
     // Authorized callers (like ProductStore contract)
     mapping(address => bool) public authorizedCallers;
@@ -102,6 +109,18 @@ contract PopupPayoutDistributor is Ownable, ReentrancyGuard {
         address indexed creator,
         uint256 amount,
         PayoutMethod method
+    );
+
+    event SalePayoutDistributed(
+        uint256 indexed payoutId,
+        address indexed creator,
+        address indexed affiliate,
+        uint256 grossAmount,
+        uint256 creatorNetAmount,
+        uint256 platformFeeAmount,
+        uint256 affiliateFeeAmount,
+        PayoutMethod method,
+        string reason
     );
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -172,6 +191,81 @@ contract PopupPayoutDistributor is Ownable, ReentrancyGuard {
         });
 
         emit PayoutDistributed(recordId, creator, amount, reason);
+    }
+
+    /**
+     * @notice Distribute primary sale or auction proceeds in the asset actually received
+     * @dev Authorized sales contracts can forward ETH directly or approve token pull.
+     */
+    function distributeSaleProceeds(
+        address creator,
+        address affiliate,
+        uint256 grossAmount,
+        PayoutMethod saleMethod,
+        uint256 referralPurchaseId,
+        string memory reason
+    ) external payable nonReentrant returns (uint256 payoutId) {
+        require(authorizedCallers[msg.sender], "Not authorized");
+        require(creator != address(0), "Invalid creator");
+        require(grossAmount > 0, "Amount must be > 0");
+
+        if (saleMethod == PayoutMethod.ETH) {
+            require(msg.value == grossAmount, "Incorrect ETH supplied");
+        } else {
+            require(msg.value == 0, "ETH not expected");
+            address token = paymentTokens[saleMethod];
+            require(token != address(0), "Token not configured");
+            bool received = IERC20(token).transferFrom(msg.sender, address(this), grossAmount);
+            require(received, "Token funding failed");
+        }
+
+        uint256 platformFeeAmount = (grossAmount * platformCommission) / BPS_DIVISOR;
+        uint256 affiliateFeeAmount = affiliate == address(0)
+            ? 0
+            : (grossAmount * AFFILIATE_COMMISSION_BPS) / BPS_DIVISOR;
+        uint256 creatorNetAmount = grossAmount - platformFeeAmount - affiliateFeeAmount;
+
+        if (platformFeeAmount > 0 && platformFeeRecipient != address(0)) {
+            _sendSalePayout(platformFeeRecipient, platformFeeAmount, saleMethod);
+        }
+
+        if (affiliateFeeAmount > 0) {
+            _sendSalePayout(affiliate, affiliateFeeAmount, saleMethod);
+            if (address(referralManager) != address(0) && referralPurchaseId != 0) {
+                referralManager.markCommissionAsPaid(referralPurchaseId);
+            }
+        }
+
+        address recipient = creatorPayoutAddress[creator] != address(0)
+            ? creatorPayoutAddress[creator]
+            : creator;
+
+        if (creatorCollaborators[creator].length > 0) {
+            _distributeSaleWithCollaborators(creator, recipient, creatorNetAmount, saleMethod);
+        } else {
+            _sendSalePayout(recipient, creatorNetAmount, saleMethod);
+        }
+
+        payoutId = payoutRecordCounter++;
+        payoutRecords[payoutId] = PayoutRecord({
+            creator: creator,
+            amount: creatorNetAmount,
+            reason: reason,
+            timestamp: block.timestamp,
+            completed: true
+        });
+
+        emit SalePayoutDistributed(
+            payoutId,
+            creator,
+            affiliate,
+            grossAmount,
+            creatorNetAmount,
+            platformFeeAmount,
+            affiliateFeeAmount,
+            saleMethod,
+            reason
+        );
     }
 
     /**
@@ -325,6 +419,28 @@ contract PopupPayoutDistributor is Ownable, ReentrancyGuard {
         _sendPayout(recipient, creatorShare, method);
     }
 
+    function _distributeSaleWithCollaborators(
+        address creator,
+        address recipient,
+        uint256 amount,
+        PayoutMethod method
+    ) internal {
+        uint256 creatorShare = amount;
+
+        for (uint256 i = 0; i < creatorCollaborators[creator].length; i++) {
+            address collaborator = creatorCollaborators[creator][i];
+            uint256 collaboratorShare = collaboratorShares[creator][collaborator];
+
+            if (collaboratorShare > 0) {
+                uint256 payAmount = (amount * collaboratorShare) / BPS_DIVISOR;
+                _sendSalePayout(collaborator, payAmount, method);
+                creatorShare -= payAmount;
+            }
+        }
+
+        _sendSalePayout(recipient, creatorShare, method);
+    }
+
     /**
      * @notice Send payout in specified method
      */
@@ -345,6 +461,24 @@ contract PopupPayoutDistributor is Ownable, ReentrancyGuard {
             creatorEscrow[recipient] += amount;
         } else {
             revert("Invalid payout method");
+        }
+    }
+
+    function _sendSalePayout(
+        address recipient,
+        uint256 amount,
+        PayoutMethod method
+    ) internal {
+        if (method == PayoutMethod.ETH) {
+            (bool success, ) = payable(recipient).call{value: amount}("");
+            require(success, "ETH transfer failed");
+        } else if (method == PayoutMethod.USDC || method == PayoutMethod.USDT) {
+            address token = paymentTokens[method];
+            require(token != address(0), "Token not configured");
+            bool success = IERC20(token).transfer(recipient, amount);
+            require(success, "Token transfer failed");
+        } else {
+            revert("Invalid sale method");
         }
     }
 
@@ -380,6 +514,10 @@ contract PopupPayoutDistributor is Ownable, ReentrancyGuard {
     function setPlatformFeeRecipient(address recipient) external onlyOwner {
         require(recipient != address(0), "Invalid recipient");
         platformFeeRecipient = recipient;
+    }
+
+    function setReferralManager(address referralManagerAddress) external onlyOwner {
+        referralManager = IPopupReferralTracker(referralManagerAddress);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════

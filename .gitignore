@@ -18,6 +18,8 @@ build/
 # Hardhat
 artifacts/
 cache/
+*.abi
+*.bin
 
 # IDE
 .vscode/

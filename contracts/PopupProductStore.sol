@@ -2,7 +2,6 @@
 pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/token/ERC721/ERC721.sol";
-import "@openzeppelin/contracts/token/ERC1155/ERC1155.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/security/Pausable.sol";
@@ -27,9 +26,35 @@ interface IPayout {
         uint256 amount,
         string memory reason
     ) external;
+
+    function distributeSaleProceeds(
+        address creator,
+        address affiliate,
+        uint256 grossAmount,
+        uint8 paymentMethod,
+        uint256 referralPurchaseId,
+        string memory reason
+    ) external payable returns (uint256 payoutId);
 }
 
-contract PopupProductStore is ERC1155, ERC721, Ownable, ReentrancyGuard, Pausable {
+interface IReferralManager {
+    function validateReferralCode(string calldata code) external view returns (bool isValid, address artist);
+
+    function recordReferral(
+        string calldata code,
+        address referrer,
+        address buyer,
+        uint256 purchaseAmount,
+        uint8 paymentMethod,
+        uint256 purchaseId
+    ) external returns (address artist, uint256 commission, bool recorded);
+
+    function markCommissionAsPaid(uint256 purchaseId) external;
+
+    function cancelReferral(uint256 purchaseId) external returns (bool cancelled);
+}
+
+contract PopupProductStore is ERC721, Ownable, ReentrancyGuard, Pausable {
     using Strings for uint256;
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -137,11 +162,14 @@ contract PopupProductStore is ERC1155, ERC721, Ownable, ReentrancyGuard, Pausabl
     mapping(uint256 => uint256) public tokenIdToProductId; // NFT tokenId → productId
     mapping(uint256 => uint256) public tokenIdToPurchaseId; // NFT tokenId → purchaseId
 
+    mapping(uint256 => address) public purchaseAffiliate; // purchaseId -> affiliate
+
     // Payment tokens
     mapping(PaymentMethod => address) public paymentTokens;
 
     // Payout handler
     IPayout public payoutHandler;
+    IReferralManager public referralManager;
 
     // Creator registry
     mapping(address => bool) public creatorApproved;
@@ -212,6 +240,7 @@ contract PopupProductStore is ERC1155, ERC721, Ownable, ReentrancyGuard, Pausabl
 
     event CreatorApproved(address indexed creator);
     event CreatorRevoked(address indexed creator);
+    event ReferralManagerUpdated(address indexed referralManager);
 
     // ═══════════════════════════════════════════════════════════════════════════
     // CONSTRUCTOR & INITIALIZATION
@@ -223,7 +252,6 @@ contract PopupProductStore is ERC1155, ERC721, Ownable, ReentrancyGuard, Pausabl
         address _payoutHandler,
         address _platformFeeRecipient
     )
-        ERC1155("ipfs://QmPopupProductMetadata/{id}")
         ERC721("POPUP Products", "POPUP")
     {
         paymentTokens[PaymentMethod.USDC] = _paymentTokenUsdc;
@@ -242,14 +270,14 @@ contract PopupProductStore is ERC1155, ERC721, Ownable, ReentrancyGuard, Pausabl
 
     /**
      * @notice Create a new product listing
-     * @param uri IPFS metadata URI
+     * @param metadataUri IPFS metadata URI
      * @param priceWei Price in wei (or token units)
      * @param paymentMethod Payment method (ETH, USDC, USDT)
      * @param supply Max supply (0 = unlimited)
      * @param royaltyPercentBps Creator royalty in basis points
      */
     function createProduct(
-        string memory uri,
+        string memory metadataUri,
         uint256 priceWei,
         PaymentMethod paymentMethod,
         uint256 supply,
@@ -264,7 +292,7 @@ contract PopupProductStore is ERC1155, ERC721, Ownable, ReentrancyGuard, Pausabl
         products[productId] = Product({
             productId: productId,
             creator: msg.sender,
-            uri: uri,
+            uri: metadataUri,
             priceWei: priceWei,
             paymentMethod: paymentMethod,
             supply: supply,
@@ -274,7 +302,7 @@ contract PopupProductStore is ERC1155, ERC721, Ownable, ReentrancyGuard, Pausabl
             createdAt: block.timestamp
         });
 
-        emit ProductCreated(productId, msg.sender, uri, priceWei, paymentMethod);
+        emit ProductCreated(productId, msg.sender, metadataUri, priceWei, paymentMethod);
     }
 
     /**
@@ -288,7 +316,36 @@ contract PopupProductStore is ERC1155, ERC721, Ownable, ReentrancyGuard, Pausabl
         uint256 quantity,
         address giftRecipient
     ) external payable nonReentrant whenNotPaused returns (uint256 purchaseId) {
+        return _purchaseProduct(productId, quantity, giftRecipient, "", address(0));
+    }
+
+    /**
+     * @notice Purchase a product directly using a referral code
+     * @param productId Product ID to purchase
+     * @param quantity Number of copies
+     * @param giftRecipient Address that should receive the soulbound NFT
+     * @param referralCode Artist-scoped referral code
+     * @param referrer Affiliate wallet to receive commission
+     */
+    function purchaseProductWithReferral(
+        uint256 productId,
+        uint256 quantity,
+        address giftRecipient,
+        string calldata referralCode,
+        address referrer
+    ) external payable nonReentrant whenNotPaused returns (uint256 purchaseId) {
+        return _purchaseProduct(productId, quantity, giftRecipient, referralCode, referrer);
+    }
+
+    function _purchaseProduct(
+        uint256 productId,
+        uint256 quantity,
+        address giftRecipient,
+        string memory referralCode,
+        address referrer
+    ) internal returns (uint256 purchaseId) {
         require(quantity > 0, "Quantity must be > 0");
+        require(quantity == 1, "Only single-copy purchases supported");
 
         Product storage product = products[productId];
         require(product.creator != address(0), "Product not found");
@@ -296,16 +353,28 @@ contract PopupProductStore is ERC1155, ERC721, Ownable, ReentrancyGuard, Pausabl
         require(product.supply == 0 || product.sold + quantity <= product.supply, "Insufficient supply");
 
         uint256 totalCost = product.priceWei * quantity;
+        purchaseId = purchaseCounter++;
+        address affiliate = _prepareReferral(
+            product.creator,
+            referralCode,
+            referrer,
+            totalCost,
+            product.paymentMethod,
+            purchaseId
+        );
 
-        // Handle payment
-        _processPayment(product.paymentMethod, product.creator, totalCost, false);
+        // Collect payment into contract custody before routing payout splits.
+        _processPayment(product.paymentMethod, address(this), totalCost, false);
 
         // Update product state
         product.sold += quantity;
 
-        // Create purchase record & mint NFT
-        purchaseId = purchaseCounter++;
-        uint256 nftTokenId = _mintProductNFT(productId, msg.sender);
+        if (affiliate != address(0)) {
+            purchaseAffiliate[purchaseId] = affiliate;
+        }
+
+        uint256 nftTokenId = 0;
+        GiftStatus giftStatus = GiftStatus.CLAIMED;
 
         purchases[purchaseId] = Purchase({
             purchaseId: purchaseId,
@@ -317,18 +386,62 @@ contract PopupProductStore is ERC1155, ERC721, Ownable, ReentrancyGuard, Pausabl
             nftTokenId: nftTokenId,
             isGift: giftRecipient != address(0),
             giftRecipient: giftRecipient,
-            giftStatus: giftRecipient != address(0) ? GiftStatus.PENDING : GiftStatus.CLAIMED,
+            giftStatus: giftStatus,
             timestamp: block.timestamp
         });
 
-        emit ProductPurchased(purchaseId, productId, msg.sender, totalCost, nftTokenId, giftRecipient != address(0));
+        if (giftRecipient == address(0)) {
+            _distributePayout(
+                product.creator,
+                affiliate,
+                totalCost,
+                product.paymentMethod,
+                affiliate != address(0) ? purchaseId : 0,
+                "Product sale"
+            );
 
-        // Handle gift if present
-        if (giftRecipient != address(0)) {
+            nftTokenId = _mintProductNFT(productId, msg.sender, purchaseId);
+            purchases[purchaseId].nftTokenId = nftTokenId;
+        } else {
+            purchases[purchaseId].giftStatus = GiftStatus.PENDING;
             _createGift(purchaseId, msg.sender, giftRecipient, "");
         }
 
+        emit ProductPurchased(purchaseId, productId, msg.sender, totalCost, nftTokenId, giftRecipient != address(0));
+
         return purchaseId;
+    }
+
+    function _prepareReferral(
+        address creator,
+        string memory referralCode,
+        address referrer,
+        uint256 totalCost,
+        PaymentMethod paymentMethod,
+        uint256 purchaseId
+    ) internal returns (address affiliate) {
+        if (bytes(referralCode).length == 0) {
+            return address(0);
+        }
+
+        require(address(referralManager) != address(0), "Referral manager not configured");
+        require(referrer != address(0), "Invalid referrer");
+        require(referrer != msg.sender, "Self-referral not allowed");
+
+        (bool isValid, address referralArtist) = referralManager.validateReferralCode(referralCode);
+        require(isValid, "Invalid referral code");
+        require(referralArtist == creator, "Referral code artist mismatch");
+
+        (, , bool recorded) = referralManager.recordReferral(
+            referralCode,
+            referrer,
+            msg.sender,
+            totalCost,
+            uint8(paymentMethod),
+            purchaseId
+        );
+
+        return recorded ? referrer : address(0);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -430,12 +543,14 @@ contract PopupProductStore is ERC1155, ERC721, Ownable, ReentrancyGuard, Pausabl
         }
 
         // Award to highest bidder
-        uint256 nftTokenId = _mintProductNFT(auction.productId, auction.highestBidder);
+        uint256 nftTokenId = _mintProductNFT(auction.productId, auction.highestBidder, 0);
 
         _distributePayout(
             auction.creator,
+            address(0),
             auction.highestBid,
-            products[auction.productId].royaltyPercentBps,
+            products[auction.productId].paymentMethod,
+            0,
             "Auction settlement"
         );
 
@@ -460,43 +575,73 @@ contract PopupProductStore is ERC1155, ERC721, Ownable, ReentrancyGuard, Pausabl
         string memory recipientLabel
     ) external {
         require(msg.sender == sender || msg.sender == owner(), "Not authorized");
+
+        Purchase storage purchase = purchases[purchaseId];
+        require(purchase.purchaseId != 0, "Purchase not found");
+        require(purchase.nftTokenId == 0, "Gift already minted");
+        require(!purchase.isGift, "Already a gift");
+
         _createGift(purchaseId, sender, recipient, recipientLabel);
+
+        purchase.isGift = true;
+        purchase.giftRecipient = recipient;
+        purchase.giftStatus = GiftStatus.PENDING;
     }
 
     /**
      * @notice Accept a gift
      * @param purchaseId Purchase ID
      */
-    function acceptGift(uint256 purchaseId) external {
+    function acceptGift(uint256 purchaseId) external nonReentrant {
         Purchase storage purchase = purchases[purchaseId];
+        require(purchase.purchaseId != 0, "Purchase not found");
+        require(purchase.isGift, "Not a gift");
         require(purchase.giftRecipient == msg.sender, "Not gift recipient");
         require(purchase.giftStatus == GiftStatus.PENDING, "Gift not pending");
+        require(purchase.nftTokenId == 0, "Gift already claimed");
 
         purchase.giftStatus = GiftStatus.ACCEPTED;
-
         GiftClaim storage gift = giftClaims[purchaseId];
         gift.status = GiftStatus.ACCEPTED;
 
-        emit GiftClaimed(purchaseId, msg.sender, GiftStatus.ACCEPTED);
+        _distributePayout(
+            purchase.creator,
+            purchaseAffiliate[purchaseId],
+            purchase.amount,
+            purchase.paymentMethod,
+            purchaseAffiliate[purchaseId] != address(0) ? purchaseId : 0,
+            "Gift accepted"
+        );
+
+        uint256 nftTokenId = _mintProductNFT(purchase.productId, msg.sender, purchaseId);
+        purchase.nftTokenId = nftTokenId;
+        purchase.giftStatus = GiftStatus.CLAIMED;
+        gift.status = GiftStatus.CLAIMED;
+
+        emit GiftClaimed(purchaseId, msg.sender, GiftStatus.CLAIMED);
     }
 
     /**
      * @notice Reject a gift
      * @param purchaseId Purchase ID
      */
-    function rejectGift(uint256 purchaseId) external {
+    function rejectGift(uint256 purchaseId) external nonReentrant {
         Purchase storage purchase = purchases[purchaseId];
+        require(purchase.purchaseId != 0, "Purchase not found");
+        require(purchase.isGift, "Not a gift");
         require(purchase.giftRecipient == msg.sender, "Not gift recipient");
         require(purchase.giftStatus == GiftStatus.PENDING, "Gift not pending");
+        require(purchase.nftTokenId == 0, "Gift already claimed");
 
         purchase.giftStatus = GiftStatus.REJECTED;
-
         GiftClaim storage gift = giftClaims[purchaseId];
         gift.status = GiftStatus.REJECTED;
 
-        // Refund sender
-        _refundPurchase(purchaseId);
+        if (address(referralManager) != address(0)) {
+            referralManager.cancelReferral(purchaseId);
+        }
 
+        _refundPurchase(purchaseId);
         emit GiftClaimed(purchaseId, msg.sender, GiftStatus.REJECTED);
     }
 
@@ -507,10 +652,14 @@ contract PopupProductStore is ERC1155, ERC721, Ownable, ReentrancyGuard, Pausabl
     /**
      * @notice Mint NFT for product purchase
      */
-    function _mintProductNFT(uint256 productId, address to) internal returns (uint256 tokenId) {
+    function _mintProductNFT(
+        uint256 productId,
+        address to,
+        uint256 purchaseId
+    ) internal returns (uint256 tokenId) {
         tokenId = tokenIdCounter++;
         tokenIdToProductId[tokenId] = productId;
-        tokenIdToPurchaseId[tokenId] = purchaseCounter;
+        tokenIdToPurchaseId[tokenId] = purchaseId;
 
         // Mint ERC721 variant for unique products
         _safeMint(to, tokenId);
@@ -526,8 +675,8 @@ contract PopupProductStore is ERC1155, ERC721, Ownable, ReentrancyGuard, Pausabl
         bool isAuctionBid
     ) internal {
         if (method == PaymentMethod.ETH) {
-            require(msg.value >= amount, "Insufficient ETH");
-            if (!isAuctionBid) {
+            require(msg.value == amount, "Incorrect ETH amount");
+            if (!isAuctionBid && recipient != address(this)) {
                 (bool success, ) = payable(recipient).call{value: amount}("");
                 require(success, "ETH transfer failed");
             }
@@ -541,34 +690,75 @@ contract PopupProductStore is ERC1155, ERC721, Ownable, ReentrancyGuard, Pausabl
         }
     }
 
-    /**
-     * @notice Distribute payout to creator with royalties and platform fees
-     */
     function _distributePayout(
         address creator,
+        address affiliate,
         uint256 amount,
-        uint256 royaltyBps,
+        PaymentMethod paymentMethod,
+        uint256 referralPurchaseId,
         string memory reason
     ) internal {
-        // Calculate platform fee
-        uint256 platformFee = (amount * platformFeeBps) / 10000;
-        uint256 creatorShare = amount - platformFee;
+        if (address(payoutHandler) != address(0)) {
+            if (paymentMethod == PaymentMethod.ETH) {
+                payoutHandler.distributeSaleProceeds{value: amount}(
+                    creator,
+                    affiliate,
+                    amount,
+                    uint8(paymentMethod),
+                    referralPurchaseId,
+                    reason
+                );
+            } else {
+                address token = paymentTokens[paymentMethod];
+                require(token != address(0), "Payment token not configured");
+                require(IERC20(token).approve(address(payoutHandler), 0), "Token approval reset failed");
+                require(IERC20(token).approve(address(payoutHandler), amount), "Token approval failed");
+                payoutHandler.distributeSaleProceeds(
+                    creator,
+                    affiliate,
+                    amount,
+                    uint8(paymentMethod),
+                    referralPurchaseId,
+                    reason
+                );
+            }
 
-        // Send platform fee
-        if (platformFeeRecipient != address(0)) {
-            (bool success, ) = payable(platformFeeRecipient).call{value: platformFee}("");
-            require(success, "Platform fee transfer failed");
+            uint256 affiliateFee = affiliate == address(0) ? 0 : (amount * 500) / 10000;
+            uint256 platformFee = (amount * platformFeeBps) / 10000;
+            creatorEarnings[creator] += amount - platformFee - affiliateFee;
+            return;
         }
 
-        // Send to payout handler
-        if (payoutHandler != address(0)) {
-            payoutHandler.distributePayout(creator, creatorShare, reason);
-        } else {
-            (bool success, ) = payable(creator).call{value: creatorShare}("");
-            require(success, "Creator payout failed");
+        uint256 affiliateFeeAmount = affiliate == address(0) ? 0 : (amount * 500) / 10000;
+        uint256 platformFeeAmount = (amount * platformFeeBps) / 10000;
+        uint256 creatorShare = amount - platformFeeAmount - affiliateFeeAmount;
+
+        if (platformFeeAmount > 0 && platformFeeRecipient != address(0)) {
+            _sendFunds(platformFeeRecipient, platformFeeAmount, paymentMethod);
         }
 
+        if (affiliateFeeAmount > 0) {
+            _sendFunds(affiliate, affiliateFeeAmount, paymentMethod);
+        }
+
+        _sendFunds(creator, creatorShare, paymentMethod);
+        if (referralPurchaseId != 0 && address(referralManager) != address(0)) {
+            referralManager.markCommissionAsPaid(referralPurchaseId);
+        }
         creatorEarnings[creator] += creatorShare;
+    }
+
+    function _sendFunds(address recipient, uint256 amount, PaymentMethod method) internal {
+        if (method == PaymentMethod.ETH) {
+            (bool ethSuccess, ) = payable(recipient).call{value: amount}("");
+            require(ethSuccess, "ETH transfer failed");
+            return;
+        }
+
+        address token = paymentTokens[method];
+        require(token != address(0), "Payment token not configured");
+        bool tokenSuccess = IERC20(token).transfer(recipient, amount);
+        require(tokenSuccess, "Token transfer failed");
     }
 
     /**
@@ -684,6 +874,15 @@ contract PopupProductStore is ERC1155, ERC721, Ownable, ReentrancyGuard, Pausabl
         platformFeeBps = feeBps;
     }
 
+    function setPayoutHandler(address payoutHandlerAddress) external onlyOwner {
+        payoutHandler = IPayout(payoutHandlerAddress);
+    }
+
+    function setReferralManager(address referralManagerAddress) external onlyOwner {
+        referralManager = IReferralManager(referralManagerAddress);
+        emit ReferralManagerUpdated(referralManagerAddress);
+    }
+
     // ═══════════════════════════════════════════════════════════════════════════
     // VIEW FUNCTIONS
     // ═══════════════════════════════════════════════════════════════════════════
@@ -734,7 +933,7 @@ contract PopupProductStore is ERC1155, ERC721, Ownable, ReentrancyGuard, Pausabl
     // ERC721/ERC1155 OVERRIDES
     // ═══════════════════════════════════════════════════════════════════════════
 
-    function supportsInterface(bytes4 interfaceId) public view override(ERC721, ERC1155) returns (bool) {
+    function supportsInterface(bytes4 interfaceId) public view override(ERC721) returns (bool) {
         return super.supportsInterface(interfaceId);
     }
 
@@ -745,26 +944,31 @@ contract PopupProductStore is ERC1155, ERC721, Ownable, ReentrancyGuard, Pausabl
         return product.uri;
     }
 
-    function uri(uint256 tokenId) public view override returns (string memory) {
+    function uri(uint256 tokenId) public view returns (string memory) {
         return tokenURI(tokenId);
     }
 
-    // Required overrides for dual inheritance
-    function _ownerOf(uint256 tokenId) internal view returns (address) {
-        return ERC721._ownerOf(tokenId);
+    function approve(address, uint256) public pure override {
+        revert("Soulbound: approvals disabled");
     }
 
-    function _update(
-        address to,
-        uint256 tokenId,
-        address auth
-    ) internal override(ERC721) returns (address) {
-        return super._update(to, tokenId, auth);
+    function setApprovalForAll(address, bool) public pure override {
+        revert("Soulbound: approvals disabled");
     }
 
-    function _increaseBalance(address account, uint128 value) internal override(ERC721) {
-        super._increaseBalance(account, value);
+    function transferFrom(address, address, uint256) public pure override {
+        revert("Soulbound: transfers disabled");
     }
+
+    function safeTransferFrom(address, address, uint256) public pure override {
+        revert("Soulbound: transfers disabled");
+    }
+
+    function safeTransferFrom(address, address, uint256, bytes memory) public pure override {
+        revert("Soulbound: transfers disabled");
+    }
+
+
 
     receive() external payable {}
 }

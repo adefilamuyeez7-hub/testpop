@@ -1,0 +1,27 @@
+{
+  "timestamp": "2026-04-15T17:35:34.557Z",
+  "network": "baseSepolia",
+  "chainId": 84532,
+  "deployer": "0x3d9A4F8E9bE795c7e82Da4FEd21cDD0D5234513E",
+  "contracts": {
+    "PopupReferralManager": "0x82160a2A2d8C5FC5388FAe88adb56EE69635b5b6",
+    "PopupPayoutDistributor": "0x407B43E780DA5cd077fEBBBACDE7D5Dd61c61640",
+    "PopupProductStore": "0x4840c1c112441e51b167fEA96E8dDC461DEd3e00",
+    "PopupAuctionManager": "0xAe5f9524d3fdF6194df30C14d64B814f080C91C3",
+    "PopupRoyaltyManager": "0x321ff7622C9D0Bb4faE4B3b73029822E6AaEA238",
+    "PopupArtistProfileMinter": "0xddA7e602207ff08Ee3cd82B333DA3f28b16A9433"
+  },
+  "config": {
+    "platformFeeRecipient": "0x3d9A4F8E9bE795c7e82Da4FEd21cDD0D5234513E",
+    "usdcAddress": "0x0000000000000000000000000000000000000000",
+    "usdtAddress": "0x0000000000000000000000000000000000000000"
+  },
+  "transactions": {
+    "PopupReferralManager": "0xfc2a386cf206c5d3528dd75f2f6eac98b8a23c4bf15dcbd97f15b62967ab2a43",
+    "PopupPayoutDistributor": "0xb77182a15b4f928d892616fba0a2fb9f925ce68d362e429ee686d5f241589e12",
+    "PopupProductStore": "0x9ac4ae45b81dfe0ea3834c132eb5c93c3d7899ce234d84071e79052b586650e0",
+    "PopupAuctionManager": "0x274bf99e7d07192cba57414846a9deb29e88c8a3e021b34bcf3a60af77cf3238",
+    "PopupRoyaltyManager": "0xebe237ea8d341556558268208d5cc87f39904df689ee6a2ef31951a22a2e5adf",
+    "PopupArtistProfileMinter": "0x3493db607fc00691628aa68f747d8fcf961dfeaa004f22edeec5b544cf1b52e6"
+  }
+}
