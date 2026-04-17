@@ -53,31 +53,18 @@ router.post('/buy', async (req: Request, res: Response) => {
       return res.status(400).json({ message: 'Invalid price' });
     }
 
-    // Find active listing for this creator
-    let listing: CreatorCardListing | undefined;
-    for (const l of listings.values()) {
-      if (
+    const listing = Array.from(listings.values()).find(
+      (l) =>
         l.creatorAddress.toLowerCase() === creatorAddress.toLowerCase() &&
         l.status === 'active'
-      ) {
-        listing = l;
-        break;
-      }
-    }
+    );
 
     if (!listing) {
-      // Create new listing if doesn't exist
-      const tokenId = `${creatorAddress}-nft`;
-      listing = {
-        id: `listing-${Date.now()}`,
-        tokenId,
-        creatorAddress,
-        sellerAddress: creatorAddress, // Creator sells their own cards
-        price,
-        listedAt: new Date(),
-        status: 'active',
-      };
-      listings.set(listing.id, listing);
+      return res.status(404).json({ message: 'No active listing found for this creator card' });
+    }
+
+    if (String(listing.price) !== String(price)) {
+      return res.status(409).json({ message: 'Listing price no longer matches the requested price' });
     }
 
     // Create transaction record
@@ -102,12 +89,9 @@ router.post('/buy', async (req: Request, res: Response) => {
     // 2. Process payment via Web3
     // 3. Update database
 
-    // In production, response should come from blockchain
-    // For now, return transaction record
     return res.json({
       success: true,
       transaction,
-      // transactionHash will be set after blockchain confirmation
     });
   } catch (error) {
     console.error('Error in buy endpoint:', error);
@@ -152,7 +136,6 @@ router.post('/list', async (req: Request, res: Response) => {
 
     return res.json({
       success: true,
-      transactionHash: `0x${Math.random().toString(16).slice(2)}`,
       listing,
     });
   } catch (error) {
@@ -216,14 +199,14 @@ router.get('/stats', async (req: Request, res: Response) => {
     const floorPrice =
       activeListings.length > 0
         ? Math.min(...activeListings.map(l => parseFloat(l.price))).toFixed(4)
-        : '0.5';
+        : null;
 
     return res.json({
       totalListings: activeListings.length,
       floorPrice,
       volume24h: volume24h.toFixed(4),
       sales24h: recentTransactions.length,
-      owners: Array.from(new Set(transactions.map(t => t.buyer))),
+      owners: Array.from(new Set(transactions.map(t => t.buyer))).length,
     });
   } catch (error) {
     console.error('Error fetching stats:', error);
@@ -349,8 +332,8 @@ router.get('/info/:creatorAddress', async (req: Request, res: Response) => {
 
     return res.json({
       creatorAddress,
-      tokenId: listing?.tokenId || `${creatorAddress}-nft`,
-      floorPrice: listing?.price || '0.5',
+      tokenId: listing?.tokenId || null,
+      floorPrice: listing?.price || null,
       volume24h: volume24h.toFixed(4),
       sales24h,
       totalSales: creatorTransactions.length,
@@ -358,7 +341,9 @@ router.get('/info/:creatorAddress', async (req: Request, res: Response) => {
         new Set(creatorTransactions.map(t => t.buyer))
       ),
       isListed: !!listing && listing.status === 'active',
-      openSeaUrl: `https://opensea.io/assets/ethereum/${creatorAddress.toLowerCase()}/${listing?.tokenId || 'nft'}`,
+      openSeaUrl: listing
+        ? `https://opensea.io/assets/ethereum/${creatorAddress.toLowerCase()}/${listing.tokenId}`
+        : null,
     });
   } catch (error) {
     console.error('Error fetching creator card info:', error);
@@ -393,7 +378,7 @@ router.get('/collection/stats', async (req: Request, res: Response) => {
       floorPrice:
         activeListings.length > 0
           ? Math.min(...activeListings.map(l => parseFloat(l.price))).toFixed(4)
-          : '0.5',
+          : null,
       volume7d: volume7d.toFixed(4),
       totalVolume: confirmedTransactions
         .reduce((sum, tx) => sum + parseFloat(tx.price), 0)

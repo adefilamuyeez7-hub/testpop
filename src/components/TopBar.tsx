@@ -1,6 +1,9 @@
+import { Shield } from "lucide-react";
 import { useLocation } from "react-router-dom";
+import { useAccount } from "wagmi";
 import logo from "@/assets/logo.png";
 import { useGuestCollector } from "@/hooks/useGuestCollector";
+import { isAdminWallet } from "@/lib/admin";
 import { appShellNavItems, isAppShellNavActive } from "./appShellNav";
 import { NavLink } from "./NavLink";
 import ThemeToggle from "./ThemeToggle";
@@ -14,6 +17,8 @@ function shortCollector(value: string) {
 const TopBar = () => {
   const location = useLocation();
   const collectorId = useGuestCollector();
+  const { address } = useAccount();
+  const showAdminLink = isAdminWallet(address);
 
   return (
     <header className="sticky top-0 z-40 border-b border-border bg-background/80 backdrop-blur-xl">
@@ -46,6 +51,15 @@ const TopBar = () => {
         </nav>
 
         <div className="flex items-center gap-2">
+          {showAdminLink ? (
+            <a
+              href="/admin/dashboard"
+              className="hidden items-center gap-1 rounded-full border border-border px-3 py-1.5 text-xs font-semibold text-foreground transition-colors hover:bg-secondary md:inline-flex"
+            >
+              <Shield className="h-3.5 w-3.5" />
+              <span>Admin Dashboard</span>
+            </a>
+          ) : null}
           <TopBarWalletControls />
           <ThemeToggle />
         </div>

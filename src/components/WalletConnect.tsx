@@ -1,9 +1,9 @@
 import { Button } from "@/components/ui/button";
-import { Wallet, LogOut, Copy, Check, AlertTriangle, ChevronDown, Sparkles } from "lucide-react";
-import { useState } from "react";
+import { Wallet, LogOut, Copy, Check, AlertTriangle, ChevronDown } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 import { useWallet } from "@/hooks/useWallet";
 import { formatEther } from "viem";
-import { ACTIVE_CHAIN, isWeb3AuthConfigured } from "@/lib/wagmi";
+import { ACTIVE_CHAIN } from "@/lib/wagmi";
 import { toast } from "sonner";
 
 const WalletConnect = () => {
@@ -14,7 +14,6 @@ const WalletConnect = () => {
     chain,
     balance,
     connectWallet,
-    connectWeb3Auth,
     requestActiveChainSwitch,
     isSwitchingNetwork,
     disconnect,
@@ -22,148 +21,145 @@ const WalletConnect = () => {
   } = useWallet();
   const [copied, setCopied] = useState(false);
   const [showDetails, setShowDetails] = useState(false);
-  const [isWeb3AuthConnecting, setIsWeb3AuthConnecting] = useState(false);
+  const detailsRef = useRef<HTMLDivElement | null>(null);
 
-  const copyAddress = () => {
-    if (address) {
-      navigator.clipboard.writeText(address);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    }
+  useEffect(() => {
+    if (!showDetails) return;
+
+    const onPointerDown = (event: MouseEvent) => {
+      if (detailsRef.current && !detailsRef.current.contains(event.target as Node)) {
+        setShowDetails(false);
+      }
+    };
+
+    const onEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setShowDetails(false);
+      }
+    };
+
+    window.addEventListener("mousedown", onPointerDown);
+    window.addEventListener("keydown", onEscape);
+    return () => {
+      window.removeEventListener("mousedown", onPointerDown);
+      window.removeEventListener("keydown", onEscape);
+    };
+  }, [showDetails]);
+
+  const copyAddress = async () => {
+    if (!address) return;
+
+    await navigator.clipboard.writeText(address);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
   };
 
   const shortenAddress = (addr: string) => `${addr.slice(0, 6)}...${addr.slice(-4)}`;
-
   const isWrongNetwork = isConnected && chain?.id !== ACTIVE_CHAIN.id;
+  const balanceLabel = balance ? `${parseFloat(formatEther(balance.value)).toFixed(3)} ETH` : "Balance unavailable";
 
-  // Mobile-optimized connect button
   if (!isConnected) {
     return (
-      <div className="flex items-center gap-2">
-        <Button
-          onClick={connectWallet}
-          disabled={isConnecting}
-          size="sm"
-          className="rounded-full gradient-primary text-primary-foreground font-semibold text-sm px-3 h-8 md:h-9 md:px-4"
-        >
-          <Wallet className="h-3.5 w-3.5 mr-1.5 md:h-4 md:w-4 md:mr-2" />
-          <span className="hidden xs:inline">{isConnecting ? "Connecting..." : "Connect"}</span>
-          <span className="xs:hidden">{isConnecting ? "..." : "Connect"}</span>
-        </Button>
-        {isWeb3AuthConfigured && (
-          <Button
-            onClick={async () => {
-              try {
-                setIsWeb3AuthConnecting(true);
-                await connectWeb3Auth();
-              } catch (error) {
-                const message = error instanceof Error ? error.message : "Web3Auth connection failed.";
-                toast.error(message);
-              } finally {
-                setIsWeb3AuthConnecting(false);
-              }
-            }}
-            disabled={isConnecting || isWeb3AuthConnecting}
-            size="sm"
-            variant="outline"
-            className="rounded-full border-slate-200 text-sm px-3 h-8 md:h-9 md:px-4"
-          >
-            <Sparkles className="h-3.5 w-3.5 mr-1.5 md:h-4 md:w-4 md:mr-2" />
-            <span className="hidden xs:inline">{isWeb3AuthConnecting ? "Signing in..." : "Web3Auth"}</span>
-            <span className="xs:hidden">{isWeb3AuthConnecting ? "..." : "Auth"}</span>
-          </Button>
-        )}
-      </div>
+      <Button
+        type="button"
+        onClick={connectWallet}
+        disabled={isConnecting}
+        size="sm"
+        className="h-9 rounded-full px-4 text-sm font-semibold"
+      >
+        <Wallet className="mr-2 h-4 w-4" />
+        {isConnecting ? "Connecting..." : "Connect Wallet"}
+      </Button>
     );
   }
 
-  // Wrong network state - mobile optimized
   if (isWrongNetwork) {
     return (
-      <div className="flex items-center gap-1 md:gap-2">
+      <div className="flex items-center gap-2">
         <Button
+          type="button"
           size="sm"
           onClick={async () => {
             try {
-              await requestActiveChainSwitch(`A wallet switch is required before you can use POPUP on ${ACTIVE_CHAIN.name}.`);
+              await requestActiveChainSwitch(`Switch your wallet to ${ACTIVE_CHAIN.name} to continue.`);
             } catch (error) {
               const message = error instanceof Error ? error.message : `Switch to ${ACTIVE_CHAIN.name} in your wallet`;
               toast.error(message);
             }
           }}
           disabled={isSwitchingNetwork}
-          className="rounded-full bg-destructive text-destructive-foreground hover:bg-destructive/90 text-xs h-8 px-3"
+          className="h-9 rounded-full bg-destructive px-4 text-sm text-destructive-foreground hover:bg-destructive/90"
         >
-          <AlertTriangle className="h-3 w-3 mr-1" />
-          <span className="hidden sm:inline">
-            {isSwitchingNetwork ? `Switching...` : `Switch to ${ACTIVE_CHAIN.name}`}
-          </span>
-          <span className="sm:hidden">{isSwitchingNetwork ? "..." : "Switch"}</span>
+          <AlertTriangle className="mr-2 h-4 w-4" />
+          {isSwitchingNetwork ? "Switching..." : `Switch to ${ACTIVE_CHAIN.name}`}
         </Button>
         <button
+          type="button"
           onClick={() => disconnect()}
-          className="p-1.5 rounded-full bg-secondary hover:bg-destructive/10 transition-colors"
-          title="Disconnect"
+          className="rounded-full border border-border bg-background p-2 transition-colors hover:bg-destructive/10"
+          title="Disconnect wallet"
         >
-          <LogOut className="h-3.5 w-3.5 text-muted-foreground" />
+          <LogOut className="h-4 w-4 text-muted-foreground" />
         </button>
       </div>
     );
   }
 
-  // Connected state - mobile optimized with collapsible details
   return (
-    <div className="flex items-center gap-1 md:gap-2">
-      {/* Network and balance - collapsible on mobile */}
-      <div className="relative">
-        <button
-          onClick={() => setShowDetails(!showDetails)}
-          className="flex items-center gap-1.5 px-2 py-1 md:px-3 md:py-1.5 rounded-full bg-accent text-accent-foreground text-xs font-medium hover:bg-accent/80 transition-colors"
-        >
-          <div className="h-1.5 w-1.5 md:h-2 md:w-2 rounded-full bg-primary animate-pulse" />
-          <span className="hidden sm:inline">{chain?.name ?? ACTIVE_CHAIN.name}</span>
-          <span className="sm:hidden">Base</span>
-          <span className="text-muted-foreground hidden md:inline">·</span>
-          <span className="hidden md:inline">{balance ? `${parseFloat(formatEther(balance.value)).toFixed(3)} ETH` : "..."}</span>
-          <ChevronDown className={`h-3 w-3 transition-transform ${showDetails ? 'rotate-180' : ''}`} />
-        </button>
+    <div ref={detailsRef} className="relative flex items-center gap-2">
+      <button
+        type="button"
+        onClick={() => setShowDetails((value) => !value)}
+        className="inline-flex items-center gap-2 rounded-full border border-border bg-background px-3 py-2 text-xs font-medium text-foreground transition-colors hover:bg-secondary"
+        aria-expanded={showDetails}
+      >
+        <span className="h-2 w-2 rounded-full bg-emerald-500" />
+        <span className="hidden sm:inline">{shortenAddress(address)}</span>
+        <span className="sm:hidden">Wallet</span>
+        <ChevronDown className={`h-3.5 w-3.5 transition-transform ${showDetails ? "rotate-180" : ""}`} />
+      </button>
 
-        {/* Mobile dropdown for balance */}
-        {showDetails && (
-          <div className="absolute top-full mt-1 right-0 bg-popover border border-border rounded-lg p-2 shadow-lg z-50 min-w-[160px] space-y-1">
+      {showDetails ? (
+        <div className="absolute right-0 top-12 z-50 min-w-[220px] rounded-2xl border border-border bg-popover p-3 shadow-xl">
+          <div className="space-y-2">
             <div>
-              <div className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground">Balance</div>
-              <div className="text-sm font-medium">
-                {balance ? `${parseFloat(formatEther(balance.value)).toFixed(4)} ETH` : "..."}
-              </div>
+              <p className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground">Address</p>
+              <p className="mt-1 text-sm font-semibold text-foreground">{shortenAddress(address)}</p>
             </div>
             <div>
-              <div className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground">Connected via</div>
-              <div className="text-xs font-semibold text-foreground">{connectorName || "Wallet"}</div>
+              <p className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground">Network</p>
+              <p className="mt-1 text-sm text-foreground">{chain?.name ?? ACTIVE_CHAIN.name}</p>
+            </div>
+            <div>
+              <p className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground">Balance</p>
+              <p className="mt-1 text-sm text-foreground">{balanceLabel}</p>
+            </div>
+            <div>
+              <p className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground">Connected via</p>
+              <p className="mt-1 text-sm text-foreground">{connectorName || "Wallet"}</p>
             </div>
           </div>
-        )}
-      </div>
 
-      {/* Address button - mobile optimized */}
-      <button
-        onClick={copyAddress}
-        className="flex items-center gap-1 px-2 py-1 md:px-3 md:py-1.5 rounded-full bg-secondary text-secondary-foreground text-xs font-medium hover:bg-secondary/80 transition-colors min-w-0"
-      >
-        <span className="truncate max-w-[60px] md:max-w-none">
-          {address && shortenAddress(address)}
-        </span>
-        {copied ? <Check className="h-3 w-3 text-primary flex-shrink-0" /> : <Copy className="h-3 w-3 flex-shrink-0" />}
-      </button>
-
-      {/* Disconnect button */}
-      <button
-        onClick={() => disconnect()}
-        className="p-1.5 rounded-full bg-secondary hover:bg-destructive/10 transition-colors flex-shrink-0"
-        title="Disconnect"
-      >
-        <LogOut className="h-3.5 w-3.5 text-muted-foreground" />
-      </button>
+          <div className="mt-3 flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => void copyAddress()}
+              className="inline-flex flex-1 items-center justify-center gap-2 rounded-full border border-border px-3 py-2 text-xs font-medium text-foreground transition-colors hover:bg-secondary"
+            >
+              {copied ? <Check className="h-3.5 w-3.5 text-primary" /> : <Copy className="h-3.5 w-3.5" />}
+              {copied ? "Copied" : "Copy"}
+            </button>
+            <button
+              type="button"
+              onClick={() => disconnect()}
+              className="inline-flex flex-1 items-center justify-center gap-2 rounded-full border border-border px-3 py-2 text-xs font-medium text-foreground transition-colors hover:bg-destructive/10"
+            >
+              <LogOut className="h-3.5 w-3.5" />
+              Disconnect
+            </button>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 };

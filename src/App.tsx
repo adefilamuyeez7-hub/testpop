@@ -24,6 +24,7 @@ const CreatorDashboard = lazy(() => import("./pages/CreatorDashboard").then((mod
 const ArtistsPage = lazy(() => import("./pages/ArtistsPage"));
 const ArtistProfilePage = lazy(() => import("./pages/ArtistProfilePage"));
 const WalletStudioRoute = lazy(() => import("./routes/WalletStudioRoute"));
+const AdminDashboardPage = lazy(() => import("./pages/admin/AdminDashboardPage"));
 
 // Phase 3 Marketplace Pages
 const MarketplaceGrid = lazy(() => import("./pages/marketplace/MarketplaceGrid"));
@@ -123,6 +124,7 @@ const App = () => {
                       <Route path="/marketplace" element={<Navigate to="/profile/marketplace" replace />} />
                       <Route path="/share/:postId" element={<Navigate to="/discover" replace />} />
                     </Route>
+                    <Route path="/admin/dashboard" element={<AdminDashboardPage />} />
                     <Route path="*" element={<NotFound />} />
                   </Routes>
                 </Suspense>

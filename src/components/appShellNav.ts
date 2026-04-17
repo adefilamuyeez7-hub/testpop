@@ -7,7 +7,6 @@ import {
   Gift,
   TrendingUp,
   Settings,
-  BarChart3,
   History,
 } from "lucide-react";
 
@@ -22,32 +21,26 @@ export const secondaryNavItems = [
   {
     section: "Marketplace",
     items: [
-      { icon: ShoppingBag, label: "Browse", path: "/marketplace/browse" },
-      { icon: Gavel, label: "Auctions", path: "/marketplace/auctions" },
-      { icon: Gift, label: "Gifts", path: "/marketplace/gifts" },
+      { icon: ShoppingBag, label: "Browse", path: "/profile/marketplace" },
+      { icon: Gavel, label: "Auctions", path: "/profile/marketplace/auctions" },
+      { icon: Gift, label: "Gifts", path: "/profile/marketplace/gifts" },
     ],
   },
   {
     section: "Collection",
     items: [
-      { icon: ShoppingBag, label: "My NFTs", path: "/collection/nfts" },
-      { icon: History, label: "Purchases", path: "/collection/purchases" },
+      { icon: ShoppingBag, label: "My NFTs", path: "/profile/collection/nfts" },
+      { icon: History, label: "Purchases", path: "/profile/collection/purchases" },
     ],
   },
   {
     section: "Creator",
     items: [
-      { icon: TrendingUp, label: "Earnings", path: "/creator/earnings" },
-      { icon: Gavel, label: "Royalties", path: "/creator/royalties" },
-      { icon: History, label: "Payouts", path: "/creator/payout-history" },
-      { icon: User, label: "Collaborators", path: "/creator/collaborators" },
-      { icon: Settings, label: "Payout Settings", path: "/creator/payout-settings" },
-    ],
-  },
-  {
-    section: "Admin",
-    items: [
-      { icon: BarChart3, label: "Dashboard", path: "/admin/dashboard" },
+      { icon: TrendingUp, label: "Earnings", path: "/profile/creator/earnings" },
+      { icon: Gavel, label: "Royalties", path: "/profile/creator/royalties" },
+      { icon: History, label: "Payouts", path: "/profile/creator/payout-history" },
+      { icon: User, label: "Collaborators", path: "/profile/creator/collaborators" },
+      { icon: Settings, label: "Payout Settings", path: "/profile/creator/payout-settings" },
     ],
   },
 ] as const;
