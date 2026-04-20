@@ -4,7 +4,7 @@ export function WelcomePage() {
   const slides = [
     {
       id: "slide1",
-      icon: "🎨",
+      icon: "Art",
       title: "Find, Collect and Sell",
       subtitle: "Amazing NFTs",
       description: "Explore the top collection of NFTs and buy and sell your NFTs as well",
@@ -12,7 +12,7 @@ export function WelcomePage() {
     },
     {
       id: "slide2",
-      icon: "🚀",
+      icon: "Drops",
       title: "Discover Creators",
       subtitle: "Support Your Favorites",
       description: "Connect with talented creators and collect their exclusive digital works",
@@ -20,7 +20,7 @@ export function WelcomePage() {
     },
     {
       id: "slide3",
-      icon: "💎",
+      icon: "Tokens",
       title: "Token Liquidity",
       subtitle: "Creator Economy",
       description: "Hold creator tokens and access exclusive content and community benefits",
@@ -60,7 +60,7 @@ export function WelcomePage() {
         <div className="welcome-actions">
           <Link to="/" className="welcome-button welcome-button--primary">
             Get Started
-            <span className="welcome-button__arrow">→</span>
+            <span className="welcome-button__arrow">{">"}</span>
           </Link>
         </div>
       </div>

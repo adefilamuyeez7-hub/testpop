@@ -1,9 +1,10 @@
-import { Link, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { ProductCard } from "../components/ProductCard";
 import { getCreatorById, getProductsByCreator } from "../data/mockData";
 
 export function CreatorProfilePage() {
   const { creatorId } = useParams();
+  const navigate = useNavigate();
   const creator = getCreatorById(creatorId ?? "") ?? getCreatorById("nora-vale");
   const products = creator ? getProductsByCreator(creator.id) : [];
 
@@ -13,21 +14,22 @@ export function CreatorProfilePage() {
 
   const stats = {
     following: 252,
-    followers: 24000,
+    followers: 24,
     creations: 732,
   };
 
   return (
     <section className="screen screen--creator-profile">
-      <div 
-        className="creator-profile-hero"
-        style={{ background: creator.accent }}
-      >
+      <div className="creator-profile-hero" style={{ background: creator.accent }}>
         <div className="creator-profile-hero__header">
-          <button type="button" className="close-button">×</button>
-          <button type="button" className="menu-button">⋯</button>
+          <button type="button" className="close-button" onClick={() => navigate(-1)}>
+            Back
+          </button>
+          <button type="button" className="menu-button" onClick={() => navigate("/creators")}>
+            All
+          </button>
         </div>
-        
+
         <div className="creator-profile-hero__avatar" style={{ background: creator.accent }}>
           {creator.name.charAt(0)}
         </div>
@@ -36,7 +38,7 @@ export function CreatorProfilePage() {
       <div className="creator-profile-info">
         <h1 className="creator-profile-name">{creator.name}</h1>
         <p className="creator-profile-handle">{creator.handle}</p>
-        
+
         <button type="button" className="follow-button">
           Follow
         </button>
@@ -60,7 +62,7 @@ export function CreatorProfilePage() {
 
         <div className="creator-profile-actions">
           <Link to={`/marketplace/token/${creator.tokenId}`} className="ghost-pill ghost-pill--full">
-            {creator.name}◆ token market
+            {creator.name} token market
           </Link>
         </div>
       </div>

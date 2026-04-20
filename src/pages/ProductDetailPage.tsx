@@ -15,33 +15,41 @@ export function ProductDetailPage() {
   const collected = isCollected(product.id);
 
   const handleCollect = async () => {
-    if (!isConnected) {
-      connect();
+    if (collected || isCollecting) {
       return;
     }
 
+    if (!isConnected) {
+      connect();
+    }
+
     setIsCollecting(true);
-    // Simulate transaction delay
-    await new Promise((resolve) => setTimeout(resolve, 1500));
+    await new Promise((resolve) => setTimeout(resolve, 1200));
     collect(product.id);
     setIsCollecting(false);
   };
+
+  const accessLabel =
+    product.type === "PDF" ? "Open reader" : product.type === "Image" ? "Open viewer" : "Download toolkit";
 
   return (
     <section className="screen screen--product-detail">
       <div className="product-detail-media" style={{ background: product.accent }}>
         <span className="product-badge">{product.type}</span>
+        <button type="button" className="product-detail-back" onClick={() => navigate(-1)}>
+          Back
+        </button>
         {showPreview && (
           <div className="product-preview-overlay">
-            <button 
+            <button
               className="preview-close"
               onClick={() => setShowPreview(false)}
               aria-label="Close preview"
             >
-              ×
+              x
             </button>
             <div className="preview-content">
-              <p className="preview-text">📄 {product.type} Preview</p>
+              <p className="preview-text">{product.type} preview</p>
               <p className="preview-note">{product.summary}</p>
             </div>
           </div>
@@ -50,7 +58,7 @@ export function ProductDetailPage() {
 
       <div className="product-detail-content">
         <div className="product-detail-creator">
-          <span className="product-detail-creator__label">By Creator</span>
+          <span className="product-detail-creator__label">By creator</span>
           <p className="product-detail-creator__name">{product.creator}</p>
           <p className="product-detail-creator__handle">{product.handle}</p>
         </div>
@@ -60,8 +68,8 @@ export function ProductDetailPage() {
         <div className="product-detail-meta">
           <span className="meta-item">Type: {product.type}</span>
           <span className="meta-item">Price: {product.price}</span>
-          <span className="meta-item">❤️ {product.likes} likes</span>
-          <span className="meta-item">🎁 {product.gifts} gifts</span>
+          <span className="meta-item">{product.likes} likes</span>
+          <span className="meta-item">{product.gifts} shares</span>
         </div>
 
         <div className="product-detail-actions">
@@ -76,25 +84,26 @@ export function ProductDetailPage() {
           <button
             type="button"
             className={`cta-button cta-button--primary ${collected ? "cta-button--collected" : ""}`}
-            onClick={handleCollect}
+            onClick={() => void handleCollect()}
             disabled={isCollecting || collected}
           >
             {isCollecting && "Processing..."}
-            {!isCollecting && collected && "✓ Collected"}
+            {!isCollecting && collected && "Collected"}
             {!isCollecting && !collected && `Collect ${product.price}`}
           </button>
         </div>
 
         {collected && (
           <div className="product-collected-badge">
-            <p>✓ You own this product</p>
-            <button 
-              type="button" 
-              className="link-button"
-              onClick={() => navigate("/profile")}
-            >
-              View in collection →
-            </button>
+            <p>You own this product</p>
+            <div className="product-collected-actions">
+              <button type="button" className="cta-button cta-button--secondary" onClick={() => setShowPreview(true)}>
+                {accessLabel}
+              </button>
+              <button type="button" className="link-button" onClick={() => navigate("/profile")}>
+                View in collection
+              </button>
+            </div>
           </div>
         )}
 
@@ -108,6 +117,20 @@ export function ProductDetailPage() {
             <li>Your ownership recorded onchain</li>
           </ul>
         </div>
+
+        {collected && (
+          <div className="owned-access-card">
+            <h3>Access your item now</h3>
+            <p>
+              {product.type === "PDF" && "Open the in-app reader to start reading immediately."}
+              {product.type === "Image" && "Open the viewer to inspect the full collectible image."}
+              {product.type === "Tool" && "Download the toolkit package and keep a copy in your workspace."}
+            </p>
+            <button type="button" className="cta-button cta-button--primary" onClick={() => setShowPreview(true)}>
+              {accessLabel}
+            </button>
+          </div>
+        )}
       </div>
     </section>
   );

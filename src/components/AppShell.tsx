@@ -4,7 +4,7 @@ import { MobileHeader } from "./MobileHeader";
 const tabs = [
   { to: "/", label: "Home" },
   { to: "/discover", label: "Discovery" },
-  { to: "/marketplace", label: "Market" },
+  { to: "/marketplace", label: "Marketplace" },
   { to: "/profile", label: "Profile" },
 ];
 
