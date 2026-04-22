@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Vault — Digital Collection</title>
+<title>V.ault — Digital Collection</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,600;1,400&family=Syne:wght@400;500;700&display=swap" rel="stylesheet">
 <style>
@@ -697,8 +697,8 @@
   <div class="tab-bar">
     <div class="tab active" onclick="switchTab('home', this)">Shop</div>
     <div class="tab" onclick="switchTab('feed', this)">Feed <span class="tab-badge">3</span></div>
-    <div class="tab" onclick="switchTab('collection', this)">My Vault</div>
-    <div class="tab" onclick="switchTab('creators', this)">Creators</div>
+    <div class="tab" onclick="switchTab('collection', this)">My Collection</div>
+    <div class="tab" onclick="switchTab('marketplace', this)">IP Marketplace</div>
   </div>
 
   <div class="scroll-main">
@@ -783,34 +783,34 @@
       <div class="bottom-space"></div>
     </div>
 
-    <!-- ═══════════ VAULT PAGE ═══════════ -->
+    <!-- ═══════════ MY COLLECTION PAGE ═══════════ -->
     <div class="page" id="page-collection">
       <div class="greeting">
         <p>Your collection</p>
-        <h1>My <em>Vault</em></h1>
+        <h1>My <em>Collection</em></h1>
       </div>
       <div style="padding:20px;">
         <div style="background:var(--surface-2);border:1px solid var(--surface-3);border-radius:var(--r);padding:20px;text-align:center;color:var(--text-3);" id="vaultContent">
           <div style="font-size:32px;margin-bottom:12px;">◉</div>
-          <div style="font-size:14px;margin-bottom:6px;color:var(--text-2);">Your vault is empty</div>
-          <div style="font-size:12px;">Collect items to see them here</div>
+          <div style="font-size:14px;margin-bottom:6px;color:var(--text-2);">Your collection is empty</div>
+          <div style="font-size:12px;">Collect IP, art, and tools to see them here</div>
         </div>
         <div id="vaultGrid" style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px;"></div>
       </div>
       <div class="bottom-space"></div>
     </div>
 
-    <!-- ═══════════ CREATOR CARDS TRADING PAGE ═══════════ -->
-    <div class="page" id="page-creators">
+    <!-- ═══════════ IP MARKETPLACE PAGE ═══════════ -->
+    <div class="page" id="page-marketplace">
       <div class="greeting">
-        <p>Trade creator cards</p>
-        <h1>Discover <em>creators</em></h1>
+        <p>Browse and trade</p>
+        <h1>IP <em>Marketplace</em></h1>
       </div>
 
       <div class="search-wrap">
         <div class="search">
           <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><line x1="16.5" y1="16.5" x2="22" y2="22"/></svg>
-          <input type="text" placeholder="Search creators…" id="creatorSearchInput" oninput="filterCreators()">
+          <input type="text" placeholder="Search creators & IP…" id="creatorSearchInput" oninput="filterCreators()">
         </div>
       </div>
 
@@ -826,7 +826,7 @@
 
       <div style="padding: 20px 0;">
         <div class="section-header">
-          <div class="section-title">Trading Pool</div>
+          <div class="section-title">Creator Pool</div>
           <div style="font-size:12px;color:var(--text-3);" id="creatorsCount"></div>
         </div>
         <div class="creator-grid" id="creatorGrid"></div>
@@ -850,11 +850,11 @@
     </div>
     <div class="nav-item" id="nav-collection" onclick="switchTab('collection', null, this)">
       <svg viewBox="0 0 24 24"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/></svg>
-      <span class="nav-label">My Vault</span>
+      <span class="nav-label">My Collection</span>
     </div>
-    <div class="nav-item" id="nav-creators" onclick="switchTab('creators', null, this)">
-      <svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M12 14c-4 0-6 3-6 3v4h12v-4s-2-3-6-3z"/></svg>
-      <span class="nav-label">Creators</span>
+    <div class="nav-item" id="nav-marketplace" onclick="switchTab('marketplace', null, this)">
+      <svg viewBox="0 0 24 24"><path d="M9 3H5a2 2 0 00-2 2v4m0 0a2 2 0 002 2h14a2 2 0 002-2m-2-4a2 2 0 012 2v4m0 0H7m12-6V5a2 2 0 00-2-2h-4m0 0H9a2 2 0 00-2 2v4"/></svg>
+      <span class="nav-label">IP Marketplace</span>
       <div class="nav-badge" id="creatorsBadge" style="display:none;">2</div>
     </div>
   </div>
@@ -915,6 +915,56 @@
     </div>
   </div>
   <button class="compose-submit-btn" onclick="submitPost()">Post to Feed</button>
+</div>
+
+<!-- LOGIN MODAL -->
+<div class="compose-modal" id="loginModal">
+  <div class="compose-modal-header">
+    <h2>Sign In</h2>
+    <div class="compose-close-btn" onclick="closeLoginModal()">✕</div>
+  </div>
+  <div class="compose-modal-body">
+    <div style="text-align: center; margin-bottom: 20px; color: var(--text-2); font-size: 14px;">
+      No registration needed. Choose your preferred login method.
+    </div>
+    
+    <div style="display: flex; flex-direction: column; gap: 12px;">
+      <button onclick="loginWithWallet()" style="padding: 14px; background: var(--ebook); color: var(--bg); border: none; border-radius: 50px; font-weight: 600; cursor: pointer; font-family: 'Syne', sans-serif;">
+        🔗 Connect Wallet
+      </button>
+      <button onclick="loginWithSocial('Google')" style="padding: 14px; background: #4A90E2; color: white; border: none; border-radius: 50px; font-weight: 600; cursor: pointer; font-family: 'Syne', sans-serif;">
+        🔵 Sign in with Google
+      </button>
+      <button onclick="loginWithSocial('Twitter')" style="padding: 14px; background: #1D9BF0; color: white; border: none; border-radius: 50px; font-weight: 600; cursor: pointer; font-family: 'Syne', sans-serif;">
+        𝕏 Sign in with X
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- CREATOR ACCOUNT SETUP MODAL -->
+<div class="compose-modal" id="creatorSetupModal">
+  <div class="compose-modal-header">
+    <h2>Become a Creator</h2>
+    <div class="compose-close-btn" onclick="closeCreatorSetupModal()">✕</div>
+  </div>
+  <div class="compose-modal-body">
+    <div style="text-align: center; margin-bottom: 16px; color: var(--text-2); font-size: 13px;">
+      Set up your creator account to list IP, post drops, and build your audience.
+    </div>
+    
+    <div style="display: flex; flex-direction: column; gap: 12px;">
+      <div>
+        <label class="compose-field-label">Creator Name</label>
+        <input type="text" class="compose-textarea" id="creatorName" placeholder="Your name or brand" style="min-height: 40px; resize: none;">
+      </div>
+      <div>
+        <label class="compose-field-label">Creator Handle</label>
+        <input type="text" class="compose-textarea" id="creatorHandle" placeholder="@yourhandle (no spaces)" style="min-height: 40px; resize: none;">
+      </div>
+    </div>
+  </div>
+  <button class="compose-submit-btn" onclick="setupCreatorAccount()">Set Up Creator Account</button>
 </div>
 
 <!-- CREATOR TRADING MODAL -->
@@ -1116,6 +1166,11 @@ let tradeHistory = {}; // { creatorId: [{user, action, amount, time}, ...] }
 let creatorListings = {}; // { creatorId: [{ seller, amount, pricePerCard }, ...] }
 let creatorPool = {}; // { creatorId: { reserve: count, floorPrice: value } }
 
+// Authentication
+let isLoggedIn = false;
+let userType = 'collector'; // 'collector' or 'creator'
+let currentUser = null; // { name, email, handle, wallet }
+
 // ═══════════════════════════════════════════
 // CANVAS ART GENERATOR
 // ═══════════════════════════════════════════
@@ -1214,10 +1269,10 @@ function switchTab(name, tabEl, navEl) {
   if (name==='home') tabs[0].classList.add('active');
   else if (name==='feed') tabs[1].classList.add('active');
   else if (name==='collection') tabs[2].classList.add('active');
-  else if (name==='creators') tabs[3].classList.add('active');
+  else if (name==='marketplace') tabs[3].classList.add('active');
 
-  // Render creators page if switching to it
-  if (name === 'creators') {
+  // Render marketplace page if switching to it
+  if (name === 'marketplace') {
     setTimeout(() => renderCreators(), 50);
   }
 
@@ -1624,6 +1679,16 @@ function sharePost(postId) {
 // COMPOSE
 // ═══════════════════════════════════════════
 function openCompose() {
+  if (!isLoggedIn) {
+    showToast('Sign in to post');
+    openLoginModal();
+    return;
+  }
+  if (userType !== 'creator') {
+    showToast('Only creators can post. Set up creator account.');
+    openCreatorSetupModal();
+    return;
+  }
   document.getElementById('composeModal').classList.add('open');
   // Build product picker
   const picker = document.getElementById('composePicker');
@@ -1696,6 +1761,72 @@ function showToast(msg) {
 function showSearch() {
   switchTab('home');
   setTimeout(()=>document.getElementById('searchInput').focus(),100);
+}
+
+// ═══════════════════════════════════════════
+// AUTHENTICATION
+// ═══════════════════════════════════════════
+function openLoginModal() {
+  document.getElementById('loginModal').classList.add('open');
+}
+
+function closeLoginModal() {
+  document.getElementById('loginModal').classList.remove('open');
+}
+
+function loginWithWallet() {
+  isLoggedIn = true;
+  userType = 'collector';
+  currentUser = { name: 'You', handle: '@collector', wallet: '0x....', type: 'collector' };
+  closeLoginModal();
+  showToast('Connected to wallet ✓');
+  updateAuthUI();
+}
+
+function loginWithSocial(provider) {
+  isLoggedIn = true;
+  userType = 'collector';
+  currentUser = { name: 'You', handle: '@collector', email: 'you@example.com', type: 'collector' };
+  closeLoginModal();
+  showToast(`Signed in with ${provider} ✓`);
+  updateAuthUI();
+}
+
+function openCreatorSetupModal() {
+  if (!isLoggedIn) {
+    showToast('Sign in first');
+    openLoginModal();
+    return;
+  }
+  document.getElementById('creatorSetupModal').classList.add('open');
+}
+
+function closeCreatorSetupModal() {
+  document.getElementById('creatorSetupModal').classList.remove('open');
+}
+
+function setupCreatorAccount() {
+  const handle = document.getElementById('creatorHandle').value.trim();
+  const name = document.getElementById('creatorName').value.trim();
+  
+  if (!handle || !name) {
+    showToast('Fill in all fields');
+    return;
+  }
+  
+  userType = 'creator';
+  currentUser.handle = handle;
+  currentUser.name = name;
+  closeCreatorSetupModal();
+  showToast(`Welcome, creator! You can now post and list IP. ✓`);
+  updateAuthUI();
+}
+
+function updateAuthUI() {
+  // Optionally update UI to show user is logged in
+  if (isLoggedIn && userType === 'creator') {
+    // Show creator-specific UI
+  }
 }
 
 // ═══════════════════════════════════════════
