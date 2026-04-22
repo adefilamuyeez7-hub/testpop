@@ -112,7 +112,7 @@
     flex: 1;
     overflow-y: auto;
     scrollbar-width: none;
-    padding-bottom: 120px;
+    padding-bottom: 140px;
   }
   .scroll-main::-webkit-scrollbar { display: none; }
 
@@ -405,12 +405,10 @@
 
   /* ── BOTTOM NAV ── */
   .bottom-nav {
-    position: fixed;
+    position: absolute;
     bottom: 0;
-    left: 50%;
-    transform: translateX(-50%);
-    width: 390px;
-    max-width: 100vw;
+    left: 0;
+    right: 0;
     background: rgba(10,9,7,0.95);
     backdrop-filter: blur(20px);
     border-top: 1px solid var(--surface-2);
@@ -1112,6 +1110,15 @@
   <div class="trade-actions">
     <button class="trade-btn trade-buy" id="buyBtn" onclick="executeBuyOrder()">Buy Cards</button>
     <button class="trade-btn trade-sell" id="sellBtn" onclick="executeSellOrder()" style="display:none;">Sell Cards</button>
+  </div>
+</div>
+
+</div><!-- overlay -->
+
+<script>
+
+const products = [
+  { id:1, cat:'art', name:'Neon Dreams', sub:'Electric city series', price:24, rating:'4.9', featured:true, format:'PNG / MP4',
     desc:'A stunning collection of 12 high-resolution neon-inspired digital prints. Each piece captures the pulse of the electric city, rendered at 6000×6000px.',
     palette:['#FF3366','#FF6B9D','#1A0A1A','#8B00FF','#4B0082'], style:'neon',
     // art & PDF → collect in-app. Tools → download externally
