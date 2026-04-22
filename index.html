@@ -719,7 +719,15 @@
       </div>
 
       <div class="cats-wrap">
-        <div class="cats-label">Browse by</div>
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:0 20px;margin-bottom:12px;">
+          <div class="cats-label">Browse by</div>
+          <select id="sortBy" onchange="sortProducts()" style="background:var(--surface-2);border:1px solid var(--surface-3);border-radius:var(--r-sm);padding:6px 10px;font-size:11px;color:var(--text-2);cursor:pointer;font-family:'Syne',sans-serif;">
+            <option value="featured">Newest</option>
+            <option value="price-low">Price: Low to High</option>
+            <option value="price-high">Price: High to Low</option>
+            <option value="rating">Top Rated</option>
+          </select>
+        </div>
         <div class="cats">
           <div class="cat active" onclick="setCategory('all', this)"><span>All</span></div>
           <div class="cat" onclick="setCategory('art', this)"><span class="cat-dot" style="background:var(--art)"></span>Art</div>
@@ -779,6 +787,11 @@
       </div>
 
       <!-- Posts -->
+      <div id="feedEmpty" style="display:none;padding:40px 20px;text-align:center;color:var(--text-3);">
+        <div style="font-size:48px;margin-bottom:16px;opacity:0.5;">📢</div>
+        <div style="font-size:16px;margin-bottom:8px;color:var(--text-2);font-weight:600;">Feed Empty</div>
+        <div style="font-size:13px;color:var(--text-3);line-height:1.6;margin-bottom:20px;">Follow creators and check back for new drops and updates</div>
+      </div>
       <div class="feed-list" id="feedList"></div>
       <div class="bottom-space"></div>
     </div>
@@ -790,10 +803,11 @@
         <h1>My <em>Collection</em></h1>
       </div>
       <div style="padding:20px;">
-        <div style="background:var(--surface-2);border:1px solid var(--surface-3);border-radius:var(--r);padding:20px;text-align:center;color:var(--text-3);" id="vaultContent">
-          <div style="font-size:32px;margin-bottom:12px;">◉</div>
-          <div style="font-size:14px;margin-bottom:6px;color:var(--text-2);">Your collection is empty</div>
-          <div style="font-size:12px;">Collect IP, art, and tools to see them here</div>
+        <div style="background:var(--surface-2);border:1px solid var(--surface-3);border-radius:var(--r);padding:40px 20px;text-align:center;color:var(--text-3);" id="vaultContent">
+          <div style="font-size:48px;margin-bottom:16px;opacity:0.5;">📦</div>
+          <div style="font-size:16px;margin-bottom:8px;color:var(--text-2);font-weight:600;">Collection Empty</div>
+          <div style="font-size:13px;color:var(--text-3);line-height:1.6;margin-bottom:20px;">Collect IP, art, and digital tools from creators. Your collection appears here.</div>
+          <button onclick="switchTab('home', null, document.getElementById('nav-home'))" style="padding:10px 20px;background:var(--gold);color:var(--bg);border:none;border-radius:50px;font-weight:600;cursor:pointer;font-size:12px;font-family:'Syne',sans-serif;">Start Collecting →</button>
         </div>
         <div id="vaultGrid" style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px;"></div>
       </div>
@@ -828,6 +842,11 @@
         <div class="section-header">
           <div class="section-title">Creator Pool</div>
           <div style="font-size:12px;color:var(--text-3);" id="creatorsCount"></div>
+        </div>
+        <div id="marketplaceEmpty" style="display:none;padding:40px 20px;text-align:center;color:var(--text-3);margin:0 20px;background:var(--surface-2);border-radius:var(--r);">
+          <div style="font-size:48px;margin-bottom:16px;opacity:0.5;">🎪</div>
+          <div style="font-size:16px;margin-bottom:8px;color:var(--text-2);font-weight:600;">Marketplace Empty</div>
+          <div style="font-size:13px;color:var(--text-3);">(Creator IP available soon)</div>
         </div>
         <div class="creator-grid" id="creatorGrid"></div>
       </div>
@@ -1170,6 +1189,8 @@ let creatorPool = {}; // { creatorId: { reserve: count, floorPrice: value } }
 let isLoggedIn = false;
 let userType = 'collector'; // 'collector' or 'creator'
 let currentUser = null; // { name, email, handle, wallet }
+let currentSort = 'featured';
+let currentCreatorSort = 'all';
 
 // ═══════════════════════════════════════════
 // CANVAS ART GENERATOR
@@ -1340,6 +1361,18 @@ function filterProducts() {
   let arr = products;
   if (currentCat!=='all') arr = arr.filter(p=>p.cat===currentCat);
   if (q) arr = arr.filter(p=>p.name.toLowerCase().includes(q)||p.sub.toLowerCase().includes(q));
+  sortAndRenderGrid(arr);
+}
+
+function sortProducts() {
+  currentSort = document.getElementById('sortBy').value;
+  filterProducts();
+}
+
+function sortAndRenderGrid(arr) {
+  if (currentSort === 'price-low') arr.sort((a,b) => a.price - b.price);
+  else if (currentSort === 'price-high') arr.sort((a,b) => b.price - a.price);
+  else if (currentSort === 'rating') arr.sort((a,b) => parseFloat(b.rating) - parseFloat(a.rating));
   renderGrid(arr);
 }
 
@@ -1516,6 +1549,14 @@ function buildInitialFeed() {
 
 function renderFeed() {
   const el = document.getElementById('feedList');
+  
+  if (feedPosts.length === 0) {
+    document.getElementById('feedEmpty').style.display = 'block';
+    el.innerHTML = '';
+    return;
+  }
+  document.getElementById('feedEmpty').style.display = 'none';
+  
   el.innerHTML = feedPosts.map(post => buildPostHTML(post)).join('');
 
   // Draw canvases
@@ -1548,13 +1589,13 @@ function buildPostHTML(post) {
       <div class="post-header">
         <div class="post-avatar" style="background:${post.creator.color}">${post.creator.initials}</div>
         <div class="post-meta">
-          <div class="post-author">
+          <div class="post-author" onclick="event.stopPropagation();openCreatorProfile('${post.creator.handle}')" style="cursor:pointer;color:var(--gold);transition:color 0.2s;">
             ${post.creator.name}
             ${post.creator.badge?'<span class="creator-badge">Creator</span>':''}
           </div>
           <div class="post-time">${post.time}</div>
         </div>
-        <div class="post-menu">···</div>
+        <div class="post-menu" style="cursor:pointer;" onclick="event.stopPropagation();alert('Creator options coming soon')">···</div>
       </div>
 
       <div class="post-text">${post.caption}</div>
@@ -2148,7 +2189,14 @@ function executeSellOrder() {
 function renderCreators() {
   const arr = filterCreatorsBySearch();
   const el = document.getElementById('creatorGrid');
-  document.getElementById('creatorsCount').textContent = arr.length + ' creators';
+  document.getElementById('creatorsCount').textContent = arr.length + ' creator' + (arr.length !== 1 ? 's' : '');
+  
+  if (arr.length === 0) {
+    document.getElementById('marketplaceEmpty').style.display = 'block';
+    el.innerHTML = '';
+    return;
+  }
+  document.getElementById('marketplaceEmpty').style.display = 'none';
   
   el.innerHTML = arr.map((c, idx) => `
     <div class="creator-card" onclick="openTradeModal(${creators.indexOf(c)})">
@@ -2223,6 +2271,16 @@ function setCreatorFilter(filter, el) {
 
 function filterCreators() {
   renderCreators();
+}
+
+function sortCreators() {
+  currentCreatorSort = document.getElementById('creatorSort').value;
+  setCreatorFilter(currentCreatorSort, null);
+}
+
+function openCreatorProfile(handle) {
+  showToast(`Opening ${handle} profile…`);
+  // Future: navigate to /creator/:id page
 }
 renderFeatured();
 renderGrid();
