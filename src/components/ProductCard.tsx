@@ -80,7 +80,7 @@ export function ProductCard({ product, compact = false }: Props) {
           <div className="inline-preview-card">
             <strong>{product.previewLabel}</strong>
             <p>
-              {product.type === "PDF" && "Preview the opening pages before you collect."}
+              {product.type === "Ebook" && "Preview the opening pages before you collect."}
               {product.type === "Image" && "Open a full-screen sample before you collect."}
               {product.type === "Tool" && "Review the toolkit summary and included files first."}
             </p>

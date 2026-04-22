@@ -30,7 +30,7 @@ export function ProductDetailPage() {
   };
 
   const accessLabel =
-    product.type === "PDF" ? "Open reader" : product.type === "Image" ? "Open viewer" : "Download toolkit";
+    product.type === "Ebook" ? "Open reader" : product.type === "Image" ? "Open viewer" : "Download toolkit";
 
   return (
     <section className="screen screen--product-detail">
@@ -122,7 +122,7 @@ export function ProductDetailPage() {
           <div className="owned-access-card">
             <h3>Access your item now</h3>
             <p>
-              {product.type === "PDF" && "Open the in-app reader to start reading immediately."}
+              {product.type === "Ebook" && "Open the in-app reader to start reading immediately."}
               {product.type === "Image" && "Open the viewer to inspect the full collectible image."}
               {product.type === "Tool" && "Download the toolkit package and keep a copy in your workspace."}
             </p>
