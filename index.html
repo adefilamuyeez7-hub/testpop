@@ -112,8 +112,7 @@
     flex: 1;
     overflow-y: auto;
     scrollbar-width: none;
-    padding-top: 80px;
-    padding-bottom: 20px;
+    padding-bottom: 140px;
   }
   .scroll-main::-webkit-scrollbar { display: none; }
 
@@ -407,13 +406,13 @@
   /* ── BOTTOM NAV ── */
   .bottom-nav {
     position: fixed;
-    top: 0;
+    bottom: 0;
     left: 0;
     right: 0;
     background: rgba(10,9,7,0.95);
     backdrop-filter: blur(20px);
-    border-bottom: 1px solid var(--surface-2);
-    padding: 12px 0;
+    border-top: 1px solid var(--surface-2);
+    padding: 12px 0 24px;
     display: flex;
     z-index: 50;
   }
@@ -808,18 +807,51 @@
     <!-- ═══════════ MY COLLECTION PAGE ═══════════ -->
     <div class="page" id="page-collection">
       <div class="greeting">
-        <p>Your collection</p>
-        <h1>My <em>Collection</em></h1>
+        <p>Your portfolio</p>
+        <h1>Dashboard</h1>
       </div>
+      
+      <!-- Tabs for dashboard sections -->
+      <div style="display:flex;border-bottom:1px solid var(--surface-2);padding:0 20px;">
+        <div class="dashboard-tab active" onclick="switchDashboardTab('collected', this)" style="flex:1;padding:12px;text-align:center;border-bottom:2px solid var(--gold);cursor:pointer;color:var(--text);font-size:13px;font-weight:500;">Collected Items</div>
+        <div class="dashboard-tab" onclick="switchDashboardTab('holdings', this)" style="flex:1;padding:12px;text-align:center;border-bottom:2px solid transparent;cursor:pointer;color:var(--text-3);font-size:13px;font-weight:500;">Creator Holdings</div>
+        <div class="dashboard-tab" onclick="switchDashboardTab('creator', this)" style="flex:1;padding:12px;text-align:center;border-bottom:2px solid transparent;cursor:pointer;color:var(--text-3);font-size:13px;font-weight:500;">My Creator</div>
+      </div>
+
       <div style="padding:20px;">
-        <div style="background:var(--surface-2);border:1px solid var(--surface-3);border-radius:var(--r);padding:40px 20px;text-align:center;color:var(--text-3);" id="vaultContent">
-          <div style="font-size:48px;margin-bottom:16px;opacity:0.5;">📦</div>
-          <div style="font-size:16px;margin-bottom:8px;color:var(--text-2);font-weight:600;">Collection Empty</div>
-          <div style="font-size:13px;color:var(--text-3);line-height:1.6;margin-bottom:20px;">Collect IP, art, and digital tools from creators. Your collection appears here.</div>
-          <button onclick="switchTab('home', null, document.getElementById('nav-home'))" style="padding:10px 20px;background:var(--gold);color:var(--bg);border:none;border-radius:50px;font-weight:600;cursor:pointer;font-size:12px;font-family:'Syne',sans-serif;">Start Collecting →</button>
+        <!-- Collected Items Tab -->
+        <div id="collectedTab" style="display:block;">
+          <div style="background:var(--surface-2);border:1px solid var(--surface-3);border-radius:var(--r);padding:40px 20px;text-align:center;color:var(--text-3);margin-bottom:20px;" id="collectedEmpty">
+            <div style="font-size:48px;margin-bottom:16px;opacity:0.5;">📦</div>
+            <div style="font-size:16px;margin-bottom:8px;color:var(--text-2);font-weight:600;">No Items Yet</div>
+            <div style="font-size:13px;color:var(--text-3);line-height:1.6;margin-bottom:20px;">Collect IP, art, and digital tools from creators.</div>
+            <button onclick="switchTab('home', null, document.getElementById('nav-home'))" style="padding:10px 20px;background:var(--gold);color:var(--bg);border:none;border-radius:50px;font-weight:600;cursor:pointer;font-size:12px;font-family:'Syne',sans-serif;">Start Collecting →</button>
+          </div>
+          <div id="vaultGrid" style="display:grid;grid-template-columns:1fr 1fr;gap:12px;"></div>
         </div>
-        <div id="vaultGrid" style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px;"></div>
+
+        <!-- Creator Holdings Tab -->
+        <div id="holdingsTab" style="display:none;">
+          <div style="background:var(--surface-2);border:1px solid var(--surface-3);border-radius:var(--r);padding:40px 20px;text-align:center;color:var(--text-3);margin-bottom:20px;">
+            <div style="font-size:48px;margin-bottom:16px;opacity:0.5;">💰</div>
+            <div style="font-size:16px;margin-bottom:8px;color:var(--text-2);font-weight:600;">No Holdings</div>
+            <div style="font-size:13px;color:var(--text-3);line-height:1.6;">Invest in creator tokens to see your holdings and gains.</div>
+          </div>
+          <div id="holdingsGrid" style="display:grid;grid-template-columns:1fr;gap:12px;"></div>
+        </div>
+
+        <!-- Creator Dashboard Tab -->
+        <div id="creatorTab" style="display:none;">
+          <div style="background:var(--surface-2);border:1px solid var(--surface-3);border-radius:var(--r);padding:40px 20px;text-align:center;color:var(--text-3);margin-bottom:20px;">
+            <div style="font-size:48px;margin-bottom:16px;opacity:0.5;">🎨</div>
+            <div style="font-size:16px;margin-bottom:8px;color:var(--text-2);font-weight:600;">Not a Creator</div>
+            <div style="font-size:13px;color:var(--text-3);line-height:1.6;margin-bottom:20px;">Set up a creator account to publish products and launch tokens.</div>
+            <button onclick="showCreatorSetup()" style="padding:10px 20px;background:var(--feed-accent);color:var(--bg);border:none;border-radius:50px;font-weight:600;cursor:pointer;font-size:12px;font-family:'Syne',sans-serif;">Become a Creator →</button>
+          </div>
+          <div id="creatorStats" style="display:none;"></div>
+        </div>
       </div>
+
       <div class="bottom-space"></div>
     </div>
 
@@ -1307,6 +1339,28 @@ function switchTab(name, tabEl, navEl) {
   }
 
   document.querySelector('.scroll-main').scrollTo({top:0});
+}
+
+function switchDashboardTab(tabName, el) {
+  document.querySelectorAll('.dashboard-tab').forEach(t => {
+    t.style.borderBottomColor = 'transparent';
+    t.style.color = 'var(--text-3)';
+  });
+  el.style.borderBottomColor = 'var(--gold)';
+  el.style.color = 'var(--text)';
+  
+  document.getElementById('collectedTab').style.display = 'none';
+  document.getElementById('holdingsTab').style.display = 'none';
+  document.getElementById('creatorTab').style.display = 'none';
+  
+  if (tabName === 'collected') document.getElementById('collectedTab').style.display = 'block';
+  else if (tabName === 'holdings') document.getElementById('holdingsTab').style.display = 'block';
+  else if (tabName === 'creator') document.getElementById('creatorTab').style.display = 'block';
+}
+
+function showCreatorSetup() {
+  showCompose();
+  openCreatorSetup();
 }
 
 // ═══════════════════════════════════════════
@@ -1952,7 +2006,7 @@ function showListForSale() {
   document.getElementById('sellToPoolForm').style.display = 'none';
 }
 
-function openTradeModal(creatorIdx) {
+function openTradeModal(creatorIdx, mode = 'buy') {
   const c = creators[creatorIdx];
   currentTradeCreator = creatorIdx;
   const portfolio = creatorPortfolio[creatorIdx];
@@ -1968,17 +2022,27 @@ function openTradeModal(creatorIdx) {
   document.getElementById('tradeBuyAmount').value = '1';
   document.getElementById('listPrice').value = (floorPrice + 0.30).toFixed(2);
   
-  // Show sell section only if user owns cards
+  // Show sell section only if user owns cards or if mode is 'sell'
   const buyBtn = document.getElementById('buyBtn');
   const sellSection = document.getElementById('sellSection');
+  const buySection = document.querySelector('.trade-section:first-child');
+  
+  if (mode === 'sell') {
+    buySection.style.display = 'none';
+    sellSection.style.display = 'block';
+    buyBtn.textContent = 'Sell Cards';
+  } else {
+    buySection.style.display = 'block';
+    buyBtn.textContent = 'Buy Cards';
+  }
+  
   if (portfolio && portfolio.owned > 0) {
     sellSection.style.display = 'block';
-    buyBtn.textContent = 'Buy Cards';
     document.getElementById('yourPortfolioCount').textContent = portfolio.owned + ' card' + (portfolio.owned !== 1 ? 's' : '') + ' @ avg $' + portfolio.avgPrice.toFixed(2);
     document.getElementById('sellPoolAmount').max = portfolio.owned;
     document.getElementById('listAmount').max = portfolio.owned;
   } else {
-    sellSection.style.display = 'none';
+    if (mode !== 'sell') sellSection.style.display = 'none';
     buyBtn.textContent = 'Buy Cards';
   }
   
@@ -2244,8 +2308,8 @@ function renderCreators() {
         </div>
 
         <div class="creator-actions">
-          <button class="creator-btn" onclick="event.stopPropagation();openTradeModal(${creators.indexOf(c)})">Trade</button>
-          <button class="creator-btn primary" onclick="event.stopPropagation();openTradeModal(${creators.indexOf(c)})">Buy</button>
+          <button class="creator-btn" onclick="event.stopPropagation();openTradeModal(${creators.indexOf(c)}, 'buy')" style="background:var(--gold);color:var(--bg);flex:1;">Buy at Launch</button>
+          <button class="creator-btn primary" onclick="event.stopPropagation();openTradeModal(${creators.indexOf(c)}, 'sell')" style="background:var(--feed-accent);color:var(--bg);flex:1;">Trade/Sell</button>
         </div>
       </div>
     </div>
