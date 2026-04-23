@@ -1081,7 +1081,13 @@
     <!-- Open Orders / Listings -->
     <div class="trade-section">
       <div class="trade-section-title">Available Listings</div>
-      <div class="trade-history" id="openOrdersList" style="max-height:150px;overflow-y:auto;">
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:8px;font-size:10px;color:var(--text-3);padding:8px;border-bottom:1px solid var(--surface-3);margin-bottom:8px;">
+        <div style="font-weight:600;">Seller</div>
+        <div style="font-weight:600;">Amount</div>
+        <div style="font-weight:600;">Price/Unit</div>
+        <div style="font-weight:600;text-align:center;">Action</div>
+      </div>
+      <div class="trade-history" id="openOrdersList" style="max-height:200px;overflow-y:auto;">
         <div style="font-size:12px;color:var(--text-3);padding:8px;text-align:center;">Loading listings...</div>
       </div>
     </div>
@@ -1968,10 +1974,11 @@ function initializeCreatorTradeHistory() {
 }
 
 function getFloorPrice(creatorIdx) {
-  // Floor price = best ask from listings, or pool floor
+  // Floor price = best ask from listings (lowest price), or pool floor
   const listings = creatorListings[creatorIdx] || [];
   if (listings.length > 0) {
-    return Math.min(parseFloat(listings[0].pricePerCard), creators[creatorIdx].floorPrice);
+    const lowestPrice = Math.min(...listings.map(l => parseFloat(l.pricePerCard)));
+    return Math.min(lowestPrice, creators[creatorIdx].floorPrice);
   }
   return creators[creatorIdx].floorPrice;
 }
@@ -1979,22 +1986,140 @@ function getFloorPrice(creatorIdx) {
 function renderOpenOrders(creatorIdx) {
   const listings = creatorListings[creatorIdx] || [];
   const bestAsk = getFloorPrice(creatorIdx);
-  
   const listEl = document.getElementById('openOrdersList');
-  listEl.innerHTML = listings.slice(0, 8).map(l => `
-    <div class="trade-item">
-      <div class="trade-item-user" style="color:var(--text-2);font-size:11px;">${l.seller}</div>
-      <div class="trade-item-action" style="color:var(--gold);min-width:50px;text-align:center;font-size:11px;">×${l.amount}</div>
-      <div class="trade-item-price" style="color:${l.pricePerCard === bestAsk ? 'var(--ebook)' : 'var(--text-2)'};font-weight:${l.pricePerCard === bestAsk ? '700' : '400'};font-size:11px;">
-        $${parseFloat(l.pricePerCard).toFixed(2)} ${l.pricePerCard === bestAsk ? '(best)' : ''}
-      </div>
-    </div>
-  `).join('');
   
   if (listings.length === 0) {
-    listEl.innerHTML = '<div style="font-size:12px;color:var(--text-3);padding:8px;text-align:center;">No listings. Pool floor: $' + creators[creatorIdx].floorPrice.toFixed(2) + '</div>';
+    listEl.innerHTML = '<div style="font-size:12px;color:var(--text-3);padding:12px;text-align:center;">No marketplace listings. Can buy from pool at $' + creators[creatorIdx].floorPrice.toFixed(2) + '</div>';
+    return;
+  }
+  
+  // Sort listings by price (best ask first)
+  const sortedListings = [...listings].sort((a, b) => parseFloat(a.pricePerCard) - parseFloat(b.pricePerCard));
+  
+  listEl.innerHTML = sortedListings.slice(0, 8).map((l, idx) => {
+    const originalIdx = listings.indexOf(l);
+    const totalValue = (l.amount * parseFloat(l.pricePerCard)).toFixed(2);
+    const isBestAsk = parseFloat(l.pricePerCard) === bestAsk;
+    const badgeColor = isBestAsk ? 'var(--ebook)' : 'var(--gold)';
+    const badge = isBestAsk ? '🏆 BEST' : '📊';
+    
+    return `
+      <div style="background:var(--surface-2);border:1px solid ${isBestAsk ? 'var(--ebook)' : 'var(--surface-3)'};border-radius:8px;padding:12px;margin-bottom:10px;cursor:pointer;transition:all 0.2s;" onclick="toggleListingSelection(${creatorIdx}, ${originalIdx})" id="listing-${originalIdx}">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:10px;">
+          <div>
+            <div style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:4px;">Seller</div>
+            <div style="font-size:14px;color:var(--text-1);font-weight:600;">${l.seller}</div>
+          </div>
+          <div style="text-align:right;">
+            <div style="font-size:11px;color:${badgeColor};font-weight:700;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:4px;">${badge}</div>
+            <div style="font-size:12px;color:var(--text-3);">Stock: ${l.amount}</div>
+          </div>
+        </div>
+        
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;padding-top:10px;border-top:1px solid var(--surface-3);">
+          <div>
+            <div style="font-size:10px;color:var(--text-3);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:4px;">Price/Unit</div>
+            <div style="font-size:16px;color:var(--gold);font-weight:700;">$${parseFloat(l.pricePerCard).toFixed(2)}</div>
+          </div>
+          <div style="text-align:right;">
+            <div style="font-size:10px;color:var(--text-3);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:4px;">Total Value</div>
+            <div style="font-size:16px;color:var(--text-1);font-weight:700;">$${totalValue}</div>
+          </div>
+        </div>
+        
+        <div id="selector-${originalIdx}" style="display:none;margin-top:12px;padding-top:12px;border-top:1px solid var(--surface-3);">
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px;">
+            <div>
+              <label style="font-size:10px;color:var(--text-3);text-transform:uppercase;letter-spacing:0.05em;">Quantity</label>
+              <input type="number" class="trade-input" id="qty-${originalIdx}" min="1" max="${l.amount}" value="1" style="width:100%;margin-top:4px;">
+            </div>
+            <div>
+              <label style="font-size:10px;color:var(--text-3);text-transform:uppercase;letter-spacing:0.05em;">Total Cost</label>
+              <div style="font-size:16px;color:var(--ebook);font-weight:700;margin-top:8px;" id="cost-${originalIdx}">$${parseFloat(l.pricePerCard).toFixed(2)}</div>
+            </div>
+          </div>
+          <button onclick="buyFromListing(${creatorIdx}, ${originalIdx})" style="width:100%;background:var(--ebook);color:var(--bg);border:none;border-radius:6px;padding:10px;font-size:12px;font-weight:700;cursor:pointer;">Buy from ${l.seller}</button>
+        </div>
+      </div>
+    `;
+  }).join('');
+  
+  // Add event listeners for quantity input
+  sortedListings.forEach((l, idx) => {
+    const originalIdx = listings.indexOf(l);
+    const qtyInput = document.getElementById(`qty-${originalIdx}`);
+    if (qtyInput) {
+      qtyInput.addEventListener('input', function() {
+        const newQty = parseFloat(this.value) || 1;
+        const maxQty = l.amount;
+        if (newQty > maxQty) this.value = maxQty;
+        if (newQty < 1) this.value = 1;
+        
+        const totalCost = (this.value * parseFloat(l.pricePerCard)).toFixed(2);
+        const costEl = document.getElementById(`cost-${originalIdx}`);
+        if (costEl) costEl.textContent = '$' + totalCost;
+      });
+    }
+  });
+}
+
+function toggleListingSelection(creatorIdx, listingIdx) {
+  const selector = document.getElementById(`selector-${listingIdx}`);
+  const listing = document.getElementById(`listing-${listingIdx}`);
+  
+  // Close other open selectors
+  const allSelectors = document.querySelectorAll('[id^="selector-"]');
+  allSelectors.forEach(sel => {
+    if (sel.id !== `selector-${listingIdx}`) {
+      sel.style.display = 'none';
+    }
+  });
+  
+  // Toggle this one
+  if (selector.style.display === 'none') {
+    selector.style.display = 'block';
+    listing.style.borderColor = 'var(--gold)';
+    listing.style.background = 'rgba(255, 215, 0, 0.05)';
+  } else {
+    selector.style.display = 'none';
+    listing.style.borderColor = 'var(--surface-3)';
+    listing.style.background = 'var(--surface-2)';
   }
 }
+
+function buyFromListing(creatorIdx, listingIdx) {
+  const listings = creatorListings[creatorIdx] || [];
+  if (!listings[listingIdx]) return;
+  
+  const listing = listings[listingIdx];
+  const amount = parseInt(document.getElementById(`qty-${listingIdx}`).value) || 1;
+  
+  if (amount > listing.amount) {
+    showToast(`Only ${listing.amount} available`);
+    return;
+  }
+  
+  const totalCost = amount * listing.pricePerCard;
+  
+  // Simulate purchase
+  if (creatorPortfolio[creatorIdx]) {
+    creatorPortfolio[creatorIdx].owned += amount;
+    creatorPortfolio[creatorIdx].avgPrice = ((creatorPortfolio[creatorIdx].avgPrice * (creatorPortfolio[creatorIdx].owned - amount)) + totalCost) / creatorPortfolio[creatorIdx].owned;
+  } else {
+    creatorPortfolio[creatorIdx] = { owned: amount, avgPrice: listing.pricePerCard };
+  }
+  
+  // Remove from listing or reduce amount
+  if (amount === listing.amount) {
+    listings.splice(listingIdx, 1);
+  } else {
+    listing.amount -= amount;
+  }
+  
+  showToast(`✅ Bought ${amount} @ $${listing.pricePerCard} each = $${totalCost.toFixed(2)}`);
+  renderOpenOrders(creatorIdx);
+}
+
 
 function showSellToPool() {
   document.getElementById('sellToPoolForm').style.display = 'block';
